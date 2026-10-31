@@ -1,0 +1,29 @@
+{
+  "name": "@tina/discord-connector",
+  "version": "0.1.0",
+  "description": "The Discord platform connector: ONE persistent Gateway session that joins voice channels on demand, decodes each speaker's Opus stream, and drives the shared gmeet transcript lane. Implements the runtime.v1 workload surface for profile=discord-bot so meeting-api spawns/tears down a voice session exactly like a container.",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "test": "tsx src/audio.test.ts && tsx src/session.test.ts && tsx src/server.test.ts && tsx src/egress.test.ts && tsx src/config.test.ts && tsx src/acts.test.ts && tsx src/session-manager.test.ts"
+  },
+  "dependencies": {
+    "@discordjs/voice": "^0.19.2",
+    "@tina/gmeet-pipeline": "workspace:*",
+    "@tina/transcribe-whisper": "workspace:*",
+    "ajv": "^8.17.0",
+    "ajv-formats": "^3.0.1",
+    "discord.js": "^14.27.0",
+    "opusscript": "^0.1.1",
+    "redis": "^4.7.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}

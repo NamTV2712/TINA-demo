@@ -1,0 +1,32 @@
+{
+  "id": "card-demo",
+  "kind": "product",
+  "title": "API",
+  "body": "Mentioned in the transcript.",
+  "source": {
+    "window_id": "window-demo",
+    "fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "generation": "generation-demo",
+    "canonical_revision": 2
+  },
+  "provenance": {
+    "pipeline": "canonical-readable",
+    "version": 2,
+    "prompt_version": 1,
+    "model": "example-model",
+    "provider": "example"
+  },
+  "evidence": [
+    {
+      "segment_id": "s1",
+      "revision": 1,
+      "start_ms": 1000,
+      "end_ms": 2000,
+      "speaker_id": "alice",
+      "speaker_name": "Alice",
+      "quote": "Tôi sẽ gửi API report."
+    }
+  ],
+  "stale": false,
+  "publication_revision": 1
+}

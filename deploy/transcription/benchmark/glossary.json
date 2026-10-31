@@ -1,0 +1,4 @@
+{
+  "description": "Fixed TINA domain vocabulary, chosen before evaluation; never derived from held-out references.",
+  "terms": ["TINA", "Qwen", "FunASR", "FSMN-VAD", "Silero", "API", "backend", "database", "Google Meet", "Microsoft Teams", "GitHub", "OpenAI", "Nguyễn Minh", "Quang"]
+}

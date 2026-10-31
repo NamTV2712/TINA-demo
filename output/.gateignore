@@ -1,0 +1,3 @@
+# build output
+
+Local Playwright/browser output. Nothing here is source; the per-directory gates opt out of this subtree.

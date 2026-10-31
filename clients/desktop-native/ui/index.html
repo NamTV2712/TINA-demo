@@ -1,0 +1,632 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>TINA Capture</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="TINA Capture navigation">
+      <a class="brand" href="#dictation-panel" aria-label="TINA Capture home">
+        <span class="brand-mark">T</span>
+        <span>TINA <small>CAPTURE</small></span>
+      </a>
+
+      <nav class="sidebar-nav" aria-label="Capture modes">
+        <p class="nav-label">CAPTURE</p>
+        <button class="nav-item active" type="button" data-mode="dictation" aria-pressed="true">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 17.5V21m-4 0h8"/></svg>
+          <span>Dictation</span>
+        </button>
+        <button class="nav-item" type="button" data-mode="meeting" aria-pressed="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="13" height="14" rx="2"/><path d="m16 10 5-3v10l-5-3M7 9h5m-5 4h5"/></svg>
+          <span>Meeting</span>
+        </button>
+        <button class="nav-item" type="button" data-mode="live-translation" aria-pressed="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5.5 11a6.5 6.5 0 0 0 13 0M12 18v3m-4 0h8M18 4h4m-2-2v4"/></svg>
+          <span>Live Translation</span>
+        </button>
+        <button class="nav-item" type="button" data-mode="history" aria-pressed="false">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><polyline points="12 6 12 12 16 14"/></svg>
+          <span>History</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-divider" role="separator"></div>
+
+      <nav class="sidebar-links" aria-label="Capture sections">
+        <a class="sidebar-link" href="#transcript-section">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8m-8 4h5"/></svg>
+          <span>Transcript</span>
+        </a>
+        <button id="sidebar-permissions" class="sidebar-link" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 20 6v5c0 5-3.4 8.2-8 10-4.6-1.8-8-5-8-10V6l8-3Z"/><path d="m9 12 2 2 4-4"/></svg>
+          <span>Permissions</span>
+        </button>
+        <a class="sidebar-link" href="#capture-diagnostics">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5m0 14h16"/><path d="m7 15 4-4 3 2 5-6"/></svg>
+          <span>Diagnostics</span>
+        </a>
+      </nav>
+
+      <div class="sidebar-divider settings-divider" role="separator"></div>
+      <button id="settings-open" class="sidebar-link settings-open" type="button">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z"/><path d="m19.4 15 .1.1a1.8 1.8 0 0 1-2.5 2.5l-.1-.1a1.8 1.8 0 0 0-3 .9v.2a1.8 1.8 0 0 1-3.6 0v-.2a1.8 1.8 0 0 0-3-.9l-.1.1a1.8 1.8 0 0 1-2.5-2.5l.1-.1a1.8 1.8 0 0 0-.9-3h-.2a1.8 1.8 0 0 1 0-3.6h.2a1.8 1.8 0 0 0 .9-3l-.1-.1a1.8 1.8 0 0 1 2.5-2.5l.1.1a1.8 1.8 0 0 0 3-.9v-.2a1.8 1.8 0 0 1 3.6 0v.2a1.8 1.8 0 0 0 3 .9l.1-.1a1.8 1.8 0 0 1 2.5 2.5l-.1.1a1.8 1.8 0 0 0 .9 3h.2a1.8 1.8 0 0 1 0 3.6h-.2a1.8 1.8 0 0 0-.9 3Z"/></svg>
+        <span>Settings</span>
+      </button>
+
+      <div class="sidebar-spacer"></div>
+
+      <section class="sidebar-asr" aria-label="Speech recognition status">
+        <span class="asr-mark" aria-hidden="true">✳</span>
+        <div class="sidebar-asr-copy">
+          <span class="section-label">SPEECH RECOGNITION</span>
+          <p id="asr" role="status">Loading ASR…</p>
+          <p class="subtle">Change it in TINA Terminal → Settings → Models.</p>
+        </div>
+      </section>
+      <div class="sidebar-footer"><span class="footer-dot" aria-hidden="true"></span>TINA Capture <span class="footer-platform">macOS</span></div>
+    </aside>
+
+    <main class="workspace">
+      <div class="workspace-inner">
+        <!-- Meeting Detection Banner (Speakly Prompt style) -->
+        <div id="meeting-detect-banner" class="meeting-detect-banner" hidden>
+          <div class="meeting-banner-left">
+            <div id="meeting-banner-icon" class="meeting-banner-icon">
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m16 10 5-3v10l-5-3M3 7a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/></svg>
+            </div>
+            <div class="meeting-banner-info">
+              <div class="meeting-banner-badge"><span class="pulse-dot"></span> Cuộc họp đang diễn ra</div>
+              <strong id="meeting-banner-title">Đang tham gia họp? Bắt đầu ghi âm và ghi chú cuộc họp?</strong>
+              <p id="meeting-banner-desc"><span id="meeting-banner-app">Zoom</span> đang sử dụng micro. Tự động ghi âm cả giọng nói và âm thanh cuộc gọi.</p>
+            </div>
+          </div>
+          <div class="meeting-banner-actions">
+            <button id="meeting-banner-dismiss" class="ghost compact-btn" type="button">Để sau</button>
+            <button id="meeting-banner-record" class="primary compact-btn" type="button">
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><circle cx="6" cy="6" r="4.5" fill="currentColor"/></svg>
+              <span>Bắt đầu ghi âm</span>
+            </button>
+          </div>
+        </div>
+
+        <section id="dictation-panel" class="mode-panel dictation-panel" aria-labelledby="dictation-title">
+          <p class="eyebrow dictation-hero-eyebrow">TINA · DICTATION</p>
+          <h1 id="dictation-title" class="dictation-hero-title">Don't type,<br>just <span class="dictation-hero-highlight">talk</span>.</h1>
+          <p class="lede dictation-hero-lede">Double-tap <kbd>Fn</kbd> for hands-free. Finished text is copied or auto-pasted according to Settings.</p>
+
+          <div class="dictation-home-stats" aria-label="Saved dictation statistics">
+            <div class="dictation-home-stat"><span>Dictations saved</span><strong id="dictation-stat-count">0</strong></div>
+            <div class="dictation-home-stat"><span>Words transcribed</span><strong id="dictation-stat-words">0</strong></div>
+          </div>
+
+          <div id="dictation-card" class="dictation-card" aria-live="polite">
+            <div class="mic-orb" aria-hidden="true">
+              <svg class="mic-svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="9" y="2" width="6" height="12" rx="3"></rect>
+                <path d="M5 10a7 7 0 0 0 14 0"></path>
+                <line x1="12" y1="19" x2="12" y2="22"></line>
+                <line x1="8" y1="22" x2="16" y2="22"></line>
+              </svg>
+              <span class="pulse"></span>
+            </div>
+            <div class="dictation-copy">
+              <strong id="state" role="status">Ready</strong>
+              <p id="dictation-activity">Your mic is ready.</p>
+              <button id="dictation-toggle" class="secondary compact-btn dictation-toggle" type="button" aria-pressed="false">Start dictation</button>
+              <div class="shortcut" aria-label="Fn or Globe key"><kbd>Fn</kbd></div>
+              <p id="hotkey" class="shortcut-status" role="status">Checking Fn shortcut…</p>
+            </div>
+            <span class="ready-dot" aria-hidden="true"></span>
+          </div>
+          <button id="dictation-original" class="link dictation-original-link" type="button" hidden>Copy original transcript</button>
+
+        </section>
+
+        <section id="meeting-panel" class="mode-panel" aria-labelledby="meeting-title" hidden>
+          <p class="eyebrow">TINA · LOCAL AUDIO</p>
+          <h1 id="meeting-title">Record a meeting</h1>
+          <p class="lede">Choose what to capture. TINA spots meeting apps and offers a floating prompt.</p>
+
+          <p id="detected" class="detected" role="status" hidden>
+            <span class="detected-dot" aria-hidden="true"></span>
+            <span id="detected-text">A meeting app is using your microphone.</span>
+          </p>
+
+          <fieldset id="sources">
+            <legend>Audio source</legend>
+            <label>
+              <input id="microphone" type="checkbox" checked>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="source-item-icon">
+                <rect x="9" y="3" width="6" height="11" rx="3"></rect>
+                <path d="M5.5 10a6.5 6.5 0 0 0 13 0M12 17v4m-4 0h8"></path>
+              </svg>
+              <span>Microphone<small>Your voice / headset input</small></span>
+            </label>
+            <label>
+              <input id="system" type="checkbox" checked>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" class="source-item-icon">
+                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                <path d="M15.54 8.46a5 5 0 0 1 0 7.07M19.07 4.93a10 10 0 0 1 0 14.14"></path>
+              </svg>
+              <span>System audio<small>Sound from meeting apps / Mac loopback</small></span>
+            </label>
+          </fieldset>
+
+          <div id="recording" class="recording" hidden>
+            <div class="recording-head">
+              <span class="recording-dot" aria-hidden="true"></span>
+              <strong id="elapsed">00:00</strong>
+              <span id="record-state" class="recording-state">Recording</span>
+            </div>
+            <div class="meter" role="img" aria-label="Microphone level"><span id="level-fill"></span></div>
+          </div>
+
+          <p class="permission-note">Headphones help prevent echo. macOS may ask for audio access.</p>
+          <div class="actions">
+            <button id="start" class="primary-action" type="button">Start session</button>
+            <button id="pause" class="secondary" type="button" hidden>Pause</button>
+            <button id="captions" class="secondary" type="button" aria-pressed="false" hidden>Live captions</button>
+            <button id="stop" class="secondary stop-action" type="button" disabled>Stop session</button>
+          </div>
+          <p id="live-line" class="live-line" aria-live="polite" hidden></p>
+        </section>
+
+        <section id="live-translation-panel" class="mode-panel live-translation-panel" aria-labelledby="live-translation-title" hidden>
+          <p class="eyebrow">TINA · LIVE TRANSLATION</p>
+          <h1 id="live-translation-title">Live Translation</h1>
+          <p class="lede">Capture with TINA’s existing audio session. Keep the original transcript while translations appear alongside it.</p>
+
+          <div class="live-output-modes" role="group" aria-label="Transcript display mode">
+            <button id="live-mode-transcript" class="live-output-card active" type="button" aria-pressed="true">
+              <span class="live-output-icon" aria-hidden="true">▤</span>
+              <span><strong>Transcript</strong><small>Read the live transcript in TINA Capture.</small></span>
+            </button>
+            <button id="live-mode-subtitle" class="live-output-card" type="button" aria-pressed="false">
+              <span class="live-output-icon" aria-hidden="true">▱</span>
+              <span><strong>Subtitle</strong><small>Show live captions in a floating window.</small></span>
+            </button>
+          </div>
+
+          <div class="live-translation-settings">
+            <label class="live-select-row">
+              <span><strong>Source</strong><small>Choose which audio lanes to capture.</small></span>
+              <select id="live-source" class="settings-select" aria-label="Audio source">
+                <option value="both">Mic + System</option>
+                <option value="microphone">Microphone</option>
+                <option value="system">System audio</option>
+              </select>
+            </label>
+            <label class="live-select-row">
+              <span><strong>Translate to</strong><small>Off keeps the original transcript only.</small></span>
+              <select id="live-target" class="settings-select" aria-label="Translate transcript to">
+                <option value="off">Off</option>
+                <option value="en">English</option>
+                <option value="vi">Vietnamese</option>
+                <option value="ja">Japanese</option>
+                <option value="ko">Korean</option>
+                <option value="zh-CN">Chinese (Simplified)</option>
+                <option value="es">Spanish</option>
+                <option value="fr">French</option>
+                <option value="de">German</option>
+              </select>
+            </label>
+          </div>
+
+          <div id="live-session-card" class="live-session-card" aria-live="polite">
+            <div class="live-session-status">
+              <span id="live-session-dot" class="live-session-dot" aria-hidden="true"></span>
+              <strong id="live-session-state" role="status">Ready</strong>
+              <span id="live-elapsed" class="live-elapsed">00:00</span>
+            </div>
+            <p id="live-session-detail">TINA Desktop will receive audio through the current capture flow.</p>
+            <div class="live-meter" role="img" aria-label="Current microphone level"><span id="live-level-fill"></span></div>
+          </div>
+
+          <div class="live-actions">
+            <button id="live-start" class="primary-action" type="button">
+              <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0 0 14 0M12 19v3m-4 0h8"/></svg>
+              <span>Start session</span>
+            </button>
+            <button id="live-pause" class="secondary" type="button" hidden>Pause</button>
+            <button id="live-subtitles-toggle" class="secondary" type="button" aria-pressed="false" hidden>Show subtitles</button>
+            <button id="live-stop" class="secondary stop-action" type="button" hidden>Stop session</button>
+          </div>
+          <p id="live-translation-error" class="live-translation-error" role="alert" hidden></p>
+          <button id="live-translation-retry" class="link live-retry" type="button" hidden>Retry translation</button>
+
+          <section class="live-transcript-section" aria-labelledby="live-transcript-title">
+            <div class="transcript-heading">
+              <div><p class="eyebrow">CURRENT SESSION</p><h2 id="live-transcript-title">Live transcript</h2></div>
+              <span id="live-transcript-count" class="count">0 segments</span>
+            </div>
+            <p id="live-transcript-empty" class="live-transcript-empty" role="status">Your live transcript will appear here.</p>
+            <ol id="live-transcript" class="live-transcript-list" aria-live="polite" aria-relevant="additions text"></ol>
+            <p id="live-pending" class="live-pending" aria-live="polite" hidden></p>
+            <div class="transcript-actions">
+              <button id="live-save" class="secondary" type="button" disabled>Save transcript</button>
+              <button id="live-reveal" class="link" type="button" hidden>Show in Finder</button>
+              <span id="live-save-result" class="subtle" role="status"></span>
+            </div>
+          </section>
+          <p class="live-privacy-note">Translation sends confirmed transcript text to the configured TINA Agent and CompletionPort, which may be remote. Audio stays on the existing capture path; translated text is not written to the transcript or revision history.</p>
+        </section>
+
+        <!-- History Panel -->
+        <section id="history-panel" class="mode-panel" aria-labelledby="history-title" hidden>
+          <div class="history-header">
+            <div>
+              <h1 id="history-title">Lịch sử đọc chính tả</h1>
+              <p class="lede">Xem lại hoặc sao chép các đoạn văn bản bạn đã đọc bằng giọng nói.</p>
+            </div>
+            <div class="history-toolbar">
+              <label class="history-search-label">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.3"/><path d="m15.5 15.5 4.2 4.2"/></svg>
+                <input id="history-search" class="history-search" type="search" placeholder="Tìm kiếm văn bản..." aria-label="Tìm trong lịch sử đọc chính tả" autocomplete="off">
+              </label>
+              <button id="history-clear-all" class="secondary compact-btn" type="button">Xóa tất cả</button>
+            </div>
+          </div>
+
+          <div id="history-list" class="history-list" role="list"></div>
+          <div id="history-empty" class="history-empty">
+            <div class="history-empty-icon">
+              <svg viewBox="0 0 24 24" width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><polyline points="12 6 12 12 16 14"/></svg>
+            </div>
+            <p>Chưa có lịch sử đọc chính tả nào.</p>
+            <span class="subtle">Nhấn hoặc giữ phím Fn để bắt đầu đọc văn bản bất kỳ đâu.</span>
+          </div>
+        </section>
+
+        <p id="error" role="alert"></p>
+
+        <details id="capture-diagnostics" class="diagnostics-card" aria-label="Capture diagnostics">
+          <summary><span class="section-label">CAPTURE DIAGNOSTICS</span><span id="diagnostic-state" role="status">Idle</span></summary>
+          <div class="diagnostics-list">
+            <div><strong>Microphone input</strong><p id="diagnostic-microphone">Ready · not recording</p></div>
+            <div><strong>System audio</strong><p id="diagnostic-system">Ready · not recording</p></div>
+            <div><strong>TINA Desktop</strong><p id="diagnostic-desktop">Checking…</p></div>
+            <div><strong>Audio delivery</strong><p id="diagnostic-delivery">No packets sent yet</p></div>
+            <div><strong>Microphone processing</strong><p id="diagnostic-processing">Not recording</p></div>
+          </div>
+        </details>
+
+        <section id="transcript-section" class="transcript" aria-label="Current session transcript">
+          <div class="transcript-heading"><div><p class="eyebrow">SESSION</p><h2>Transcript</h2></div><span id="transcript-count" class="count">0 segments</span></div>
+          <p id="empty">Nothing here yet.</p>
+          <ol id="transcript" aria-live="polite" aria-relevant="additions text"></ol>
+          <div class="transcript-actions">
+            <button id="save" class="secondary" type="button" disabled>Save notes</button>
+            <button id="reveal" class="link" type="button" hidden>Show in Finder</button>
+            <span id="save-result" class="subtle" role="status"></span>
+          </div>
+        </section>
+
+        <p class="footnote">TINA sends audio to TINA Desktop for transcription. It won’t record your screen. Pasting replaces your clipboard. macOS may ask for Screen &amp; System Audio Recording access. Requires macOS 15+.</p>
+      </div>
+    </main>
+  </div>
+
+  <dialog id="settings-dialog" class="settings-dialog" aria-labelledby="settings-title">
+    <header class="settings-header">
+      <div class="settings-header-left">
+        <svg class="settings-header-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+        <h2 id="settings-title">Settings</h2>
+      </div>
+      <button id="settings-close" class="settings-close" type="button" aria-label="Close settings">×</button>
+    </header>
+    <div class="settings-layout">
+      <aside class="settings-sidebar" aria-label="Settings categories">
+        <label class="settings-search">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.3"/><path d="m15.5 15.5 4.2 4.2"/></svg>
+          <input id="settings-search" type="search" aria-label="Search settings" placeholder="Search settings" autocomplete="off">
+        </label>
+        <nav id="settings-tabs" class="settings-tabs" role="tablist" aria-label="Settings categories" aria-orientation="vertical">
+          <button id="settings-tab-dictation" class="settings-tab active" type="button" role="tab" data-settings-tab="dictation" aria-controls="settings-panel-dictation" aria-selected="true" tabindex="0">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8"/></svg><span>Dictation</span>
+          </button>
+          <button id="settings-tab-audio" class="settings-tab" type="button" role="tab" data-settings-tab="audio" aria-controls="settings-panel-audio" aria-selected="false" tabindex="-1">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg><span>Audio</span>
+          </button>
+          <button id="settings-tab-permissions" class="settings-tab" type="button" role="tab" data-settings-tab="permissions" aria-controls="settings-panel-permissions" aria-selected="false" tabindex="-1">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 20 6v5c0 5-3.4 8.2-8 10-4.6-1.8-8-5-8-10V6l8-3Z"/><path d="m9 12 2 2 4-4"/></svg><span>Privacy &amp; Permissions</span>
+          </button>
+          <button id="settings-tab-network" class="settings-tab" type="button" role="tab" data-settings-tab="network" aria-controls="settings-panel-network" aria-selected="false" tabindex="-1">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9a11 11 0 0 1 14 0M8 12a6.5 6.5 0 0 1 8 0m-5 3a2 2 0 0 1 2 0m-1 4h.01"/></svg><span>Services</span>
+          </button>
+          <button id="settings-tab-about" class="settings-tab" type="button" role="tab" data-settings-tab="about" aria-controls="settings-panel-about" aria-selected="false" tabindex="-1">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v5m0-8h.01"/></svg><span>About</span>
+          </button>
+        </nav>
+        <p id="settings-search-empty" class="settings-search-empty" role="status" aria-live="polite" hidden>No matching settings.</p>
+      </aside>
+
+      <div id="settings-content" class="settings-content">
+        <section id="settings-panel-dictation" class="settings-panel" data-settings-panel="dictation" role="tabpanel" aria-labelledby="settings-tab-dictation" hidden>
+          <h3 id="settings-dictation-title">Dictation</h3>
+          <p class="settings-intro">Choose how dictation starts, sounds, and enters text.</p>
+
+          <div class="settings-group-title">Sound feedback</div>
+          <div class="settings-card">
+            <div class="settings-row">
+              <div>
+                <strong>Start and stop sounds</strong>
+                <p>Play a chime when dictation starts or ends.</p>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="setting-chimes-enabled" aria-label="Play dictation chimes" checked>
+                <span class="toggle-track"></span>
+              </label>
+            </div>
+            <div class="settings-row">
+              <div>
+                <strong>Preview sounds</strong>
+                <p>Preview both chimes without recording, even when sounds are off.</p>
+              </div>
+              <button id="btn-test-chimes" class="secondary compact-btn" type="button">
+                <svg viewBox="0 0 24 24" class="btn-icon" aria-hidden="true"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                <span>Preview</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="settings-group-title">Fn shortcut</div>
+          <div class="settings-card">
+            <div class="settings-row">
+              <div>
+                <strong>Fn key</strong>
+                <p>Use Fn anywhere in macOS to start dictation.</p>
+              </div>
+              <div class="keycap-group">
+                <kbd class="keycap">Fn</kbd>
+                <span class="keycap-label">Hold or double-tap</span>
+              </div>
+            </div>
+            <div class="settings-row">
+              <div>
+                <strong>Push to talk</strong>
+                <p>Hold Fn to speak; release to finish and insert text.</p>
+              </div>
+              <span class="badge badge-ok">Default</span>
+            </div>
+            <div class="settings-row">
+              <div>
+                <strong>Hands-free</strong>
+                <p>Double-tap Fn to start; tap Fn or select Stop to finish.</p>
+              </div>
+              <span class="badge badge-ok">Available</span>
+            </div>
+            <div class="settings-row">
+              <div>
+                <strong>Fn key listener</strong>
+                <p>Monitors the Fn key across macOS.</p>
+              </div>
+              <span id="settings-shortcut-status" class="badge badge-muted">Checking…</span>
+            </div>
+          </div>
+
+          <div class="settings-group-title">Text processing</div>
+          <div class="settings-card">
+            <div class="settings-row" style="flex-direction: column; align-items: stretch; gap: 12px; padding: 14px 0;">
+              <div>
+                <strong>Dictation Mode</strong>
+                <p>Choose polished or verbatim text.</p>
+              </div>
+              <div class="dictation-mode-cards">
+                <button class="mode-card active" type="button" data-mode="polish" id="mode-card-polish" aria-pressed="true">
+                  <span class="mode-card-header">
+                    <span class="mode-card-title">AI polish</span>
+                    <span class="badge badge-accent">Recommended</span>
+                  </span>
+                  <span class="mode-card-desc">Removes fillers and improves punctuation. Original text stays saved.</span>
+                </button>
+                <button class="mode-card" type="button" data-mode="faithful" id="mode-card-faithful" aria-pressed="false">
+                  <span class="mode-card-header">
+                    <span class="mode-card-title">Verbatim</span>
+                    <span class="badge badge-muted">No rewrite</span>
+                  </span>
+                  <span class="mode-card-desc">Uses speech recognition text without changes.</span>
+                </button>
+              </div>
+            </div>
+          <div class="settings-row">
+              <div>
+                <strong>Insert text automatically</strong>
+                <p>Paste the final transcript into the active app.</p>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="setting-auto-paste" aria-label="Insert final transcript automatically" checked>
+                <span class="toggle-track"></span>
+              </label>
+            </div>
+          </div>
+        </section>
+
+        <!-- Audio -->
+        <section id="settings-panel-audio" class="settings-panel" data-settings-panel="audio" role="tabpanel" aria-labelledby="settings-tab-audio" hidden>
+          <h3 id="settings-audio-title">Audio</h3>
+          <p class="settings-intro">Choose which audio meeting capture records.</p>
+
+          <div class="settings-group-title">Capture source</div>
+          <div class="settings-card">
+            <div class="settings-row">
+              <div>
+                <strong id="settings-audio-source-label">Audio source</strong>
+                <p id="settings-audio-source-description">Select the audio recorded for meetings.</p>
+              </div>
+              <select id="setting-audio-source" class="settings-select" aria-labelledby="settings-audio-source-label" aria-describedby="settings-audio-source-description">
+                <option value="both" selected>Mic + system audio</option>
+                <option value="microphone">Mic only</option>
+                <option value="system">System audio only</option>
+              </select>
+            </div>
+          </div>
+
+        </section>
+
+        <!-- Privacy and permissions -->
+        <section id="settings-panel-permissions" class="settings-panel" data-settings-panel="permissions" role="tabpanel" aria-labelledby="settings-tab-permissions" hidden>
+          <h3 id="settings-permissions-title">Privacy &amp; Permissions</h3>
+          <p class="settings-intro">Review required access and how capture data is used.</p>
+
+          <div class="settings-group-title">macOS permissions</div>
+          <div class="settings-card settings-permissions">
+            <div class="settings-row">
+              <div class="permission-info">
+                <div class="permission-header-line">
+                  <svg class="permission-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8"/></svg>
+                  <strong>Microphone</strong>
+                  <span id="settings-microphone-badge" class="badge badge-muted">Checking…</span>
+                </div>
+                <p id="settings-microphone-status">Checking…</p>
+                <p class="subtle">Needed for dictation and microphone capture.</p>
+              </div>
+              <button class="secondary compact-btn" type="button" data-open-privacy="microphone" aria-label="Open microphone privacy settings">Open System Settings</button>
+            </div>
+
+            <div class="settings-row">
+              <div class="permission-info">
+                <div class="permission-header-line">
+                  <svg class="permission-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="5" r="2"/><path d="m9 20 3-6 3 6M6 8h12M12 8v6"/></svg>
+                  <strong>Accessibility</strong>
+                  <span id="settings-accessibility-badge" class="badge badge-muted">Checking…</span>
+                </div>
+                <p id="settings-accessibility-status">Checking…</p>
+                <p class="subtle">Lets TINA insert text into the active app.</p>
+              </div>
+              <button class="secondary compact-btn" type="button" data-open-privacy="accessibility" aria-label="Open accessibility settings">Open System Settings</button>
+            </div>
+
+            <div class="settings-row">
+              <div class="permission-info">
+                <div class="permission-header-line">
+                  <svg class="permission-icon" viewBox="0 0 24 24" aria-hidden="true"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>
+                  <strong>Screen &amp; System Audio Recording</strong>
+                  <span id="settings-screen-audio-badge" class="badge badge-muted">Checking…</span>
+                </div>
+                <p id="settings-screen-audio-status">Checking…</p>
+                <p class="subtle">Captures meeting participants and system audio.</p>
+              </div>
+              <button class="secondary compact-btn" type="button" data-open-privacy="screen-audio" aria-label="Open screen and system audio settings">Open System Settings</button>
+            </div>
+          </div>
+
+          <div class="settings-actions-bar">
+            <button id="settings-check-permissions" class="secondary compact-btn" type="button">
+              <svg viewBox="0 0 24 24" class="btn-icon" aria-hidden="true"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+              <span>Refresh status</span>
+            </button>
+            <p id="settings-data-message" class="settings-note" role="status"></p>
+          </div>
+
+          <details class="settings-details">
+            <summary>Can't find TINA in System Settings?</summary>
+            <div class="permission-info">
+              <p class="subtle">Add this app under Accessibility or Screen Recording:</p>
+              <code id="settings-app-path" class="app-path-code">Loading path…</code>
+              <div class="permission-help-actions">
+                <button id="settings-show-app" class="link" type="button">Show in Finder</button>
+                <button id="settings-copy-path" class="link" type="button">Copy path</button>
+              </div>
+            </div>
+          </details>
+
+          <div class="settings-group-title">Data flow</div>
+          <div class="settings-card settings-data-card">
+            <strong>Where capture data goes</strong>
+            <ul class="settings-flow">
+              <li><strong>Audio</strong><span>Sent to configured speech recognition, which may be local or remote.</span></li>
+              <li><strong>Transcript text</strong><span>Optional polish and translation go through TINA Gateway to its configured provider, which may be external. These features do not send audio.</span></li>
+              <li><strong>Gateway key</strong><span>Never shared with TINA Capture.</span></li>
+              <li><strong>Exports</strong><span>Saved locally as Markdown.</span></li>
+            </ul>
+          </div>
+        </section>
+
+        <!-- Services -->
+        <section id="settings-panel-network" class="settings-panel" data-settings-panel="network" role="tabpanel" aria-labelledby="settings-tab-network" hidden>
+          <h3 id="settings-network-title">Services</h3>
+          <p class="settings-intro">Service status for speech recognition and capture.</p>
+
+          <div class="settings-group-title">Connection status</div>
+          <div class="settings-card">
+            <div class="settings-row">
+              <div>
+                <strong>TINA Desktop</strong>
+                <p>Local service for capture and speech.</p>
+              </div>
+              <span id="settings-desktop-status" class="badge badge-accent">Checking…</span>
+            </div>
+            <div class="settings-row">
+              <div>
+                <strong>Speech model</strong>
+                <p>Model used to transcribe audio.</p>
+              </div>
+              <span id="settings-asr-status" class="subtle">Checking…</span>
+            </div>
+            <div class="settings-row">
+              <div>
+                <strong>Audio stream</strong>
+                <p>Local WebSocket connection.</p>
+              </div>
+              <span class="subtle">127.0.0.1:9099</span>
+            </div>
+          </div>
+
+          <div class="settings-actions-bar">
+            <button id="settings-check-network" class="secondary compact-btn" type="button">
+              <svg viewBox="0 0 24 24" class="btn-icon" aria-hidden="true"><path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/></svg>
+              <span>Check connection</span>
+            </button>
+            <p id="settings-network-message" class="settings-note" role="status"></p>
+          </div>
+        </section>
+
+        <!-- About -->
+        <section id="settings-panel-about" class="settings-panel" data-settings-panel="about" role="tabpanel" tabindex="0" aria-labelledby="settings-tab-about" hidden>
+          <h3 id="settings-about-title">About</h3>
+          <p class="settings-intro">App version and system details.</p>
+
+          <div class="settings-card about-brand-card">
+            <div class="about-brand-header">
+              <div class="about-brand-orb">
+                <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8"/></svg>
+              </div>
+              <div>
+                <h4 class="about-brand-title">TINA Capture</h4>
+                <p class="about-brand-tagline">Voice dictation and meeting capture for macOS.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-card">
+            <div class="settings-row">
+              <strong>Version</strong>
+              <span>0.1.0</span>
+            </div>
+            <div class="settings-row">
+              <strong>System requirement</strong>
+              <span>macOS 15+ · Apple Silicon</span>
+            </div>
+            <div class="settings-row">
+              <strong>Built with</strong>
+              <span>Rust · CoreGraphics · ScreenCaptureKit · WebKit</span>
+            </div>
+            <div class="settings-row">
+              <strong>Text processing</strong>
+              <span>Optional TINA Desktop polish; original transcript if unavailable</span>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </dialog>
+  <script src="capture-settings.js"></script>
+  <script src="overlay-utils.js"></script>
+  <script src="dictation.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

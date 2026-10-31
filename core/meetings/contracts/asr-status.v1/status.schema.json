@@ -1,0 +1,246 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tina:asr-status:v1",
+  "title": "Content-free ASR service status",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "started_at_ms",
+    "model",
+    "queue",
+    "requests",
+    "latency",
+    "recent"
+  ],
+  "properties": {
+    "version": {
+      "const": "asr-status.v1"
+    },
+    "started_at_ms": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "asr_model",
+        "alias",
+        "vad_model",
+        "device",
+        "requested_device"
+      ],
+      "properties": {
+        "asr_model": {
+          "type": "string"
+        },
+        "alias": {
+          "type": "string"
+        },
+        "vad_model": {
+          "type": "string"
+        },
+        "device": {
+          "type": "string"
+        },
+        "requested_device": {
+          "type": "string"
+        }
+      }
+    },
+    "queue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "active",
+        "waiting",
+        "capacity",
+        "wait_limit_ms"
+      ],
+      "properties": {
+        "active": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "waiting": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "capacity": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "wait_limit_ms": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "requests": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "total",
+        "errors"
+      ],
+      "properties": {
+        "total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "errors": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "latency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "audio_ms",
+        "capture_ms",
+        "queue_ms",
+        "inference_ms",
+        "total_ms"
+      ],
+      "properties": {
+        "audio_ms": {
+          "$ref": "#/$defs/percentile"
+        },
+        "capture_ms": {
+          "$ref": "#/$defs/percentile"
+        },
+        "queue_ms": {
+          "$ref": "#/$defs/percentile"
+        },
+        "inference_ms": {
+          "$ref": "#/$defs/percentile"
+        },
+        "total_ms": {
+          "$ref": "#/$defs/percentile"
+        }
+      }
+    },
+    "recent": {
+      "type": "array",
+      "maxItems": 100,
+      "items": {
+        "$ref": "#/$defs/sample"
+      }
+    }
+  },
+  "$defs": {
+    "percentile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "count",
+        "p50_ms",
+        "p95_ms"
+      ],
+      "properties": {
+        "count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "p50_ms": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 3600000
+        },
+        "p95_ms": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 3600000
+        }
+      }
+    },
+    "sample": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request_id",
+        "at_ms",
+        "source",
+        "http_status",
+        "audio_ms",
+        "capture_ms",
+        "queue_ms",
+        "inference_ms",
+        "total_ms"
+      ],
+      "properties": {
+        "request_id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "at_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "source": {
+          "enum": [
+            "meeting-bot",
+            "extension",
+            "dictation",
+            "unknown"
+          ]
+        },
+        "http_status": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 599
+        },
+        "audio_ms": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 3600000
+        },
+        "capture_ms": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 3600000
+        },
+        "queue_ms": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 3600000
+        },
+        "inference_ms": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 3600000
+        },
+        "total_ms": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 3600000
+        }
+      }
+    }
+  }
+}

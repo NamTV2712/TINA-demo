@@ -1,0 +1,6 @@
+{
+  "platform": "google_meet",
+  "meetingUrl": "https://meet.google.com/xxx-xxxx-xxx",
+  "botName": "TINA",
+  "redisUrl": "redis://redis:6379"
+}

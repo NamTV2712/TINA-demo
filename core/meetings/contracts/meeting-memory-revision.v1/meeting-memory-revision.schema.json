@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tina:schemas/meeting-memory-revision.v1",
+  "title": "meeting-memory-revision.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "type",
+    "event_id",
+    "meeting_id",
+    "revision",
+    "at"
+  ],
+  "properties": {
+    "version": {
+      "const": "meeting-memory-revision.v1"
+    },
+    "type": {
+      "const": "meeting.memory.updated"
+    },
+    "event_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "meeting_id": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

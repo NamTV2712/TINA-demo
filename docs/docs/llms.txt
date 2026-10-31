@@ -1,0 +1,24 @@
+# TINA
+
+> Self-hosted meeting capture, transcription, and agent APIs under Apache-2.0. TINA has no hosted
+> API, account service, Git remote, or public issue tracker configured yet.
+
+## Start here
+
+- [Quickstart](/quickstart.md): build the local Docker Compose stack and get an API key.
+- [Send a bot](/how-to/send-a-bot.md): send a self-hosted meeting bot and read its transcript.
+- [Authentication](/authentication.md): API keys, scopes, and rotation.
+- [Meetings API](/api/meetings.md): meeting bots, transcripts, recordings, and calendar routes.
+- [Agent API](/api/agent.md): dispatch, chat, routines, and workspaces.
+- [MCP server](/tina-mcp.md): connect an MCP client to a self-hosted gateway.
+- [Deployment](/deployment.md): Compose, Lite, and Kubernetes/Helm.
+- [Configuration](/configuration.md): environment variables and self-hosted services.
+- [Troubleshooting](/troubleshooting.md): diagnostics for local deployments.
+- [Support](/support.md): information to collect before asking for help.
+
+## Repository policies
+
+- `AGENTS.md`: coding-agent instructions for this local TINA checkout.
+- `CONTRIBUTING.md`: local development and contribution guidance.
+- `SECURITY.md`: current vulnerability-reporting status.
+- `LICENSE`: Apache-2.0.

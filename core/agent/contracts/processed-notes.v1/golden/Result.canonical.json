@@ -1,0 +1,34 @@
+{
+  "meeting_id": 42,
+  "user_id": 7,
+  "source": {
+    "window_id": "window-demo",
+    "fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "generation": "generation-demo",
+    "canonical_revision": 2,
+    "evidence": [
+      {
+        "segment_id": "s1",
+        "revision": 1,
+        "start_ms": 1000,
+        "end_ms": 2000,
+        "speaker_id": "alice",
+        "speaker_name": "Alice",
+        "quote": "Tôi sẽ gửi báo cáo."
+      }
+    ]
+  },
+  "params": {
+    "pipeline": "canonical-readable",
+    "version": 2,
+    "prompt_version": 1,
+    "model": "example-model",
+    "provider": "example"
+  },
+  "notes": [
+    {
+      "id": "s1",
+      "text": "Tôi sẽ gửi báo cáo."
+    }
+  ]
+}

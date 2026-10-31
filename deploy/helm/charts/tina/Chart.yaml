@@ -1,0 +1,14 @@
+apiVersion: v2
+name: tina
+description: Self-hosted real-time meeting transcription and agent control plane
+type: application
+# Chart version (SemVer). appVersion tracks the v0.12 control-plane image tag the chart deploys.
+version: 0.12.2
+appVersion: "0.12.28"
+keywords:
+  - tina
+  - meeting-bot
+  - transcription
+  - agent
+maintainers:
+  - name: TINA maintainers

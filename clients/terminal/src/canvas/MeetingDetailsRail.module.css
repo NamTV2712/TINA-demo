@@ -1,0 +1,505 @@
+.layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.layoutWithRail {
+  grid-template-columns: minmax(0, 1fr) 282px;
+  gap: 14px;
+}
+
+.canvas {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+.transcriptPanel {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.recordingPlayer {
+  flex: none;
+  min-width: 0;
+  margin: 0 0 8px;
+}
+
+.recordingMessage {
+  flex: none;
+  margin: 0 0 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel);
+  color: var(--t3);
+  font-size: 12px;
+}
+
+.transcriptHeader {
+  min-height: 42px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.transcriptHeading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: auto;
+}
+
+.transcriptTitle {
+  color: var(--t1);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.transcriptMeta {
+  color: var(--t3);
+  font-size: 12px;
+}
+
+.transcriptSource {
+  color: var(--brand);
+  border: 1px solid var(--line2);
+  border-radius: 3px;
+  background: transparent;
+  padding: 3px 6px;
+  font: 9px var(--mono);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.transcriptSource:hover {
+  background: var(--panel2);
+}
+
+.transcriptSource:focus-visible,
+.notesAction:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.transcriptActions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.actionButton {
+  min-height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--line2);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--t2);
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.actionButton:hover {
+  background: var(--panel2);
+  color: var(--t1);
+}
+
+.detailsToggle {
+  display: none;
+  align-items: center;
+  min-height: 29px;
+  padding: 0 9px;
+  border: 1px solid var(--line2);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--t2);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.searchInput,
+.speakerSelect {
+  height: 29px;
+  min-width: 0;
+  padding: 0 8px;
+  border: 1px solid var(--line2);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--t1);
+  font: inherit;
+  font-size: 12px;
+}
+
+.searchInput {
+  width: 170px;
+}
+
+.speakerSelect {
+  max-width: 142px;
+}
+
+.transcriptBody {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 0 0;
+}
+
+.rail {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 9px 12px 14px 0;
+}
+
+.section {
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  padding: 12px 2px 15px;
+}
+
+.section:last-child {
+  border-bottom: 0;
+}
+
+.sectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 0;
+  margin-bottom: 8px;
+  border-bottom: 0;
+}
+
+.sectionTitle {
+  color: var(--t1);
+  font-size: 13px;
+  font-weight: 650;
+  margin: 0;
+}
+
+.sectionMeta {
+  color: var(--t3);
+  font: 12px var(--mono);
+  white-space: nowrap;
+}
+
+.rows {
+  display: grid;
+  gap: 1px;
+}
+
+.row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 0;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.rowLabel {
+  color: var(--t3);
+  flex: none;
+}
+
+.rowValue {
+  color: var(--t2);
+  text-align: right;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.statusValue {
+  color: var(--t1);
+  font-weight: 600;
+}
+
+.statusLive {
+  color: var(--green);
+}
+
+.deleteControl {
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+}
+
+.deleteAction {
+  min-height: 28px;
+  padding: 0 9px;
+  border: 1px solid color-mix(in srgb, var(--danger) 55%, var(--line));
+  border-radius: 5px;
+  background: transparent;
+  color: var(--danger);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.deleteAction:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+
+.deleteAction:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.deleteConfirm {
+  display: grid;
+  gap: 7px;
+  width: 100%;
+}
+
+.deleteConfirm input {
+  width: 100%;
+  min-width: 0;
+  min-height: 30px;
+  padding: 4px 8px;
+  border: 1px solid var(--line2);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--t1);
+  font: inherit;
+  font-size: 12px;
+}
+
+.deleteConfirmActions {
+  display: flex;
+  gap: 7px;
+}
+
+.deleteCancel {
+  min-height: 28px;
+  padding: 0 9px;
+  border: 1px solid var(--line2);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--t2);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.deleteCancel:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.deleteHelp,
+.deleteError {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.deleteHelp {
+  color: var(--t3);
+}
+
+.deleteError {
+  color: var(--danger);
+}
+
+.people {
+  display: grid;
+  gap: 7px;
+}
+
+.person {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--t2);
+  font-size: 12px;
+}
+
+.initials {
+  width: 24px;
+  height: 24px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line2);
+  border-radius: 50%;
+  color: var(--ink);
+  background: var(--panel2);
+  font: 12px var(--mono);
+}
+
+.personName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.empty {
+  color: var(--t3);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.note {
+  color: var(--t2);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 150px;
+  overflow: auto;
+  margin: 0;
+}
+
+.notesControl {
+  display: grid;
+  justify-items: start;
+  gap: 7px;
+  margin-top: 10px;
+  padding-top: 9px;
+  border-top: 1px solid var(--line);
+}
+
+.notesStatus,
+.notesError {
+  margin: 0;
+  color: var(--t3);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.notesAction {
+  min-height: 28px;
+  padding: 0 9px;
+  border: 1px solid var(--line2);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--t2);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.notesAction:hover:not(:disabled) {
+  background: var(--panel2);
+  color: var(--t1);
+}
+
+.notesAction:disabled {
+  cursor: wait;
+  opacity: .65;
+}
+
+.notesError {
+  color: var(--danger);
+}
+
+.historyDisclosure {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+  color: var(--t2);
+  font-size: 12px;
+}
+
+.historyDisclosure summary {
+  cursor: pointer;
+  color: var(--t2);
+}
+
+.historyDisclosure summary span {
+  margin-left: 6px;
+  color: var(--t3);
+  font: 12px var(--mono);
+}
+
+.history {
+  display: grid;
+  gap: 8px;
+  margin-top: 9px;
+}
+
+.transition {
+  display: grid;
+  grid-template-columns: 7px minmax(0, 1fr);
+  gap: 8px;
+  color: var(--t2);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.transitionDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--control-line);
+  margin-top: 4px;
+}
+
+.transitionTime {
+  display: block;
+  color: var(--t3);
+  font: 12px var(--mono);
+  margin-top: 2px;
+}
+
+@media (max-width: 980px) {
+  .layoutWithRail {
+    grid-template-columns: minmax(0, 1fr) 248px;
+    gap: 9px;
+  }
+
+  .rail {
+    padding-right: 7px;
+  }
+}
+
+@media (max-width: 720px) {
+  .layoutWithRail {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) minmax(190px, 36vh);
+  }
+
+  .rail {
+    height: auto;
+    padding: 8px;
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .detailsToggle {
+    display: inline-flex;
+  }
+}

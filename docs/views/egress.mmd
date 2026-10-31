@@ -1,0 +1,43 @@
+%% GENERATED — pnpm arch:dsl --write
+flowchart LR
+  subgraph tenant["tenant boundary"]
+    agent_api["agent-api"]
+    conformance["conformance"]
+    gateway["gateway"]
+    admin_api["admin-api"]
+    bot["bot"]
+    discord_connector["discord-connector"]
+    desktop["desktop"]
+    meeting_api["meeting-api"]
+    alignment_worker["MFA alignment worker"]
+    service_authority["external service authority"]
+    system_webhook["operator terminal callback"]
+    mcp["mcp"]
+    slim["slim"]
+    extension["extension"]
+    claude_plugin["claude-plugin"]
+    terminal["terminal"]
+    segments_table["transcription_segments (table)"]
+    runtime["runtime"]
+    agent_worker["agent-worker"]
+    redis["redis"]
+    postgres["postgres"]
+    object_store["object-store"]
+    dashboard["dashboard (deprecated)"]
+    flows_api["flows-api"]
+    flows_worker["flows-worker"]
+    native_capture["TINA Capture"]
+    desktop_journal["Desktop transcript journal"]
+    transcript_sync["Owner transcript synchronization CLI"]
+    diarization_worker["Local speaker diarization worker"]
+  end
+  transcription["transcription"]
+  bot ==>|"audio -> tenant-hosted"| transcription
+  transcription["transcription"]
+  terminal_app ==>|"audio -> tenant-hosted"| transcription
+  completion_provider["configured completion provider"]
+  agent_worker ==>|"transcript -> external-saas"| completion_provider
+  completion_provider["configured completion provider"]
+  agent_worker ==>|"transcript -> external-saas"| completion_provider
+  transcription["transcription"]
+  discord_connector ==>|"audio -> tenant-hosted"| transcription

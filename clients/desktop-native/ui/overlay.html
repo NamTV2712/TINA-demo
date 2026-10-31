@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>TINA Capture Overlay</title>
+  <link rel="stylesheet" href="overlay.css">
+</head>
+<body data-mode="hidden">
+  <!-- 1. Meeting Detected Card (Speakly Prompt style) -->
+  <section id="detect" class="card detect" aria-label="Meeting detected" hidden>
+    <div class="meeting-detect-progress">
+      <div id="detect-progress-fill" class="meeting-detect-progress-fill"></div>
+    </div>
+    <button id="detect-dismiss-btn" class="meeting-detect-dismiss" type="button" data-action="dismiss" aria-label="Dismiss">×</button>
+    <div class="head" data-tauri-drag-region>
+      <div class="app-icon-wrap" id="detect-icon-wrap" data-tauri-drag-region>
+        <div id="detect-icon" class="app-icon" aria-hidden="true">M</div>
+      </div>
+      <div class="copy" data-tauri-drag-region>
+        <div class="detect-badge"><span class="pulse-dot"></span> Phát hiện cuộc họp</div>
+        <strong id="detect-title" data-tauri-drag-region>Đang tham gia họp?</strong>
+        <p id="detect-copy">Bắt đầu ghi âm và ghi chú cuộc họp?</p>
+      </div>
+    </div>
+    <div class="row">
+      <button class="ghost" type="button" data-action="dismiss">Để sau</button>
+      <button class="primary" type="button" data-action="record">
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" class="btn-icon">
+          <circle cx="6" cy="6" r="4.5" fill="currentColor"/>
+        </svg>
+        Bắt đầu ghi âm
+      </button>
+    </div>
+  </section>
+
+  <!-- 2. Active Recording Mode: Both Horizontal Capsule & Speakly Vertical Mini Pill -->
+  <section id="record" class="card record" aria-label="Recording controls" hidden>
+    <!-- 2A. Full Horizontal Capsule -->
+    <div class="record-capsule" id="recordCapsule" data-tauri-drag-region>
+      <!-- Left: Status & Timer -->
+      <div class="record-meta" data-tauri-drag-region>
+        <span id="live-dot" class="live-dot" aria-hidden="true"></span>
+        <strong id="record-elapsed" data-tauri-drag-region>00:00</strong>
+        <span id="record-state" class="state" data-tauri-drag-region>Recording</span>
+      </div>
+
+      <!-- Center: 7-bar Speakly Dynamic Equalizer -->
+      <div class="waveform-section" id="waveformSection" title="Audio level">
+        <div class="wave-bar"></div>
+        <div class="wave-bar"></div>
+        <div class="wave-bar"></div>
+        <div class="wave-bar"></div>
+        <div class="wave-bar"></div>
+        <div class="wave-bar"></div>
+        <div class="wave-bar"></div>
+        <span id="level" class="level-indicator-hidden"></span>
+      </div>
+
+      <!-- Right: Action Controls -->
+      <div class="actions" data-tauri-drag-region>
+        <!-- Audio Source Selector Dropdown (Speakly RecPill style) -->
+        <div class="source-selector-wrap" id="sourceSelectorWrap">
+          <button id="source-toggle-btn" class="ghost pill-btn source-btn" type="button" title="Switch audio source">
+            <svg class="source-icon" width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+              <path d="M8 12a3 3 0 0 0 3-3V4a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3z"/>
+              <path d="M3 8a.5.5 0 0 0-1 0 6 6 0 0 0 5 5.91V15H5.5a.5.5 0 0 0 0 1h5a.5.5 0 0 0 0-1H9v-1.09A6 6 0 0 0 14 8a.5.5 0 0 0-1 0 5 5 0 0 1-10 0z"/>
+            </svg>
+            <span id="source-label" class="btn-label">Both</span>
+            <svg class="source-chevron" width="7" height="7" viewBox="0 0 8 8" fill="none" stroke="currentColor" stroke-width="1.6">
+              <path d="M1.5 2.5L4 5L6.5 2.5"/>
+            </svg>
+          </button>
+          
+          <div class="source-dropdown" id="sourceDropdown" hidden>
+            <button class="source-opt active" type="button" data-source-set="both">
+              <span class="source-opt-icon">🎙️🔊</span>
+              <div class="source-opt-copy">
+                <strong>Mic &amp; System Audio</strong>
+                <small>Record speaker and meeting</small>
+              </div>
+              <span class="source-opt-check">✓</span>
+            </button>
+            <button class="source-opt" type="button" data-source-set="mic">
+              <span class="source-opt-icon">🎙️</span>
+              <div class="source-opt-copy">
+                <strong>Microphone Only</strong>
+                <small>Only record your voice</small>
+              </div>
+              <span class="source-opt-check">✓</span>
+            </button>
+            <button class="source-opt" type="button" data-source-set="system">
+              <span class="source-opt-icon">🔊</span>
+              <div class="source-opt-copy">
+                <strong>System Audio Only</strong>
+                <small>Only record computer audio</small>
+              </div>
+              <span class="source-opt-check">✓</span>
+            </button>
+          </div>
+        </div>
+
+        <button id="pause" class="ghost pill-btn" type="button" data-action="pause" title="Pause recording">
+          <svg class="icon-pause" width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+            <rect x="2.5" y="2" width="2.5" height="8" rx="1"></rect>
+            <rect x="7" y="2" width="2.5" height="8" rx="1"></rect>
+          </svg>
+          <span class="btn-label">Pause</span>
+        </button>
+
+        <button id="captions" class="ghost pill-btn captions-toggle" type="button" data-action="captions" aria-pressed="false" title="Toggle live captions">
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M2.5 4A1.5 1.5 0 0 0 1 5.5v5A1.5 1.5 0 0 0 2.5 12h11a1.5 1.5 0 0 0 1.5-1.5v-5A1.5 1.5 0 0 0 13.5 4h-11zM2 5.5a.5.5 0 0 1 .5-.5h11a.5.5 0 0 1 .5.5v5a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5v-5z"/>
+            <path d="M4.5 7a.5.5 0 0 0 0 1h2a.5.5 0 0 0 0-1h-2zm5 0a.5.5 0 0 0 0 1h2a.5.5 0 0 0 0-1h-2zm-5 2a.5.5 0 0 0 0 1h4a.5.5 0 0 0 0-1h-4z"/>
+          </svg>
+          <span class="btn-label">Live</span>
+        </button>
+
+        <button class="primary danger pill-btn" type="button" data-action="stop" title="Stop and save transcript">
+          <svg width="10" height="10" viewBox="0 0 12 12" fill="currentColor">
+            <rect x="2" y="2" width="8" height="8" rx="1.5"/>
+          </svg>
+          <span class="btn-label">Stop</span>
+        </button>
+
+        <!-- Toggle to Speakly Mini Pill -->
+        <button id="btn-collapse" class="ghost icon-only-btn" type="button" title="Minimize to edge pill">
+          <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6">
+            <rect x="4" y="2" width="6" height="10" rx="3"/>
+          </svg>
+        </button>
+      </div>
+
+      <span class="grip" data-tauri-drag-region aria-hidden="true" title="Drag overlay">⠿</span>
+    </div>
+
+    <!-- 2B. Speakly Vertical Mini Pill Widget (40x64px style) -->
+    <div class="mini-pill-widget" id="miniPillWidget">
+      <!-- Hover Quick Actions (Slide-out left) -->
+      <div class="pill-quick-actions" id="pillQuickActions">
+        <button class="qa-btn" type="button" id="qa-expand" title="Expand to full bar">
+          <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M1 5V1H5M11 7V11H7"/>
+          </svg>
+          Expand
+        </button>
+        <button class="qa-btn" type="button" id="qa-source" title="Cycle audio source">
+          <svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M8 12a3 3 0 0 0 3-3V4a3 3 0 0 0-6 0v5a3 3 0 0 0 3 3z"/>
+          </svg>
+          <span id="qa-source-label">Both</span>
+        </button>
+        <button class="qa-btn" type="button" data-action="open" title="Open TINA Notes">
+          <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M4 1H11V8M11 1L3 9"/>
+          </svg>
+          Notes
+        </button>
+        <button class="qa-btn qa-danger" type="button" data-action="stop" title="End recording">
+          <svg width="10" height="10" viewBox="0 0 12 12" fill="currentColor">
+            <rect x="2" y="2" width="8" height="8" rx="1.5"/>
+          </svg>
+          Stop
+        </button>
+      </div>
+
+      <!-- Pill Body -->
+      <div class="pill-body" id="pillBody" title="Double click to expand, drag to move" data-tauri-drag-region>
+        <div class="rec-dot-wrap">
+          <span id="pill-live-dot" class="live-dot" aria-hidden="true"></span>
+        </div>
+        <div class="pill-waveform" id="pillWaveform">
+          <div class="wave-bar"></div>
+          <div class="wave-bar"></div>
+          <div class="wave-bar"></div>
+          <div class="wave-bar"></div>
+          <div class="wave-bar"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Error Toast if any -->
+    <p id="record-error" class="overlay-error" hidden></p>
+  </section>
+
+  <!-- 3. Meeting Ended Card (Speakly Grace-Period Countdown style) -->
+  <section id="ended" class="card ended" aria-label="Meeting ended" hidden>
+    <div class="head" data-tauri-drag-region>
+      <div class="ended-icon-wrap" data-tauri-drag-region>
+        <span class="ended-dot" aria-hidden="true"></span>
+      </div>
+      <div class="copy" data-tauri-drag-region>
+        <strong data-tauri-drag-region>Meeting finished?</strong>
+        <p id="ended-copy" class="copyline">Zoom released your microphone.</p>
+      </div>
+    </div>
+    
+    <div class="grace-wrap" aria-hidden="true">
+      <div class="grace"><span id="grace-fill"></span></div>
+    </div>
+
+    <div class="row">
+      <p id="grace-copy" class="grace-copy">Auto-stopping soon unless kept alive.</p>
+      <div class="btn-group">
+        <button class="ghost" type="button" data-action="continue">Keep recording</button>
+        <button class="primary danger" type="button" data-action="stop">Stop &amp; save</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4. Recognition Result Toast / AI Summary (Speakly result-popup style) -->
+  <section id="result" class="card result" aria-label="Recording saved" hidden>
+    <div class="result-header">
+      <div class="result-badge">
+        <span class="result-check-icon">✓</span>
+        <div class="result-title-wrap">
+          <strong id="result-title">Meeting saved to TINA</strong>
+          <span id="result-meta" class="result-meta">00:00 • Mic &amp; System Audio</span>
+        </div>
+      </div>
+      <button class="result-close-btn" id="result-close" type="button" aria-label="Close" title="Dismiss">
+        <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8">
+          <path d="M1 1L11 11M1 11L11 1"/>
+        </svg>
+      </button>
+    </div>
+
+    <div class="result-body">
+      <div id="result-snippet" class="result-snippet">
+        "Transcript saved. Ready for review and AI extraction."
+      </div>
+    </div>
+
+    <div class="result-footer">
+      <button id="result-copy" class="ghost pill-btn" type="button" title="Copy transcript snippet">
+        <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4">
+          <rect x="4" y="4" width="8" height="8" rx="2"/>
+          <path d="M2 10V3a1 1 0 0 1 1-1h7"/>
+        </svg>
+        <span id="copy-label">Copy Text</span>
+      </button>
+
+      <button id="result-open" class="primary pill-btn" type="button" data-action="open" title="Open in TINA Notes">
+        <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.4">
+          <rect x="2" y="2" width="10" height="10" rx="2"/>
+          <path d="M5 5L9 5L9 9"/>
+          <path d="M9 5L5 9"/>
+        </svg>
+        Open Notes
+      </button>
+    </div>
+
+    <!-- 6-second countdown progress bar -->
+    <div class="result-countdown"><div id="result-countdown-fill" class="countdown-fill"></div></div>
+  </section>
+
+  <!-- 5. Floating Dictation Capsule (Speakly RecordingTip style) -->
+  <section id="dictation" class="card dictation-capsule" aria-label="Dictation active" hidden>
+    <div class="dictation-pill" data-tauri-drag-region>
+      <div class="dictation-status-dot" data-tauri-drag-region>
+        <span id="dict-dot" class="dot-pulse" aria-hidden="true"></span>
+      </div>
+      <div class="dictation-waveform" id="dictWaveform" title="Voice activity">
+        <div class="wave-bar"></div>
+        <div class="wave-bar"></div>
+        <div class="wave-bar"></div>
+        <div class="wave-bar"></div>
+        <div class="wave-bar"></div>
+        <div class="wave-bar"></div>
+      </div>
+      <div class="dictation-info" data-tauri-drag-region>
+        <span id="dict-state-text" class="dict-state-text" data-tauri-drag-region>Listening…</span>
+      </div>
+      <button id="dict-stop-btn" class="dict-cancel-btn" type="button" data-action="dictation-stop" title="Stop &amp; insert text">
+        <svg width="10" height="10" viewBox="0 0 12 12" fill="currentColor">
+          <rect x="2" y="2" width="8" height="8" rx="1.5"/>
+        </svg>
+      </button>
+    </div>
+  </section>
+
+  <script src="overlay-utils.js"></script>
+  <script src="overlay.js"></script>
+</body>
+</html>

@@ -1,0 +1,6 @@
+%% GENERATED — pnpm arch:dsl --write
+sequenceDiagram
+  autonumber
+  agent_worker->>completion_provider: tool-less CompletionPort returns summary text from surfaced cards only
+  agent_worker->>workspace_v1: validate meeting frontmatter against workspace.v1
+  agent_worker->>meeting_wiki_entity: write and commit only kg/entities/meeting/{id}.md

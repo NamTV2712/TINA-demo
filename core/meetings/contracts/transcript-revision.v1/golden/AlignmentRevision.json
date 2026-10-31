@@ -1,0 +1,12 @@
+{
+  "version": "transcript-revision.v1",
+  "type": "transcript.revised",
+  "event_id": "6a3199b6-4f58-4a2b-b2f1-f9d1c34eac02",
+  "meeting_id": 7,
+  "platform": "google_meet",
+  "native_meeting_id": "meeting-code",
+  "segment_id": "segment-1",
+  "revision": 4,
+  "kind": "alignment",
+  "at": "2026-10-23T00:00:03Z"
+}

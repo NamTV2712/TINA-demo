@@ -1,0 +1,35 @@
+---
+title: "Local change workflow"
+description: "A small delivery process for making and reviewing changes in the self-hosted TINA checkout."
+---
+
+TINA currently has no public Git remote, issue tracker, or release registry. Use this page for local
+development; update it when those services are configured.
+
+## Before changing code
+
+1. State the user-visible behavior that should change.
+2. Inspect the working tree and preserve edits already present.
+3. Trace callers and the deployment/configuration paths that use the code.
+4. Record a small acceptance check and the relevant documentation surface.
+
+## During implementation
+
+- Change the shared producer when fixing a shared contract; keep client adaptation at client
+  boundaries.
+- For API, environment, package, or storage changes, update every caller, example, fixture, and
+  operator guide in the same change.
+- Preserve error handling, validation, security boundaries, and existing license notices.
+- Update architecture or contract seals when their underlying inputs change.
+
+## Verification and reporting
+
+Run the focused checks needed for the change when requested or required by the task. Report the
+commands, results, and anything left unverified. A passing source test does not establish that a
+TINA deployment worked; label runtime behavior as unverified until exercised on the target setup.
+
+## Git and release boundaries
+
+The TINA repository currently has no remote or release destination. Do not push, publish images, or
+create a public release until the owner provides those destinations and the contribution-rights
+process is configured. Preserve the independent `.git` directory and the inherited source history.

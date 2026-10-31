@@ -1,0 +1,95 @@
+%% GENERATED — pnpm arch:dsl --write
+flowchart LR
+  subgraph meetings["meetings"]
+    bot["bot"]
+    discord_connector["discord-connector"]
+    desktop["desktop"]
+    meeting_api["meeting-api"]
+    alignment_worker["MFA alignment worker"]
+    mcp["mcp"]
+    transcription["transcription"]
+    segments_table["transcription_segments (table)"]
+    desktop_journal["Desktop transcript journal"]
+    transcript_sync["Owner transcript synchronization CLI"]
+    diarization_worker["Local speaker diarization worker"]
+  end
+  subgraph agent["agent"]
+    agent_api["agent-api"]
+    agent_worker["agent-worker"]
+  end
+  subgraph gateway_system["gateway"]
+    conformance["conformance"]
+    gateway["gateway"]
+  end
+  subgraph identity["identity"]
+    admin_api["admin-api"]
+  end
+  subgraph runtime_system["runtime"]
+    runtime["runtime"]
+  end
+  subgraph service_authority_system["service authority"]
+    service_authority["external service authority"]
+  end
+  subgraph system_webhook_system["system webhook"]
+    system_webhook["operator terminal callback"]
+  end
+  subgraph platform["platform"]
+    redis["redis"]
+    postgres["postgres"]
+    object_store["object-store"]
+  end
+  subgraph flows["flows"]
+    flows_api["flows-api"]
+    flows_worker["flows-worker"]
+  end
+  slim["slim"]
+  extension["extension"]
+  claude_plugin["claude-plugin"]
+  terminal["terminal"]
+  dashboard["dashboard (deprecated)"]
+  native_capture["TINA Capture"]
+  meeting_api -->|"write"| segments_table
+  bot -->|"HTTPS"| transcription
+  meeting_api -->|"JDBC"| postgres
+  meeting_api -->|"HTTPS"| object_store
+  meeting_api -->|"HTTPS"| runtime
+  meeting_api -->|"HTTPS"| admin_api
+  meeting_api -->|"HTTPS"| service_authority
+  meeting_api -->|"HTTP(S)"| system_webhook
+  agent_api -->|"HTTPS"| runtime
+  mcp -->|"HTTPS"| gateway
+  gateway -->|"HTTPS"| meeting_api
+  gateway -->|"HTTPS"| agent_api
+  gateway -->|"HTTPS"| mcp
+  gateway -->|"HTTPS"| admin_api
+  admin_api -->|"JDBC"| postgres
+  terminal -->|"HTTPS"| gateway
+  terminal -->|"WebSocket"| gateway
+  dashboard -->|""| gateway
+  dashboard -->|""| gateway
+  slim -->|"HTTPS"| gateway
+  extension -->|"HTTP"| gateway
+  extension -->|"HTTP"| desktop
+  flows_worker -->|""| agent_api
+  flows_worker -->|""| gateway
+  flows_worker -->|""| admin_api
+  native_capture -->|"WebSocket"| desktop
+  desktop -->|"HTTP"| transcription
+  desktop -->|"HTTP"| admin_api
+  native_capture -->|"HTTP"| desktop
+  native_capture -->|"HTTP"| desktop
+  desktop -->|"HTTP"| agent_api
+  native_capture -->|"HTTP"| desktop
+  desktop -->|"HTTP"| agent_api
+  native_capture -->|"WebSocket"| desktop
+  desktop -->|""| desktop_journal
+  meeting_api -->|"HTTP"| alignment_worker
+  meeting_api -->|"Redis"| gateway
+  transcript_sync -->|"HTTP"| desktop
+  transcript_sync -->|"HTTP"| gateway
+  meeting_api -->|"HTTP"| discord_connector
+  discord_connector -->|"HTTPS"| transcription
+  desktop -->|"HTTP"| diarization_worker
+  meeting_api -->|"HTTP"| diarization_worker
+  desktop -->|"HTTP"| alignment_worker
+  agent_api -->|"HTTP"| meeting_api

@@ -1,0 +1,15 @@
+{
+  "name": "tina",
+  "owner": { "name": "TINA" },
+  "plugins": [
+    {
+      "name": "tina",
+      "source": "./clients/claude-plugin",
+      "description": "Connect to a self-hosted TINA server for meeting bots and transcripts.",
+      "version": "0.1.0",
+      "category": "productivity",
+      "tags": ["meetings", "transcription", "google-meet", "microsoft-teams", "zoom", "mcp"],
+      "license": "Apache-2.0"
+    }
+  ]
+}

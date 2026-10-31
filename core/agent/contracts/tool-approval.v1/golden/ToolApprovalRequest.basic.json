@@ -1,0 +1,14 @@
+{
+  "type": "tool-approval-request",
+  "approval_id": "00000000-0000-4000-8000-000000000001",
+  "turn_id": "t0",
+  "server": "tina-email-send",
+  "tool": "send",
+  "title": "Send email",
+  "description": "Send the prepared email",
+  "message": "Allow sending this email?",
+  "parameters": [
+    { "name": "to", "display_name": "To", "value": "jane@example.test" }
+  ],
+  "expires_at": 1798252800000
+}

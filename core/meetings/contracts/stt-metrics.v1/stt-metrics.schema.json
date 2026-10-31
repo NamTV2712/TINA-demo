@@ -1,0 +1,423 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tina:schemas/stt-metrics.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "const": "stt-metrics.v1"
+    },
+    "meeting_id": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "since_ms": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "active_asr_requests": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "errors": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "asr": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "storage": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "asr",
+        "storage"
+      ]
+    },
+    "latency": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "asr_http_ms": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "retained": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 256
+            },
+            "p50_ms": {
+              "type": "number",
+              "minimum": 0
+            },
+            "p95_ms": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "count",
+            "retained",
+            "p50_ms",
+            "p95_ms"
+          ]
+        },
+        "asr_audio_ms": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "retained": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 256
+            },
+            "p50_ms": {
+              "type": "number",
+              "minimum": 0
+            },
+            "p95_ms": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "count",
+            "retained",
+            "p50_ms",
+            "p95_ms"
+          ]
+        },
+        "capture_to_request_ms": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "retained": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 256
+            },
+            "p50_ms": {
+              "type": "number",
+              "minimum": 0
+            },
+            "p95_ms": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "count",
+            "retained",
+            "p50_ms",
+            "p95_ms"
+          ]
+        },
+        "storage_write_ms": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "retained": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 256
+            },
+            "p50_ms": {
+              "type": "number",
+              "minimum": 0
+            },
+            "p95_ms": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "count",
+            "retained",
+            "p50_ms",
+            "p95_ms"
+          ]
+        },
+        "transcript_write_ms": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "retained": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 256
+            },
+            "p50_ms": {
+              "type": "number",
+              "minimum": 0
+            },
+            "p95_ms": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "count",
+            "retained",
+            "p50_ms",
+            "p95_ms"
+          ]
+        },
+        "caption_lag_ms": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "retained": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 256
+            },
+            "p50_ms": {
+              "type": "number",
+              "minimum": 0
+            },
+            "p95_ms": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "count",
+            "retained",
+            "p50_ms",
+            "p95_ms"
+          ]
+        },
+        "ui_commit_ms": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "retained": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 256
+            },
+            "p50_ms": {
+              "type": "number",
+              "minimum": 0
+            },
+            "p95_ms": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "count",
+            "retained",
+            "p50_ms",
+            "p95_ms"
+          ]
+        },
+        "ui_frame_ms": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "retained": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 256
+            },
+            "p50_ms": {
+              "type": "number",
+              "minimum": 0
+            },
+            "p95_ms": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "count",
+            "retained",
+            "p50_ms",
+            "p95_ms"
+          ]
+        },
+        "server_to_ui_ms": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "retained": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 256
+            },
+            "p50_ms": {
+              "type": "number",
+              "minimum": 0
+            },
+            "p95_ms": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "count",
+            "retained",
+            "p50_ms",
+            "p95_ms"
+          ]
+        },
+        "confirmed_caption_lag_ms": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "retained": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 256
+            },
+            "p50_ms": {
+              "type": "number",
+              "minimum": 0
+            },
+            "p95_ms": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "count",
+            "retained",
+            "p50_ms",
+            "p95_ms"
+          ]
+        },
+        "draft_age_ms": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "retained": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 256
+            },
+            "p50_ms": {
+              "type": "number",
+              "minimum": 0
+            },
+            "p95_ms": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "count",
+            "retained",
+            "p50_ms",
+            "p95_ms"
+          ]
+        }
+      }
+    },
+    "storage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "audio_chunks": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "pcm_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "transcript_records": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "recovery": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "state": {
+                "type": "string"
+              },
+              "count": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "state",
+              "count"
+            ]
+          }
+        }
+      },
+      "required": [
+        "audio_chunks",
+        "pcm_bytes",
+        "transcript_records",
+        "recovery"
+      ]
+    },
+    "clock": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "version",
+    "meeting_id",
+    "since_ms",
+    "active_asr_requests",
+    "errors",
+    "latency",
+    "storage",
+    "clock"
+  ]
+}

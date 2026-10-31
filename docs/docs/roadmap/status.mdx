@@ -1,0 +1,29 @@
+---
+title: "TINA project status"
+description: "Current distribution and validation status for the self-hosted TINA codebase."
+---
+
+## Distribution
+
+- TINA is a self-hosted codebase. It has no hosted API, user account portal, public Git remote, or
+  container-image registry configured.
+- Docker Compose and TINA Lite build images locally from this checkout.
+- Kubernetes/Helm users must build images and preload them into their cluster.
+- The standalone Git repository keeps its source history for provenance but has no remote.
+
+## Validation status
+
+Source-level implementation includes meeting capture, an OpenAI-compatible STT interface, recording
+storage, Docker/Kubernetes runtimes, a Terminal, a browser extension, a Python client, and an MCP
+server. Each deployment still needs its own operator validation. No production TINA deployment is
+claimed by this page.
+
+## Project services not configured
+
+- Public issue tracker and roadmap.
+- TINA Git hosting and release destination.
+- Hosted API, account/billing portal, and hosted transcription.
+- Public security contact.
+
+See [Deployment](/deployment) for the local Compose stack and [Support](/support) for current
+diagnostic guidance.

@@ -1,0 +1,11 @@
+{
+  "name": "tina-desktop-native",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "tauri dev",
+    "build": "tauri build --bundles app",
+    "test": "node --test ui/*.test.mjs"
+  },
+  "devDependencies": {"@tauri-apps/cli": "^2.0.0"}
+}

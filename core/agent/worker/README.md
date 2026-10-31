@@ -1,0 +1,22 @@
+# agent · worker
+
+The agent worker: runs a single agent workload to completion. Owns the generic turn engine
+(`engine`), the per-meeting loop (`meeting`, `meeting_transcript_mcp`), and its container image
+(`Dockerfile`). Model/harness access goes through the provider-agnostic [`llm`](../llm) ports —
+card beats via `CompletionPort` (a direct HTTP completion), workspace turns via `HarnessPort` (the
+`TINA_RUNNER`-selected CLI agent); no vendor name lives in this package. Spawned by the control
+plane; liveness = workload lifecycle.
+
+Terminal dictation polish is a one-shot, read-only `CompletionPort` job in the worker. It has no
+harness tools and does not write chat history or workspace files.
+
+TINA Capture live translation is also a one-shot, tool-less `CompletionPort` job. It receives one
+confirmed transcript segment and a fixed target-language code; the source is treated as untrusted
+text, and the translated result is returned to the loopback client without writing transcript or
+workspace history.
+# Canonical notes jobs
+
+`processed_notes.py` handles the private canonical-window entrypoint before the legacy live loop.
+It calls the existing tool-less meeting CompletionPort using canonical text and resolved speaker
+names, then emits a candidate result. It does not publish live notes, edit canonical text or
+overwrite workspace documents. Meeting API owns source/lease validation and final publication.

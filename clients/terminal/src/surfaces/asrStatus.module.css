@@ -1,0 +1,29 @@
+.page { display: flex; flex-direction: column; gap: 12px; max-width: 960px; color: var(--t1); font-size: 12px; min-width: 0; }
+.page h2 { font-size: 18px; margin: 0 0 8px; font-weight: 650; }
+.page h3 { font-size: 13px; margin: 12px 0 0; font-weight: 600; }
+.page p { color: var(--t3); line-height: 1.6; margin: 0; }
+.header, .summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.header { align-items: flex-start; }
+.header > div { flex: 1 1 240px; }
+.button { display: inline-flex; align-items: center; gap: 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel2); color: var(--t1); padding: 8px 12px; font: inherit; cursor: pointer; }
+.button:disabled { opacity: .6; cursor: default; }
+.button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.summary { color: var(--t2); padding: 12px; background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; }
+.ready { color: var(--green); }
+.warning { color: var(--warn); }
+.error { color: var(--danger); }
+.config { margin: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-top: 1px solid var(--line); }
+.config > div { padding: 12px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
+.config dt { color: var(--t3); margin-bottom: 4px; }
+.config dd { margin: 0; font-weight: 500; }
+.scroll { max-width: 100%; overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; }
+.scroll table { width: 100%; border-collapse: collapse; min-width: 520px; font-size: 12px; text-align: left; }
+.scroll th, .scroll td { padding: 10px 12px; vertical-align: top; border-bottom: 1px solid var(--line); }
+.scroll thead { background: var(--panel2); color: var(--t3); }
+.scroll th { font-weight: 500; }
+.scroll tbody tr:last-child > * { border-bottom: 0; }
+.scroll td { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.scroll small { display: block; color: var(--t3); font-size: 11px; font-weight: 400; margin-top: 4px; line-height: 1.5; }
+.empty { padding: 16px; border: 1px dashed var(--line); border-radius: 8px; }
+.footnote { font-size: 11px; }
+@media (max-width: 640px) { .config { grid-template-columns: minmax(0, 1fr); } }

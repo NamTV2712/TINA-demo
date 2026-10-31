@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tina:schemas/tool-approval.v1",
+  "title": "tool-approval.v1",
+  "description": "The per-call approval request and decision exchanged between a TINA chat surface and a gated MCP tool running inside a unit.",
+  "$defs": {
+    "ApprovalParameter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "display_name", "value"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "display_name": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "value": { "type": "string", "maxLength": 1000 }
+      }
+    },
+    "ToolApprovalRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type", "approval_id", "turn_id", "server", "tool", "title",
+        "description", "message", "parameters", "expires_at"
+      ],
+      "properties": {
+        "type": { "const": "tool-approval-request" },
+        "approval_id": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+        },
+        "turn_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "server": { "type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$" },
+        "tool": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "title": { "type": "string", "minLength": 1, "maxLength": 160 },
+        "description": { "type": "string", "maxLength": 500 },
+        "message": { "type": "string", "maxLength": 500 },
+        "parameters": {
+          "type": "array",
+          "maxItems": 20,
+          "items": { "$ref": "#/$defs/ApprovalParameter" }
+        },
+        "expires_at": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "ToolApprovalResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "approval_id", "turn_id", "decision"],
+      "properties": {
+        "type": { "const": "tool-approval-response" },
+        "approval_id": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+        },
+        "turn_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "decision": { "enum": ["approve", "deny"] }
+      }
+    },
+    "ToolApprovalResolved": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "approval_id", "turn_id", "outcome"],
+      "properties": {
+        "type": { "const": "tool-approval-resolved" },
+        "approval_id": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+        },
+        "turn_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "outcome": { "enum": ["approved", "denied", "expired", "cancelled"] }
+      }
+    },
+    "ToolApprovalEvent": {
+      "oneOf": [
+        { "$ref": "#/$defs/ToolApprovalRequest" },
+        { "$ref": "#/$defs/ToolApprovalResponse" },
+        { "$ref": "#/$defs/ToolApprovalResolved" }
+      ]
+    }
+  }
+}

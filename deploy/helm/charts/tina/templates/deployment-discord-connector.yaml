@@ -1,0 +1,99 @@
+{{- if .Values.discordConnector.enabled }}
+{{- if ne (int .Values.discordConnector.replicaCount) 1 }}
+{{- fail "discordConnector.replicaCount must be 1: one bot token holds exactly one Discord Gateway session, and a second replica with the same token evicts the first (dropping every live meeting). Scale with a second bot application + release instead." }}
+{{- end }}
+{{- if and (not .Values.discordConnector.existingSecret) (not .Values.discordConnector.botToken) }}
+{{- fail "discordConnector.enabled=true requires discordConnector.botToken (rendered into the chart Secret) or discordConnector.existingSecret (a Secret already carrying the token) — there is no working tokenless configuration." }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "tina.componentName" (list . "discord-connector") }}
+  labels:
+    {{- include "tina.labels" . | nindent 4 }}
+spec:
+  # Pinned to 1 (validated above). The Gateway session is the scarce resource, not CPU.
+  replicas: 1
+  # Recreate, NOT the chart's RollingUpdate helper: maxSurge: 1 would boot a SECOND Gateway
+  # session with the SAME token, and Discord evicts the older connection — every in-flight
+  # meeting drops mid-transcript. A short deploy gap is the correct trade; the next spawn
+  # establishes a fresh session.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "tina.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: discord-connector
+  template:
+    metadata:
+      labels:
+        {{- include "tina.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: discord-connector
+      annotations:
+        {{- toYaml .Values.global.podAnnotations | nindent 8 }}
+    spec:
+      # main() drains voice sessions (flush STT, emit terminal lifecycle) under a 25s watchdog;
+      # leave headroom for the HTTP server close.
+      terminationGracePeriodSeconds: 35
+      securityContext:
+        {{- toYaml .Values.global.podSecurityContext | nindent 8 }}
+      {{- with .Values.global.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: discord-connector
+          securityContext:
+            {{- toYaml .Values.global.securityContext | nindent 12 }}
+          image: "{{ .Values.discordConnector.image.repository }}:{{ .Values.global.imageTag | default .Values.discordConnector.image.tag }}"
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8091
+          env:
+            - name: DISCORD_BOT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.discordConnector.existingSecret | default (include "tina.adminTokenSecretName" .) | quote }}
+                  key: {{ .Values.discordConnector.botTokenKey | quote }}
+            - name: DISCORD_GUILD_ALLOWLIST
+              value: {{ .Values.discordConnector.guildAllowlist | default "" | quote }}
+            - name: DISCORD_MAX_SESSIONS
+              value: {{ .Values.discordConnector.maxSessions | default 4 | quote }}
+            - name: DISCORD_MAX_CHANNELS
+              value: {{ .Values.discordConnector.maxChannels | default 16 | quote }}
+            {{- with .Values.discordConnector.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 5
+            failureThreshold: 40
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            timeoutSeconds: 5
+          resources:
+            {{- toYaml .Values.discordConnector.resources | nindent 12 }}
+      {{- with .Values.discordConnector.nodeSelector | default .Values.global.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.discordConnector.tolerations | default .Values.global.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

@@ -1,0 +1,376 @@
+@import "tailwindcss";
+@import "../../../../branding/tokens.css";
+
+/* Terminal aliases. Dark mode uses the Terminal-only Graphite Emerald palette below; light mode
+ * continues to inherit the shared TINA light tokens. */
+:root {
+  color-scheme: dark;
+  /* Neutral raised level for light mode; dark mode replaces it with a graphite step. */
+  --raised: var(--subtle);
+  --quiet: var(--muted);
+  --bg: var(--canvas);
+  --sidebar: var(--subtle);
+  --panel: var(--surface);
+  --panel2: var(--raised);
+  --rail: var(--surface);
+  --line2: var(--control-line);
+  --t1: var(--ink);
+  --t2: var(--muted);
+  --t3: var(--quiet);
+  --accent: var(--brand);
+  --accentbg: color-mix(in srgb, var(--brand) 14%, transparent);
+  --scrollbar-thumb: color-mix(in srgb, var(--t3) 54%, var(--sidebar));
+  --scrollbar-thumb-hover: color-mix(in srgb, var(--accent) 65%, var(--sidebar));
+  /* Semantic set (palette A, design-spec meeting-lifecycle-v2): --danger = destructive
+   * actions + errors ONLY (never "live" — live is green); --warn = attention-not-error
+   * (needs_help, waiting, behind). --on-* = text on solid semantic fills. The old --live
+   * token is deliberately GONE so stale usage fails visibly. */
+  --danger: var(--rejected);
+  --dangerbg: var(--rejected-bg);
+  --warn: var(--draft);
+  --warnbg: var(--draft-bg);
+  --on-accent: var(--on-brand);
+  --on-green: var(--on-brand);
+  --on-warn: var(--ink);
+  --green: var(--accepted);
+  --greenbg: var(--accepted-bg);
+  --blue: var(--pending);
+  --bluebg: var(--pending-bg);
+  --violet: #b08cf0;
+  --violetbg: rgba(176, 140, 240, 0.14);
+  --r: var(--radius-control);
+  --r2: var(--radius-panel);
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --sans: var(--font-body);
+  --display: var(--font-display, Georgia, serif);
+}
+
+/* Graphite Emerald · approved Terminal direction B.
+ * Graphite separates the work canvas, navigation rails, and raised controls. Emerald stays
+ * focused on active navigation, primary actions, and keyboard focus. These local overrides keep
+ * Dashboard and Extension on the shared TINA brand palette. */
+:root[data-theme="dark"] {
+  --canvas: #0D1310;
+  --surface: #232D26;
+  --subtle: #171F1A;
+  --raised: #34433A;
+  --rail: var(--subtle);
+  --ink: #F6FAF7;
+  --muted: #C9D5CB;
+  --quiet: #9AA99E;
+  --brand: #43D279;
+  --on-brand: #062013;
+  --line: #586B5E;
+  --control-line: #8AA094;
+  --focus: #43D279;
+}
+
+/*
+ * Day mode — the light counterpart of the dark tokens above. Same variable names so every surface
+ * (which paints from var(--*)) switches with no per-component changes. Toggled via the footer control,
+ * which sets data-theme="light" on <html>.
+ */
+:root[data-theme="light"] {
+  color-scheme: light;
+  /* Day-mode violet: #b08cf0 is a dark-mode lavender and only reaches 2.50:1 on the light canvas.
+   * This step keeps the hue and clears WCAG AA (6.68:1 on #F7F8F3, 7.13:1 on #FFFFFF). */
+  --violet: #6938C2;
+  --violetbg: rgba(105, 56, 194, 0.12);
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  background: var(--bg);
+  color: var(--t1);
+  font-family: var(--sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* One quiet scrollbar treatment for native overflow areas across the Terminal. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+*:hover {
+  scrollbar-color: var(--scrollbar-thumb-hover) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 2px;
+  height: 2px;
+}
+
+*::-webkit-scrollbar-track,
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background-color: var(--scrollbar-thumb);
+  background-clip: border-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background-color: var(--scrollbar-thumb-hover);
+}
+
+/*
+ * dockview — map the docking engine's theme variables onto our palette so panels/tabs/sashes match
+ * the prototype. (theme={themeAbyss} applies .dockview-theme-abyss; we override its --dv-* vars.)
+ */
+.dockview-theme-abyss.dockview-theme-abyss {
+  --dv-background-color: var(--bg);
+  --dv-group-view-background-color: var(--bg);
+  --dv-tabs-and-actions-container-background-color: var(--sidebar);
+  /* the tab strip sits on the lighter sidebar tone; the ACTIVE tab drops to the dark
+   * canvas it belongs to — strongest possible active cue */
+  --dv-activegroup-visiblepanel-tab-background-color: var(--bg);
+  --dv-activegroup-visiblepanel-tab-color: var(--t1);
+  --dv-activegroup-hiddenpanel-tab-background-color: var(--sidebar);
+  --dv-activegroup-hiddenpanel-tab-color: var(--t3);
+  --dv-inactivegroup-visiblepanel-tab-background-color: var(--sidebar);
+  --dv-inactivegroup-visiblepanel-tab-color: var(--t3);
+  --dv-inactivegroup-hiddenpanel-tab-background-color: var(--sidebar);
+  --dv-inactivegroup-hiddenpanel-tab-color: var(--t3);
+  --dv-separator-border: var(--line);
+  --dv-tab-divider-color: var(--line);
+  --dv-active-sash-color: var(--accent);
+  --dv-icon-hover-background-color: var(--panel2);
+  --dv-context-menu-background-color: var(--panel);
+  --dv-floating-titlebar-background-color: var(--panel);
+  --dv-drag-over-background-color: var(--accentbg);
+  --dv-tabs-container-scrollbar-color: var(--scrollbar-thumb);
+}
+
+/* Studio-grade tab refinement: active tab receives a clean hairline accent on top */
+.dockview-theme-abyss .dv-tab.dv-active-tab {
+  border-top: 2px solid var(--accent);
+  font-weight: 500;
+}
+.dockview-theme-abyss .dv-tab {
+  font-size: 12px;
+  transition: background-color .12s ease, color .12s ease;
+}
+.dockview-theme-abyss .dv-tab:hover {
+  color: var(--t1);
+}
+
+/* cmdk command palette (headless — we style its data-attributes) */
+[cmdk-input] {
+  width: 100%;
+  box-sizing: border-box;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--t1);
+  font-size: 15px;
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--line);
+}
+[cmdk-input]::placeholder { color: var(--t3); }
+[cmdk-list] { max-height: 360px; overflow: auto; padding: 6px; }
+[cmdk-group-heading] {
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--t3);
+  padding: 10px 10px 4px;
+}
+[cmdk-item] {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  color: var(--t1);
+  font-size: 13px;
+  cursor: pointer;
+  user-select: none;
+  transition: background .1s ease, color .1s ease;
+}
+[cmdk-item][data-selected="true"] {
+  background: var(--panel2);
+  color: var(--accent);
+}
+[cmdk-empty] { padding: 18px; color: var(--t3); font-size: 13px; text-align: center; }
+.pal-skill { margin-left: auto; font-family: var(--mono); font-size: 11.5px; color: var(--accent); }
+
+/* allotment — match the split sash to our palette */
+:root {
+  --separator-border: var(--line);
+  --focus-border: var(--accent);
+}
+
+/* agent-window — operation step spinner (a tool call "in works") */
+@keyframes vx-op-spin { to { transform: rotate(360deg); } }
+.vx-op-spin { animation: vx-op-spin 0.7s linear infinite; }
+
+/* entity list — a quiet row: hover-only secondary action, type-color rail revealed on hover */
+.vx-row { position: relative; }
+.vx-row .vx-row-act { opacity: 0; transform: translateX(2px); transition: opacity .12s ease, transform .12s ease; }
+.vx-row:hover .vx-row-act,
+.vx-row:focus-within .vx-row-act { opacity: 1; transform: none; }
+.vx-row .vx-row-rail { opacity: 0; transition: opacity .12s ease; }
+.vx-row:hover .vx-row-rail { opacity: 1; }
+
+/* a clean, single-line scroller for the suggested-actions row (no visible scrollbar) */
+.vx-hscroll { overflow-x: auto; overflow-y: hidden; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.vx-hscroll::-webkit-scrollbar { display: none; }
+
+/* a soft entrance for the conversation as it first appears */
+@keyframes vx-fade-up { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.vx-fade-up { animation: vx-fade-up .22s ease both; }
+
+/* Workbench header panel toggle buttons (Direction 2: Semantic Distinction) */
+.panel-toggle-btn {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--t3);
+  cursor: pointer;
+  padding: 0;
+  transition: background .12s ease, color .12s ease, border-color .12s ease, transform .1s ease;
+}
+.panel-toggle-btn:hover {
+  background: var(--panel2);
+  color: var(--t1);
+  border-color: var(--line);
+}
+.panel-toggle-btn.is-active {
+  background: var(--panel);
+  color: var(--t1);
+  border-color: var(--line2);
+}
+.panel-toggle-btn.is-active:hover {
+  background: var(--panel2);
+  color: var(--t1);
+  border-color: var(--line2);
+}
+.panel-toggle-btn:active {
+  transform: scale(0.96);
+}
+.panel-toggle-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.shell-topbar-toggle {
+  color: var(--t2);
+}
+.panel-toggle-btn.btn-danger:hover {
+  color: var(--danger, #ff6b6b);
+  border-color: rgba(255, 107, 107, 0.25);
+}
+
+/* Direction C capture controls — open, quiet field; emerald is reserved for the primary action. */
+.meeting-capture-input {
+  box-sizing: border-box;
+  width: 0;
+  min-width: 0;
+  flex: 1;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--t1);
+  font-size: 12px;
+  outline: none;
+  transition: border-color .12s ease, box-shadow .12s ease;
+}
+.meeting-capture-input::placeholder {
+  color: var(--t3);
+}
+.meeting-capture-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 13%, transparent);
+}
+.meeting-capture-add {
+  height: 34px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 6px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 11.5px;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.meeting-capture-add:not(:disabled):hover {
+  filter: brightness(1.07);
+}
+.meeting-capture-add:disabled {
+  cursor: default;
+  opacity: .82;
+}
+
+@media (max-width: 559px) {
+  .panel-toggle-btn {
+    width: 32px;
+    height: 32px;
+  }
+}
+
+/* ── A11y: one focus contract for the whole terminal ─────────────────────────────────────────────
+ * Every keyboard-reachable control paints the same accent ring. Inline `outline: none` is banned;
+ * surfaces that own the ring (composer, command palette) opt out explicitly below. */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+summary:focus-visible,
+[role="button"]:focus-visible,
+[role="menuitem"]:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Chat composer: the rounded container is the focus indicator, not the bare textarea. */
+.composer-box {
+  transition: box-shadow .12s ease;
+}
+.composer-box:focus-within {
+  box-shadow: 0 0 0 1px var(--accent), 0 0 0 3px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+.composer-box textarea:focus-visible {
+  outline: none;
+}
+
+/* Command palette: the palette itself is the focus context and the input is autofocused. */
+[cmdk-input]:focus-visible {
+  outline: none;
+}
+
+/* dockview tab affordances (pin / close) are real buttons — give them a real ring. */
+.tab-action-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+/* SetupGate provider cards: the hidden radio is the keyboard target, the card shows the ring. */
+.choice-card:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+/* The card ring is the focus indicator for every control inside it — never stack a second ring. */
+.choice-card input:focus-visible,
+.choice-card textarea:focus-visible,
+.choice-card select:focus-visible {
+  outline: none;
+}

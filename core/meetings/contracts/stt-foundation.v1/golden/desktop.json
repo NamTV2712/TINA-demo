@@ -1,0 +1,62 @@
+{
+  "version": "stt-foundation.v1",
+  "meeting_uid": "3f687d181bd19e7f03912b0d1288ce21cd2c183589ea50d371fef03339f214d7",
+  "authority": {
+    "system": "desktop",
+    "instance_id": "149b9fd5-91f7-472d-88ae-92c4e8402528"
+  },
+  "locator": {
+    "platform": "google_meet",
+    "native_meeting_id": "foundation",
+    "local_meeting_id": "1"
+  },
+  "sources": [
+    {
+      "session_id": "accf4738-69e8-4b2b-a750-404c919dad00",
+      "channel": "0",
+      "sample_rate": 16000,
+      "start_sample": 0,
+      "start_us": 1800000000000000,
+      "clock_quality": "samples",
+      "source_id": "dee5c321832cddc01b53625cd01c0945303e5bc414fa1d6862f9a8c1b44fa98d"
+    }
+  ],
+  "segments": [
+    {
+      "segment_id": "ch-0:one",
+      "segment_uid": "803122da7cdad8cf7c0b2da9767cdf05dba3a7574fe74f3bd528474c5dee8dc1",
+      "start_us": 1800000000000000,
+      "end_us": 1800000001000000,
+      "raw_text": "Tôi sẽ review API.",
+      "text": "Câu được sửa.",
+      "revision": 1,
+      "speaker": "Hà",
+      "history": [
+        {
+          "revision": 1,
+          "text": "Câu được sửa.",
+          "kind": "manual",
+          "at": "2026-10-24T09:13:27.302Z"
+        }
+      ],
+      "audio": [
+        {
+          "start_sample": 0,
+          "end_sample": 8000,
+          "start_us": 1800000000000000,
+          "end_us": 1800000000500000,
+          "source_id": "dee5c321832cddc01b53625cd01c0945303e5bc414fa1d6862f9a8c1b44fa98d"
+        },
+        {
+          "start_sample": 12000,
+          "end_sample": 16000,
+          "start_us": 1800000000750000,
+          "end_us": 1800000001000000,
+          "source_id": "dee5c321832cddc01b53625cd01c0945303e5bc414fa1d6862f9a8c1b44fa98d"
+        }
+      ]
+    }
+  ],
+  "sequence": 2,
+  "fingerprint": "5ea98718a02e5d5e62e7322ccf2d3f537275663a680a1082edb2d31cc2513a20"
+}

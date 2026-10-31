@@ -1,0 +1,375 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tina:schemas:transcript-alignment.v1",
+  "title": "transcript-alignment.v1",
+  "description": "Owner-only optional word alignment over authority-selected verbatim text and saved audio. Bot aligns raw ASR; Desktop aligns accepted text with explicit text_kind. OOV words have no claimed time. Neither path rewrites text or audio.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "available",
+    "job"
+  ],
+  "properties": {
+    "version": {
+      "const": "transcript-alignment.v1"
+    },
+    "available": {
+      "type": "boolean"
+    },
+    "job": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "version",
+        "id",
+        "status",
+        "backend",
+        "model",
+        "created_at",
+        "items"
+      ],
+      "properties": {
+        "version": {
+          "const": "transcript-alignment.v1"
+        },
+        "id": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "status": {
+          "enum": [
+            "running",
+            "paused",
+            "cancelling",
+            "completed",
+            "cancelled",
+            "interrupted",
+            "failed"
+          ]
+        },
+        "backend": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "finished_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "published_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "error": {
+          "type": "string",
+          "maxLength": 256
+        },
+        "items": {
+          "type": "array",
+          "maxItems": 2000,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "segment_id",
+              "state",
+              "expected_revision",
+              "text_sha256"
+            ],
+            "properties": {
+              "segment_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 512
+              },
+              "state": {
+                "enum": [
+                  "pending",
+                  "aligned",
+                  "skipped",
+                  "stale"
+                ]
+              },
+              "expected_revision": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "text_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "audio_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "recording_id": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "recording_start_ms": {
+                "type": "number",
+                "minimum": 0
+              },
+              "recording_end_ms": {
+                "type": "number",
+                "exclusiveMinimum": 0
+              },
+              "duration_ms": {
+                "type": "number",
+                "exclusiveMinimum": 0,
+                "maximum": 30000
+              },
+              "model": {
+                "type": "string",
+                "maxLength": 256
+              },
+              "speaker_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "reason": {
+                "type": "string",
+                "maxLength": 256
+              },
+              "words": {
+                "type": "array",
+                "maxItems": 2000,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "index",
+                    "text",
+                    "start_ms",
+                    "end_ms",
+                    "aligned"
+                  ],
+                  "properties": {
+                    "index": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "text": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 1024
+                    },
+                    "start_ms": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "minimum": 0
+                    },
+                    "end_ms": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "minimum": 0
+                    },
+                    "aligned": {
+                      "type": "boolean"
+                    },
+                    "speaker_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "speaker_name": {
+                      "type": "string",
+                      "maxLength": 120
+                    },
+                    "speaker_source": {
+                      "enum": [
+                        "unknown",
+                        "confirmed",
+                        "diarization"
+                      ]
+                    }
+                  }
+                }
+              },
+              "phrases": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "speaker_id",
+                    "speaker_name",
+                    "text",
+                    "start_ms",
+                    "end_ms",
+                    "word_indices"
+                  ],
+                  "properties": {
+                    "speaker_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "speaker_name": {
+                      "type": "string",
+                      "maxLength": 120
+                    },
+                    "text": {
+                      "type": "string",
+                      "maxLength": 10000
+                    },
+                    "start_ms": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "minimum": 0
+                    },
+                    "end_ms": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "minimum": 0
+                    },
+                    "word_indices": {
+                      "type": "array",
+                      "items": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    }
+                  }
+                }
+              },
+              "capture": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "session_id",
+                  "channel",
+                  "start_sample",
+                  "end_sample",
+                  "start_ms",
+                  "end_ms"
+                ],
+                "properties": {
+                  "session_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "channel": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "start_sample": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "end_sample": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "start_ms": {
+                    "type": "number"
+                  },
+                  "end_ms": {
+                    "type": "number"
+                  }
+                }
+              }
+            },
+            "anyOf": [
+              {
+                "required": [
+                  "recording_id",
+                  "recording_start_ms",
+                  "recording_end_ms"
+                ],
+                "properties": {
+                  "recording_id": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "recording_start_ms": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "recording_end_ms": {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  }
+                }
+              },
+              {
+                "required": [
+                  "capture"
+                ],
+                "properties": {
+                  "capture": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "session_id",
+                      "channel",
+                      "start_sample",
+                      "end_sample",
+                      "start_ms",
+                      "end_ms"
+                    ],
+                    "properties": {
+                      "session_id": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "channel": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "start_sample": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "end_sample": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "start_ms": {
+                        "type": "number"
+                      },
+                      "end_ms": {
+                        "type": "number"
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "text_kind": {
+          "enum": [
+            "raw",
+            "accepted"
+          ]
+        }
+      }
+    }
+  }
+}

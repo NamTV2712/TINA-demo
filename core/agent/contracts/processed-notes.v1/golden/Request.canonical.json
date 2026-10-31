@@ -1,0 +1,25 @@
+{
+  "meeting_id": 42,
+  "user_id": 7,
+  "source": {
+    "window_id": "window-demo",
+    "fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "generation": "generation-demo",
+    "canonical_revision": 2,
+    "evidence": [
+      {
+        "segment_id": "s1",
+        "revision": 1,
+        "start_ms": 1000,
+        "end_ms": 2000,
+        "speaker_id": "alice",
+        "speaker_name": "Alice",
+        "quote": "Tôi sẽ gửi báo cáo."
+      }
+    ]
+  },
+  "lease_until": 1793200000,
+  "proof": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "platform": "google_meet",
+  "native_meeting_id": "demo"
+}

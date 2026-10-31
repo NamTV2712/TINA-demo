@@ -1,0 +1,23 @@
+# Root .dockerignore — used by the root-context builds (meeting-api, discord-connector; compose
+# `context: ../..`). The other services build from their own narrow contexts. Keep the context
+# light: exclude vendored/build trees + venvs; each Dockerfile COPYs only the slice it needs.
+node_modules/
+**/node_modules/
+**/.venv/
+.venv/
+**/dist/
+**/target/
+**/__pycache__/
+**/.pytest_cache/
+.turbo/
+**/.turbo/
+*.egg-info/
+*.log
+.DS_Store
+.git/
+.env
+.env.*
+.recordings/
+clients/
+sdks/
+docs/

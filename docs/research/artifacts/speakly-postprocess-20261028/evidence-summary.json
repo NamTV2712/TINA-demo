@@ -1,0 +1,306 @@
+{
+  "target": "/Applications/Genspark Speakly.app/Contents/Resources/app.asar",
+  "version": "1.6.5200",
+  "asar_sha256": "fa341adaa9dfc5102d3bc3a950c06034a7c353548f6d833434d403011009e885",
+  "full_bundle_path": "/tmp/tina-speakly-postprocess-20261028/rea-evidence-bundle-final.json",
+  "full_bundle_sha256": "57106e54589e0a1aeee5b5289c567166f492571247ba05d361a5eb72939da73d",
+  "full_bundle_bytes": 155488288,
+  "scope": "Selected hash-verified first-party JavaScript extracted from installed ASAR; native integrity mismatch excludes native claims. Supporting shell reads are separate from REA graph observations.",
+  "sources": [
+    {
+      "path": "package.json",
+      "sha256": "f8798d73ce2a17950d79092f153a8b247eb94116efc5c0bf907df37eee2d1206",
+      "declared_sha256": "f8798d73ce2a17950d79092f153a8b247eb94116efc5c0bf907df37eee2d1206",
+      "size": 1922,
+      "asar_offset": 9276256
+    },
+    {
+      "path": "dist/src/worker/localSttWorkerCore.js",
+      "sha256": "5237459f10900cdec8147a4260c5094ad832c0975ac7e04bc1ffe8c2c5a2f4be",
+      "declared_sha256": "5237459f10900cdec8147a4260c5094ad832c0975ac7e04bc1ffe8c2c5a2f4be",
+      "size": 6383,
+      "asar_offset": 9299554
+    },
+    {
+      "path": "dist/src/utils/contextFormatter.js",
+      "sha256": "f8245315fccb157d5c5f0fb313c260a1b0755a3712627026341f3475676a8f9f",
+      "declared_sha256": "f8245315fccb157d5c5f0fb313c260a1b0755a3712627026341f3475676a8f9f",
+      "size": 3784,
+      "asar_offset": 9575012
+    },
+    {
+      "path": "dist/src/utils/transcriptText.js",
+      "sha256": "c03a83b9efeb5512fb5d7333ce7f523c6d1ee081b36892f5bea5f0ce140e1c43",
+      "declared_sha256": "c03a83b9efeb5512fb5d7333ce7f523c6d1ee081b36892f5bea5f0ce140e1c43",
+      "size": 6034,
+      "asar_offset": 9600126
+    },
+    {
+      "path": "dist/src/services/ContextService.js",
+      "sha256": "379f68cb232af46b0ec8b09ee17c056b59ba00a9acea292055d9b5844b2e8c7a",
+      "declared_sha256": "379f68cb232af46b0ec8b09ee17c056b59ba00a9acea292055d9b5844b2e8c7a",
+      "size": 11664,
+      "asar_offset": 9840578
+    },
+    {
+      "path": "dist/src/services/MeetingNoteExporter.js",
+      "sha256": "b718dad8f2a3820e749a423abf1121d1f4e5f009b6e0fc893ed76321e21fa60b",
+      "declared_sha256": "b718dad8f2a3820e749a423abf1121d1f4e5f009b6e0fc893ed76321e21fa60b",
+      "size": 22999,
+      "asar_offset": 10178890
+    },
+    {
+      "path": "dist/src/services/NativeService.js",
+      "sha256": "01f7cf644392a00ff1199a5bf1cf4a61e67db4a881846a79ca82ed3d07540db1",
+      "declared_sha256": "01f7cf644392a00ff1199a5bf1cf4a61e67db4a881846a79ca82ed3d07540db1",
+      "size": 76095,
+      "asar_offset": 10222924
+    },
+    {
+      "path": "dist/src/services/VoiceModeService.js",
+      "sha256": "27df7ef8b1a258db7ddebbafe59308ea5c2bdffc1c52460689a2f7df030051ad",
+      "declared_sha256": "27df7ef8b1a258db7ddebbafe59308ea5c2bdffc1c52460689a2f7df030051ad",
+      "size": 262145,
+      "asar_offset": 10605768
+    },
+    {
+      "path": "dist/src/services/VoiceRecognitionService.js",
+      "sha256": "f92b182867e9c56fa1f9067cdcc2de12910cc2b714e196c012b13426248cae0c",
+      "declared_sha256": "f92b182867e9c56fa1f9067cdcc2de12910cc2b714e196c012b13426248cae0c",
+      "size": 103581,
+      "asar_offset": 10867913
+    },
+    {
+      "path": "dist/src/services/flow/transcript/TranscriptionSessionFlow.js",
+      "sha256": "aeffc63dee847147467a5dc641db7bdec0879fed72d3f2ae09f696cde7249143",
+      "declared_sha256": "aeffc63dee847147467a5dc641db7bdec0879fed72d3f2ae09f696cde7249143",
+      "size": 40781,
+      "asar_offset": 11153404
+    },
+    {
+      "path": "dist/src/services/Meeting/MeetingChatService.js",
+      "sha256": "ab4cd0b9528b0ad65797606d78db8ddefaefdc97694620ee92b2612c15b8ec9f",
+      "declared_sha256": "ab4cd0b9528b0ad65797606d78db8ddefaefdc97694620ee92b2612c15b8ec9f",
+      "size": 19724,
+      "asar_offset": 11400056
+    },
+    {
+      "path": "dist/src/services/Meeting/NotesFreshnessService.js",
+      "sha256": "f62d8fbc897d4067c181d7c0f73d457c62504973543a85a090c4d2f1339146ca",
+      "declared_sha256": "f62d8fbc897d4067c181d7c0f73d457c62504973543a85a090c4d2f1339146ca",
+      "size": 5919,
+      "asar_offset": 11481154
+    },
+    {
+      "path": "dist/src/services/Meeting/NotesService.js",
+      "sha256": "aae7a1e00a4c73d9a4db1866d447a244dfc6f4acd048bb695774381ddb947dd9",
+      "declared_sha256": "aae7a1e00a4c73d9a4db1866d447a244dfc6f4acd048bb695774381ddb947dd9",
+      "size": 70572,
+      "asar_offset": 11487073
+    },
+    {
+      "path": "dist/src/services/Meeting/RecordingStorage.js",
+      "sha256": "115b3ab110bbd508579aeae081f21e24aab836910c130882872f07fe2f111fc3",
+      "declared_sha256": "115b3ab110bbd508579aeae081f21e24aab836910c130882872f07fe2f111fc3",
+      "size": 79490,
+      "asar_offset": 11578002
+    },
+    {
+      "path": "dist/src/services/Meeting/RecordingUploader.js",
+      "sha256": "ed18d0d4aa20daa21ad4e8db3037e2ffd40cd05ce48320fa2d4ef85c2de4fb9c",
+      "declared_sha256": "ed18d0d4aa20daa21ad4e8db3037e2ffd40cd05ce48320fa2d4ef85c2de4fb9c",
+      "size": 26704,
+      "asar_offset": 11657492
+    },
+    {
+      "path": "dist/src/services/Meeting/TranscriptionManager.js",
+      "sha256": "2c2a90844c9bf74226a5797337ce2e1ebd70029befd975164ba6a13961027fd0",
+      "declared_sha256": "2c2a90844c9bf74226a5797337ce2e1ebd70029befd975164ba6a13961027fd0",
+      "size": 19951,
+      "asar_offset": 11684196
+    },
+    {
+      "path": "dist/src/services/Meeting/buildGroomerAskBody.js",
+      "sha256": "1565eaaf434e6543c679b1c0a9b6419c1fc16834552c2245dd23023770524e53",
+      "declared_sha256": "1565eaaf434e6543c679b1c0a9b6419c1fc16834552c2245dd23023770524e53",
+      "size": 1794,
+      "asar_offset": 11737333
+    },
+    {
+      "path": "dist/src/renderer/components/meetingnotes/NoteDetail.js",
+      "sha256": "76bd805ecad2316c64a51710839a832a686e18c5c6e7c778764522ac659cd181",
+      "declared_sha256": "76bd805ecad2316c64a51710839a832a686e18c5c6e7c778764522ac659cd181",
+      "size": 132796,
+      "asar_offset": 14194905
+    },
+    {
+      "path": "dist/src/renderer/components/meetingnotes/transcriptMessages.js",
+      "sha256": "36ea5cd89981eef586bed2de2b84a5b726a85d6aab76d1b48141bd16ab77cd1c",
+      "declared_sha256": "36ea5cd89981eef586bed2de2b84a5b726a85d6aab76d1b48141bd16ab77cd1c",
+      "size": 5636,
+      "asar_offset": 14568500
+    },
+    {
+      "path": "dist/src/renderer/components/meetingnotes/useRecordingSession.js",
+      "sha256": "c21fbd2afe0b749d7b8666b4c9ccfd4e30650698c415d05885a36eb16d1cc6d5",
+      "declared_sha256": "c21fbd2afe0b749d7b8666b4c9ccfd4e30650698c415d05885a36eb16d1cc6d5",
+      "size": 116814,
+      "asar_offset": 14587322
+    },
+    {
+      "path": "dist/src/locales/en/common.json",
+      "sha256": "2876bc268aeacbdd825257e9778cee7ec50e106653ec9b0200fb94a761fdf34c",
+      "declared_sha256": "2876bc268aeacbdd825257e9778cee7ec50e106653ec9b0200fb94a761fdf34c",
+      "size": 152274,
+      "asar_offset": 19553004
+    }
+  ],
+  "records": [
+    {
+      "evidence_id": "ev_575b0fe0137ea21091218b785521547d09c8c871f11cd769cc5bf77ed7494819",
+      "operation": "capture_process_scenario",
+      "authority": "controlled-replay",
+      "confidence": "observed",
+      "limitations": [
+        "Artifact identity is unavailable for this observation.",
+        "The executable digest is a prelaunch file sample; matching path metadata immediately after spawn does not prove an atomic operating-system image binding.",
+        "Process trees are sampled and may omit short-lived descendants.",
+        "Filesystem observations are before/after snapshots, not syscall traces.",
+        "Inherited host environment variables are not recorded and may affect results.",
+        "No filesystem observation paths were selected; filesystem effects remain unknown."
+      ],
+      "exit": {
+        "code": 0,
+        "reason": "exited",
+        "signal": 0
+      },
+      "scenario": {
+        "arguments": [
+          "/tmp/tina-speakly-postprocess-20261028/probe.cjs"
+        ],
+        "environment": {},
+        "events": [],
+        "executable": "/Users/jky/.nvm/versions/node/v24.21.0/bin/node",
+        "executable_sha256": "e4b5a3af0e05c75de2eae013904145f40fe7fc2a6e6f17510128bf45cca4e79b",
+        "filesystem_observation_paths": [],
+        "idle_timeout_ms": 3000,
+        "limits": {
+          "file_bytes": 10000000,
+          "files": 10000,
+          "filesystem_depth": 16,
+          "output_bytes": 10000,
+          "processes": 4
+        },
+        "normalization": {
+          "paths": false,
+          "patterns": [],
+          "pids": true,
+          "ports": false,
+          "time_bucket_ms": 10
+        },
+        "settle_ms": 100,
+        "terminal": {
+          "columns": 80,
+          "rows": 24,
+          "scrollback": 1000
+        },
+        "timeout_ms": 10000,
+        "working_directory": "/private/tmp/tina-speakly-postprocess-20261028"
+      },
+      "frames": [
+        {
+          "at_ms": 30,
+          "data": "{\"scope\":\"Controlled replay of selected installed JavaScript modules; fake clock/dependencies; no app/native/cloud execution\",\"checks\":{\"final_emitted_before_local_sidecar_write\":true,\"terminal_translation_update_flushes_early\":true,\"update_ignores_ASR_text\":true,\"late_translation_does_not_rewrite_sidecar\":true,\"FIFO_head_blocks_younger_settled_row\":true,\"duplicate_final_after_flush_can_append_again\":true,\"speaker_alias_precedence\":true,\"TXT_half_up_and_SRT_milliseconds\":true,\"hallucination_label_skipped_in_export\":true,\"Qwen_strips_asr_marker_only\":true,\"ITN_flag_is_SenseVoice_specific\":true}}\r\n",
+          "sequence": 0
+        }
+      ]
+    },
+    {
+      "evidence_id": "ev_b5ed93385fe361bb285614768780e53d6f62c67bd2e1aab697da63b131cf95fe",
+      "operation": "analyze_javascript_application",
+      "authority": "shipped-artifact",
+      "confidence": "derived",
+      "subject": {
+        "architecture": null,
+        "digest": {
+          "sha256": "cd3b33a90558d4d68b567cf0ccebb4e116c4c4cde7cc2087800db8a7b1704306"
+        },
+        "format": "directory",
+        "local_path": "/private/tmp/tina-speakly-postprocess-20261028/rea-scope",
+        "name": "rea-scope"
+      },
+      "limitations": [
+        "CommonJS and ESM binding relationships were recovered from inert syntax and resolved only within the inventoried artifact container.",
+        "Electron relationships are derived from inert syntax; runtime registration, reachability, defaults, and enforcement remain unproven.",
+        "JavaScript and HTML were parsed as inert text; bundle bootstrap code was never executed.",
+        "Static imports, entrypoints, workers, endpoints, and storage relationships do not prove runtime execution.",
+        "Static paths and relationships may remain unresolved when expressions are dynamic or obfuscated.",
+        "Webpack/Rspack factories were recovered from AST literals; REA did not invoke push handlers or bundle bootstrap code."
+      ],
+      "statistics": {
+        "findings": 393,
+        "invalid_utf8_files": 0,
+        "modules": 0,
+        "nested_asar_containers": 0,
+        "parse_failures": 0,
+        "parsed_javascript_files": 15,
+        "relevant_files": 16,
+        "text_bytes_read": 821466,
+        "truncated_scopes": 0,
+        "visited_ast_nodes": 82447
+      },
+      "static_coverage": {
+        "limits": [],
+        "omitted_count": 0,
+        "status": "complete",
+        "truncated": false
+      },
+      "semantic_status": "unknown",
+      "semantic_unknown_count": 12225
+    },
+    {
+      "evidence_id": "ev_d74a84995f0c4b8dc57045c8c7a308ee410c63778ba155a4bb2733fc2d57bd9b",
+      "operation": "analyze_javascript_application",
+      "authority": "shipped-artifact",
+      "confidence": "derived",
+      "subject": {
+        "architecture": null,
+        "digest": {
+          "sha256": "fe249c7dc1ebc95c4f0456e5223ebf428647ccbc065c8820278b4b9201c9581a"
+        },
+        "format": "directory",
+        "local_path": "/private/tmp/tina-speakly-postprocess-20261028/rea-summary-services",
+        "name": "rea-summary-services"
+      },
+      "limitations": [
+        "CommonJS and ESM binding relationships were recovered from inert syntax and resolved only within the inventoried artifact container.",
+        "Electron relationships are derived from inert syntax; runtime registration, reachability, defaults, and enforcement remain unproven.",
+        "JavaScript and HTML were parsed as inert text; bundle bootstrap code was never executed.",
+        "Static imports, entrypoints, workers, endpoints, and storage relationships do not prove runtime execution.",
+        "Static paths and relationships may remain unresolved when expressions are dynamic or obfuscated.",
+        "Webpack/Rspack factories were recovered from AST literals; REA did not invoke push handlers or bundle bootstrap code."
+      ],
+      "statistics": {
+        "findings": 125,
+        "invalid_utf8_files": 0,
+        "modules": 0,
+        "nested_asar_containers": 0,
+        "parse_failures": 0,
+        "parsed_javascript_files": 3,
+        "relevant_files": 4,
+        "text_bytes_read": 119149,
+        "truncated_scopes": 0,
+        "visited_ast_nodes": 13171
+      },
+      "static_coverage": {
+        "limits": [],
+        "omitted_count": 0,
+        "status": "complete",
+        "truncated": false
+      },
+      "semantic_status": "unknown",
+      "semantic_unknown_count": 1575
+    }
+  ],
+  "probe_script_sha256": "6ea5abb800885325886364e9943d83458ccd4badda73ad60723e72f708ce2f87"
+}

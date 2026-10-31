@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tina:schemas/speaker-revision.v1",
+  "title": "speaker-revision.v1",
+  "description": "Metadata-only identity revision. Refetch the meeting snapshot; speaker revisions are independent of text revisions. No names, participant IDs, actor IDs or history.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "type",
+    "event_id",
+    "meeting_id",
+    "platform",
+    "native_meeting_id",
+    "speaker_id",
+    "revision",
+    "kind",
+    "at"
+  ],
+  "properties": {
+    "version": {
+      "const": "speaker-revision.v1"
+    },
+    "type": {
+      "const": "speaker.revised"
+    },
+    "event_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "meeting_id": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "platform": {
+      "type": "string"
+    },
+    "native_meeting_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "speaker_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "revision": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "kind": {
+      "const": "speaker"
+    },
+    "at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}

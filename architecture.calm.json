@@ -1,0 +1,4044 @@
+{
+ "$schema": "https://calm.finos.org/release/1.0/meta/calm.json",
+ "metadata": [
+  {
+   "tina": {
+    "purpose": "SSOT architecture model: module/service/contract inventory AND the runtime data plane (carriers, ownership, flows, egress boundary). gate:dataflow enforces model<->disk completeness, single-writer + render-only ownership, and a reality diff against code; gate:calm validates it against the FINOS meeting-intelligence pattern.",
+    "principle": "P23 — one writer per data carrier; readers never re-derive a producer's data; the model covers every module/service/contract (no drift)."
+   }
+  }
+ ],
+ "nodes": [
+  {
+   "unique-id": "meetings",
+   "node-type": "system",
+   "name": "meetings",
+   "description": "capture → transcribe → record; owns the raw transcript",
+   "metadata": [
+    {
+     "path": "core/meetings"
+    }
+   ]
+  },
+  {
+   "unique-id": "agent",
+   "node-type": "system",
+   "name": "agent",
+   "description": "the execution domain: a trigger becomes one governed agent turn over a workspace.v1 git repo; owns no transcript",
+   "metadata": [
+    {
+     "path": "core/agent"
+    }
+   ]
+  },
+  {
+   "unique-id": "gateway-system",
+   "node-type": "system",
+   "name": "gateway",
+   "description": "the one public edge (api.v1, ws.v1)",
+   "metadata": [
+    {
+     "path": "core/gateway"
+    }
+   ]
+  },
+  {
+   "unique-id": "identity",
+   "node-type": "system",
+   "name": "identity",
+   "description": "access + audit; owns the durable DB",
+   "metadata": [
+    {
+     "path": "core/identity"
+    }
+   ]
+  },
+  {
+   "unique-id": "runtime-system",
+   "node-type": "system",
+   "name": "runtime",
+   "description": "workload spawn (bot/agent containers)",
+   "metadata": [
+    {
+     "path": "core/runtime"
+    }
+   ]
+  },
+  {
+   "unique-id": "deploy",
+   "node-type": "system",
+   "name": "deploy",
+   "description": "Deployment and execution-target registry. Local tina CLI/TUI shares Compose configuration, build/activation and readiness logic; operational mutations target the selected Docker context/project, preserve data volumes and support dry-run. Read-only full diagnostics resolve effective ASR through Identity and probe configured host/container health without inference. Allowlisted repository checks reuse existing gates and write private local logs. ASR configuration uses existing Identity global/account settings APIs with explicit scoped previews and secret-free output. Fresh local setup creates private configuration and new Compose-managed volumes, refuses existing configuration/resources and occupied ports, and reuses deployment plus optional ASR configuration/status verification; it does not install native capture or models. No user meeting/agent API client is added.",
+   "metadata": [
+    {
+     "path": "deploy"
+    }
+   ]
+  },
+  {
+   "unique-id": "service-authority-system",
+   "node-type": "system",
+   "name": "service authority",
+   "description": "optional operator-owned admission and active-service authority; absent in stock OSS and never owns billing policy inside core"
+  },
+  {
+   "unique-id": "system-webhook-system",
+   "node-type": "system",
+   "name": "system webhook",
+   "description": "optional operator-owned terminal-event consumer; absent in stock OSS and never selected from customer or meeting data"
+  },
+  {
+   "unique-id": "agent-api",
+   "node-type": "service",
+   "name": "agent-api",
+   "description": "unit control-plane; dispatch -> runtime spawn; meeting copilot Per-user ChatGPT disconnect keeps TINA/ASR sessions separate. Terminal OAuth state is cancelled locally; authenticated internal Agent API owns profile writes, disconnect and generation checks under the same file lock as token refresh. Credentials stay in the private auth volume; callbacks from a disconnected generation cannot restore an old account. Existing in-flight workers may retain short-lived tokens. Owner-scoped meeting Q&A reads canonical transcript and explicitly selected linked private Wiki documents, validates source IDs, stores source fingerprints, and creates a new Wiki page only after explicit Apply; existing pages and canonical data are never overwritten. Routine files are owner-scoped active private-workspace resources: anchored no-symlink I/O, per-owner serialized reconcile, source SHA preconditions for explicit Edit/toggle/delete, and stable IDs per workspace/file. Delete removes the source before cancelling all related jobs; shared workspace files never grant schedules.",
+   "metadata": [
+    {
+     "path": "core/agent/services/agent-api"
+    }
+   ],
+   "interfaces": [
+    {
+     "unique-id": "agent-api-rest",
+     "type": "api"
+    }
+   ]
+  },
+  {
+   "unique-id": "completion-provider",
+   "node-type": "system",
+   "name": "configured completion provider",
+   "description": "the deployment or per-user model endpoint selected by TINA_LLM_PROVIDER; may be tenant-hosted or an external provider",
+   "interfaces": [
+    {
+     "unique-id": "completion-provider-api",
+     "type": "api"
+    }
+   ]
+  },
+  {
+   "unique-id": "conformance",
+   "node-type": "service",
+   "name": "conformance",
+   "description": "conformance — service in gateway",
+   "metadata": [
+    {
+     "path": "core/gateway/services/conformance"
+    }
+   ]
+  },
+  {
+   "unique-id": "gateway",
+   "node-type": "service",
+   "name": "gateway",
+   "description": "edge: auth (scopes) + REST routing + WS fan-out",
+   "metadata": [
+    {
+     "path": "core/gateway/services/gateway"
+    }
+   ],
+   "interfaces": [
+    {
+     "unique-id": "gateway-rest",
+     "type": "api"
+    },
+    {
+     "unique-id": "gateway-ws",
+     "type": "websocket"
+    }
+   ]
+  },
+  {
+   "unique-id": "admin-api",
+   "node-type": "service",
+   "name": "admin-api",
+   "description": "identity: token mint/validate, users, webhooks, and per-user calendar connections",
+   "metadata": [
+    {
+     "path": "core/identity/services/admin-api"
+    }
+   ],
+   "interfaces": [
+    {
+     "unique-id": "admin-api-rest",
+     "type": "api"
+    }
+   ]
+  },
+  {
+   "unique-id": "bot",
+   "node-type": "service",
+   "name": "bot",
+   "description": "spawned-per-meeting worker: join -> capture -> STT -> transcript.v1",
+   "metadata": [
+    {
+     "path": "core/meetings/services/bot"
+    }
+   ],
+   "interfaces": [
+    {
+     "unique-id": "bot-commands-sub",
+     "type": "consumer"
+    }
+   ]
+  },
+  {
+   "unique-id": "discord-connector",
+   "node-type": "service",
+   "name": "discord-connector",
+   "description": "long-lived Discord voice connector: ONE Gateway session per bot token; joins voice channels as runtime.v1 discord-bot workloads, decodes each speaker's Opus stream, drives the shared gmeet lane -> transcript.v1",
+   "metadata": [
+    {
+     "path": "core/meetings/services/discord"
+    }
+   ],
+   "interfaces": [
+    {
+     "unique-id": "discord-connector-runtime",
+     "type": "api"
+    }
+   ]
+  },
+  {
+   "unique-id": "transcription",
+   "node-type": "service",
+   "name": "transcription",
+   "description": "transcription — OpenAI-compatible /v1/audio/transcriptions boundary with selectable backends: faster-whisper/CTranslate2, Apple MLX/Metal, and loopback FunASR Qwen3-ASR with FSMN-VAD. Clients send bounded audio windows, continuity prompts and content-free capture-lag metadata. FunASR exposes asr-status.v1 with actual device, bounded request timing samples, queue and model percentiles; Terminal reads it through a verified admin proxy. Browser render timings remain local. Does not write any redis carrier (the bot XADDs segments). Optional native Rust backend runs Silero VAD and Qwen3-ASR-0.6B INT8 through sherpa-onnx on CPU at host loopback :18001; it preserves VAD segment offsets and the same ASR status contract. The FunASR adapter forwards min_silence_duration_ms to FSMN max_end_silence_time (100-2000 ms, default 800 ms, explicitly pinned), preserving per-VAD sentence offsets for downstream alignment. An isolated single-source Apple Silicon PoC under deploy/transcription/streaming-poc validates real Qwen Transformers decoder token callbacks and paced growing-window hypotheses on cached VI/EN evaluation clips. It is not a selected production endpoint, does not claim an incremental audio encoder, and never changes/restarts production services; private external artifacts record token timing, accuracy, RAM and before/after listener identities. Sub-200 ms FunASR inputs receive trailing silence only in the temporary inference file to avoid incomplete FSMN frames; source PCM, reported duration and sentence bounds retain the original source interval. Empty input and inference failures remain errors. Optional authenticated loopback :18002 backend composes FunASR FSMN-VAD CPU with hash-pinned Gipformer 1.5 INT8 via Sherpa-ONNX OfflineRecognizer. The root Compose asr profile runs that same CPU service, mounts the pinned model directory and owns host port 18002 while enabled; unload the host LaunchAgent to avoid a port conflict. Existing Custom endpoint settings select it for Desktop/Bot without altering the Qwen platform default. Original VAD sample offsets survive speech slicing; no word timing, prompt conditioning, language detection or token streaming is claimed. One inference plus three bounded waiters, no audio/text in diagnostics.",
+   "metadata": [
+    {
+     "path": "core/meetings/services/transcription"
+    },
+    {
+     "path": "core/meetings/services/transcription_mlx"
+    },
+    {
+     "path": "deploy/transcription/funasr"
+    },
+    {
+     "path": "core/meetings/services/native-asr"
+    },
+    {
+     "path": "deploy/transcription/sherpa"
+    },
+    {
+     "path": "deploy/transcription/streaming-poc"
+    },
+    {
+     "path": "deploy/transcription/gipformer"
+    }
+   ],
+   "interfaces": [
+    {
+     "unique-id": "stt-endpoint",
+     "type": "api"
+    },
+    {
+     "unique-id": "asr-status-endpoint",
+     "type": "api"
+    }
+   ]
+  },
+  {
+   "unique-id": "desktop",
+   "node-type": "service",
+   "name": "desktop",
+   "description": "all-in-one dev host: bot+collector+gateway in one process; capture sessions resolve central identity ASR settings once (personal API key > platform > environment), pin the selection until stop and expose credential-free backend metadata Local SQLite journal preserves confirmed ASR, PCM source timestamps and owner corrections across restarts; document/review/audio routes consult canAccess. Explicit post-meeting second-pass ASR yields persisted proposals; one worker pauses between utterances for live capture and never edits text before owner Apply.; input ring shared with ASR, per-session/source sample clock and original capture timestamp archived in SQLite; authorized audio-timeline.v1 metadata and RAM-to-archive range reads never fill missing samples; WS /ws fans out transcript.v1 confirmed/pending frames to local capture clients; vi-en pending ASR language reviews archive original/retry text plus source PCM separately from confirmed transcript; owner/origin-checked asr-reviews routes and review UI expose suggestions without adding them to canonical or memory. Ingest ready advertises recording_ack and recording_resume for an optional client_session nonce. REC1 acknowledgements follow sink processing; explicit finalization closes immediately while unexpected socket closes retain the recording assembler for 30 seconds for same-client resume. Shutdown flushes pending assemblers. Different logical client sessions finalize separately; replacing a current recording master preserves the older file as a versioned sibling. Opt-in audio_ack=sample-range.v1 requires indexed PCM and a client_session nonce; exact-range audio-ack follows durable journal insertion. Persistent archive session ids deduplicate identical PCM/timestamps across reconnect and process restart without duplicate pipeline feed; conflicting/overlapping ranges fail without ACK. Socket-local pipeline RAM stays separate from archive identity. Audio ACK does not promise downstream ASR completion. A single background ASR recovery worker resumes unprocessed source/sample ranges after stop or restart, using bounded 15-second archive windows and the existing Gmeet ASR/filter engine. It yields to live capture, retries failures with backoff, pins an opaque backend/credential digest, and never substitutes an unavailable configuration. Owner/origin-scoped asr-recovery.v1 exposes jobs and checkpoints. Recovered mixed audio stays unattributed; known channel names and local mic identity are preserved. Live confirmed segments project accepted canonical text at the gateway; drafts for edited/restored ids are suppressed. transcript.v1 binary/event shapes are unchanged and revision metadata remains on the separate transcript.revised/HTTP interfaces. Owner-only stt-foundation.v1 snapshots persist a journal instance and monotonic sequence; globally stable meeting/source/segment IDs retain exact sample references and accepted revision history. stt-metrics.v1 distinguishes bounded ASR-call, capture lag, SQLite persistence, caption and client-reported foreground UI timing; no text/audio in metrics. Mixed lane transcript IDs include connection and source channel so mic/tab/reconnect turn counters cannot collide. STT diagnostics separate confirmed-caption publication delay from draft-window age; the legacy combined series remains available. Capture teardown plans missing source/sample ranges instead of blanket-checkpointing received PCM; only confirmed or successfully committed recovery ranges advance ASR coverage. Historical checkpoints are preserved. Late accepted PCM atomically reopens completed ASR sessions before ACK so appended tails remain recoverable. Batch archive recovery selects the existing mixed media/repetition filter through the Gmeet host policy hook, retaining short single-word speech while RMS/confidence/language checks remain in force; live Gmeet defaults and completed historical jobs are unchanged. Desktop owns a meeting-local SQLite speaker registry: channel 1000 is one local microphone identity, raw 1002 is archive-only, verified Meet participant IDs bind distinct people, and system mix 999 stays unknown. Owner rename/assignment uses independent speaker revisions and the durable metadata outbox. Owner-triggered post-meeting diarization sends verified saved system audio to the existing authenticated loopback worker; proposals require explicit Apply with registry, text, timeline and audio-hash checks. Manual names/unknown and participant identities are protected. Owner-only canonical and meeting-memory endpoints share accepted speaker projection; drafts/raw mic never become evidence, and words remain segment_fallback without forced alignment. HTTP Window ASR defaults remain unchanged. Owner-triggered post-meeting MFA alignment batches up to 20 verified continuous mono PCM16 clips, at most 30 seconds each, over current accepted text. Alignment jobs yield between batches to live capture and serialize with refinement/diarization. Per-segment accepted timing publishes only after expected text revision, text/audio hashes and capture source references still match. Word audio playback rechecks provenance and never assigns time to OOV tokens. Text edits and Restore invalidate timing atomically. Canonical words/phrases use source-absolute times; speaker attribution is reprojected from the current registry and applied acoustic turns. Alignment types, hashing, validation and speaker projection live in the pure alignment-model module; transcript-journal depends on that model, while the alignment worker depends on the journal, without a runtime import cycle.",
+   "metadata": [
+    {
+     "path": "core/meetings/services/desktop"
+    },
+    {
+     "path": "core/meetings/contracts/audio-timeline.v1"
+    },
+    {
+     "audio_timeline": {
+      "sources": 16,
+      "retention_seconds": 30,
+      "pre_roll_ms": 200,
+      "archive": "SQLite audio_chunks plus bounded audio_timeline_events; additive nullable sample columns",
+      "wire": "capture codec optional bit30 Float64 startSample; legacy byte layouts unchanged"
+     }
+    },
+    {
+     "speaker_projection": {
+      "authority": "Desktop SQLite per meeting; distinct from Meeting API authority",
+      "worker": "diarization-worker",
+      "carrier": "speaker_registries, diarization_jobs, canonical_projections",
+      "limits": "30 minutes including padding; 256 continuous source ranges; 2000 segments; no automatic real-name inference"
+     }
+    }
+   ],
+   "interfaces": [
+    {
+     "unique-id": "desktop-rest",
+     "type": "api"
+    },
+    {
+     "unique-id": "desktop-translation-proxy",
+     "type": "api"
+    },
+    {
+     "unique-id": "desktop-ingest-ws",
+     "type": "websocket"
+    },
+    {
+     "unique-id": "desktop-live-ws",
+     "type": "websocket"
+    }
+   ]
+  },
+  {
+   "unique-id": "meeting-api",
+   "node-type": "service",
+   "name": "meeting-api",
+   "description": "collector + bot-spawn + recordings + sessions + calendar import/autojoin (the hub); optionally asks an external service authority before spawn and at one-minute active boundaries. Owns immutable raw ASR plus the transcript_edits overlay with locked expected_revision checks. Owns post-meeting recording refinement and optional Vietnamese word alignment over clocked saved audio; alignment/OOV timestamps are a separate owner view and never rewrite transcript-document.v1 or raw ASR. Canonical accepted text/revision and alignment metadata use the transactional JSONB revision outbox; current-text GIN search remains text-only. Owns the durable meeting-local speaker registry, observed Meet participant bindings, owner-confirmed names and assignment history; owner-triggered local CPU diarization applies speaker overlays and word attribution leaves overlap/uncertainty unknown. Persists owner-only canonical-transcript.v1 with current text, source-clock word alignment, speaker attribution and hashes. Incremental meeting-memory.v1 groups finalized speech into conversation windows and exact-quote VI/EN extraction candidates, rebuilt on source revisions; no inferred owner/deadline. Owner-only stt-foundation.v1 native exports and CAS-protected read-only source replicas in meeting.data.stt_replicas retain source authority; replicas never overwrite native Bot canonical rows. Alignment commits atomically reject stale expected_revision; job admission uses expected prior job ID; raw collector upserts cannot overwrite edited rows. Content-free transcript_storage events separate PostgreSQL persistence from Redis mutable-tail queue age.",
+   "metadata": [
+    {
+     "path": "core/meetings/services/meeting-api"
+    },
+    {
+     "diarization": {
+      "worker": "deploy/transcription/diarization",
+      "endpoint": "DIARIZATION_SERVICE_URL/diarize",
+      "carrier": "meeting.data.transcript_diarization",
+      "limits": "one local worker, 30 minutes total decoded audio per job, no raw text/audio mutation, metadata/manual identities take priority"
+     }
+    },
+    {
+     "alignment": {
+      "worker": "deploy/transcription/alignment",
+      "endpoint": "ALIGNMENT_SERVICE_URL/align-batch",
+      "carrier": "meeting.data.transcript_alignment",
+      "limits": "one local MFA worker, mono 16 kHz PCM16, at most 30 seconds per segment, model/audio/text hashes, OOV/overlap stays unaligned or unknown"
+     }
+    },
+    {
+     "path": "deploy/transcription/alignment"
+    },
+    {
+     "path": "deploy/transcription/diarization"
+    }
+   ],
+   "interfaces": [
+    {
+     "unique-id": "meeting-api-rest",
+     "type": "api"
+    }
+   ]
+  },
+  {
+   "unique-id": "alignment-worker",
+   "node-type": "service",
+   "name": "MFA alignment worker",
+   "description": "optional loopback-only Montreal Forced Aligner worker; accepts a bounded saved audio segment and raw transcript, returns word intervals with model and source hashes; OOV words remain unaligned",
+   "metadata": [
+    {
+     "path": "deploy/transcription/alignment"
+    }
+   ],
+   "interfaces": [
+    {
+     "unique-id": "alignment-worker-http",
+     "type": "api"
+    }
+   ]
+  },
+  {
+   "unique-id": "service-authority",
+   "node-type": "service",
+   "name": "external service authority",
+   "description": "optional operator-provided service-authority.v1 endpoint; decides only allow/deny and remains outside the self-hosted core",
+   "interfaces": [
+    {
+     "unique-id": "service-authority-rest",
+     "type": "api"
+    }
+   ]
+  },
+  {
+   "unique-id": "system-webhook",
+   "node-type": "service",
+   "name": "operator terminal callback",
+   "description": "optional operator-provided webhook.v1 endpoint for signed meeting.completed and bot.failed service facts",
+   "interfaces": [
+    {
+     "unique-id": "system-webhook-rest",
+     "type": "api"
+    }
+   ]
+  },
+  {
+   "unique-id": "mcp",
+   "node-type": "service",
+   "name": "mcp",
+   "description": "MCP tools + prompts over the public API (stateless FastAPI, /mcp mount)",
+   "metadata": [
+    {
+     "path": "core/meetings/services/mcp"
+    }
+   ],
+   "interfaces": [
+    {
+     "unique-id": "mcp-http",
+     "type": "api"
+    }
+   ]
+  },
+  {
+   "unique-id": "buffer",
+   "node-type": "module",
+   "name": "buffer",
+   "description": "buffer — atomic module in meetings; source-local sample-indexed AudioRing/AudioTimelinePool: 30s Float32 PCM with validity bitmap, global active-source budget, independent range reads, gap/duplicate/eviction/clock diagnostics Provides a deterministic sustained-silence sample cut that retains both PCM partitions and never treats soft speech as a relative-energy silence.",
+   "metadata": [
+    {
+     "path": "core/meetings/modules/buffer"
+    }
+   ]
+  },
+  {
+   "unique-id": "capture-codec",
+   "node-type": "module",
+   "name": "capture-codec",
+   "description": "capture-codec — atomic module in meetings Shared sample-range.v1 opt-in PCM ACK metadata/type; indexed binary frame layout and legacy golden bytes stay unchanged.",
+   "metadata": [
+    {
+     "path": "core/meetings/modules/capture-codec"
+    }
+   ]
+  },
+  {
+   "unique-id": "gmeet-capture",
+   "node-type": "module",
+   "name": "gmeet-capture",
+   "description": "gmeet-capture — atomic module in meetings Default capture uses RMS 0.0001 to preserve quiet speech; explicit peak-gate overrides remain supported.",
+   "metadata": [
+    {
+     "path": "core/meetings/modules/gmeet-capture"
+    }
+   ]
+  },
+  {
+   "unique-id": "gmeet-pipeline",
+   "node-type": "module",
+   "name": "gmeet-pipeline",
+   "description": "gmeet-pipeline — atomic module in meetings A host-supplied hallucinationFilter covers every confirmation and flush branch; default isHallucination remains unchanged. Live ASR submissions use the shared continuityPrompt selector: no inherited text for sub-two-second PCM; existing long-window context and confirmation remain unchanged.",
+   "metadata": [
+    {
+     "path": "core/meetings/modules/gmeet-pipeline"
+    }
+   ]
+  },
+  {
+   "unique-id": "jitsi-capture",
+   "node-type": "module",
+   "name": "jitsi-capture",
+   "description": "jitsi-capture — atomic module in meetings",
+   "metadata": [
+    {
+     "path": "core/meetings/modules/jitsi-capture"
+    }
+   ]
+  },
+  {
+   "unique-id": "join",
+   "node-type": "module",
+   "name": "join",
+   "description": "join — atomic module in meetings",
+   "metadata": [
+    {
+     "path": "core/meetings/modules/join"
+    }
+   ]
+  },
+  {
+   "unique-id": "mixed-capture-core",
+   "node-type": "module",
+   "name": "mixed-capture-core",
+   "description": "mixed-capture-core — atomic module in meetings Default mixed capture uses RMS 0.0001 and retains the original sample clock across skipped frames.",
+   "metadata": [
+    {
+     "path": "core/meetings/modules/mixed-capture-core"
+    }
+   ]
+  },
+  {
+   "unique-id": "mixed-pipeline",
+   "node-type": "module",
+   "name": "mixed-pipeline",
+   "description": "mixed-pipeline — atomic module in meetings ASR energy floor is RMS 0.0001; transport/name evidence thresholds remain independent. Provisional CSRC rolls wait for a sustained quiet cut after the last draft; EOF flushes remaining owned audio after a roll, preserving the source clock and same track. Stop/reconnect blocks new PCM, drains already-fed segmentation callbacks, then flushes the final turn; concurrent disposals share one completion task. Live ASR submissions use the shared continuityPrompt selector: no inherited text for sub-two-second PCM; existing long-window context and confirmation remain unchanged.",
+   "metadata": [
+    {
+     "path": "core/meetings/modules/mixed-pipeline"
+    }
+   ]
+  },
+  {
+   "unique-id": "record-chunker",
+   "node-type": "module",
+   "name": "record-chunker",
+   "description": "record-chunker — atomic module in meetings MediaRecorder pause/resume waits for source events; blob encoding/delivery is serialized and fully awaited before the final marker; concurrent stops share completion and late tap startup can be cancelled.",
+   "metadata": [
+    {
+     "path": "core/meetings/modules/record-chunker"
+    }
+   ]
+  },
+  {
+   "unique-id": "recording",
+   "node-type": "module",
+   "name": "recording",
+   "description": "recording — atomic module in meetings",
+   "metadata": [
+    {
+     "path": "core/meetings/modules/recording"
+    }
+   ]
+  },
+  {
+   "unique-id": "remote-browser",
+   "node-type": "module",
+   "name": "remote-browser",
+   "description": "remote-browser — atomic module in meetings",
+   "metadata": [
+    {
+     "path": "core/meetings/modules/remote-browser"
+    }
+   ]
+  },
+  {
+   "unique-id": "teams-capture",
+   "node-type": "module",
+   "name": "teams-capture",
+   "description": "teams-capture — atomic module in meetings",
+   "metadata": [
+    {
+     "path": "core/meetings/modules/teams-capture"
+    }
+   ]
+  },
+  {
+   "unique-id": "whisper",
+   "node-type": "module",
+   "name": "whisper",
+   "description": "whisper — atomic module in meetings Exports a sample-count-based live continuity-context selector: previous confirmed text is omitted below two seconds of PCM, retained for longer windows. Explicit direct/refinement prompts, raw results and vi-en review protection remain available.",
+   "metadata": [
+    {
+     "path": "core/meetings/modules/whisper"
+    }
+   ]
+  },
+  {
+   "unique-id": "zoom-capture",
+   "node-type": "module",
+   "name": "zoom-capture",
+   "description": "zoom-capture — atomic module in meetings",
+   "metadata": [
+    {
+     "path": "core/meetings/modules/zoom-capture"
+    }
+   ]
+  },
+  {
+   "unique-id": "event.v1",
+   "node-type": "contract",
+   "name": "event.v1",
+   "description": "event.v1 — sealed/published contract (agent)",
+   "metadata": [
+    {
+     "path": "core/agent/contracts/event.v1",
+     "domain": "agent"
+    }
+   ]
+  },
+  {
+   "unique-id": "invoke.v1",
+   "node-type": "contract",
+   "name": "invoke.v1",
+   "description": "invoke.v1 — sealed/published contract (agent)",
+   "metadata": [
+    {
+     "path": "core/agent/contracts/invoke.v1",
+     "domain": "agent"
+    }
+   ]
+  },
+  {
+   "unique-id": "proactive-card.v1",
+   "node-type": "contract",
+   "name": "proactive-card.v1",
+   "description": "proactive-card.v1 — sealed/published contract (agent)",
+   "metadata": [
+    {
+     "path": "core/agent/contracts/proactive-card.v1",
+     "domain": "agent"
+    }
+   ]
+  },
+  {
+   "unique-id": "routine.v1",
+   "node-type": "contract",
+   "name": "routine.v1",
+   "description": "routine.v1 — sealed/published contract (agent)",
+   "metadata": [
+    {
+     "path": "core/agent/contracts/routine.v1",
+     "domain": "agent"
+    }
+   ]
+  },
+  {
+   "unique-id": "task.v1",
+   "node-type": "contract",
+   "name": "task.v1",
+   "description": "task.v1 — sealed/published contract (agent)",
+   "metadata": [
+    {
+     "path": "core/agent/contracts/task.v1",
+     "domain": "agent"
+    }
+   ]
+  },
+  {
+   "unique-id": "tool.v1",
+   "node-type": "contract",
+   "name": "tool.v1",
+   "description": "tool.v1 — sealed/published contract (agent)",
+   "metadata": [
+    {
+     "path": "core/agent/contracts/tool.v1",
+     "domain": "agent"
+    }
+   ]
+  },
+  {
+   "unique-id": "tool-approval.v1",
+   "node-type": "contract",
+   "name": "tool-approval.v1",
+   "description": "tool-approval.v1 — sealed/published per-call MCP approval request and decision contract (agent)",
+   "metadata": [
+    {
+     "path": "core/agent/contracts/tool-approval.v1",
+     "domain": "agent"
+    }
+   ]
+  },
+  {
+   "unique-id": "unit.v1",
+   "node-type": "contract",
+   "name": "unit.v1",
+   "description": "unit.v1 — sealed/published contract (agent)",
+   "metadata": [
+    {
+     "path": "core/agent/contracts/unit.v1",
+     "domain": "agent"
+    }
+   ]
+  },
+  {
+   "unique-id": "workspace.v1",
+   "node-type": "contract",
+   "name": "workspace.v1",
+   "description": "workspace.v1 — sealed/published contract (agent)",
+   "metadata": [
+    {
+     "path": "core/agent/contracts/workspace.v1",
+     "domain": "agent"
+    }
+   ]
+  },
+  {
+   "unique-id": "api.v1",
+   "node-type": "contract",
+   "name": "api.v1",
+   "description": "api.v1 — sealed/published contract (gateway)",
+   "metadata": [
+    {
+     "path": "core/gateway/contracts/api.v1",
+     "domain": "gateway"
+    }
+   ]
+  },
+  {
+   "unique-id": "logevent.v1",
+   "node-type": "contract",
+   "name": "logevent.v1",
+   "description": "logevent.v1 — sealed/published contract (gateway)",
+   "metadata": [
+    {
+     "path": "core/gateway/contracts/logevent.v1",
+     "domain": "gateway"
+    }
+   ]
+  },
+  {
+   "unique-id": "ws.v1",
+   "node-type": "contract",
+   "name": "ws.v1",
+   "description": "ws.v1 — sealed/published contract (gateway)",
+   "metadata": [
+    {
+     "path": "core/gateway/contracts/ws.v1",
+     "domain": "gateway"
+    }
+   ]
+  },
+  {
+   "unique-id": "identity.v1",
+   "node-type": "contract",
+   "name": "identity.v1",
+   "description": "identity.v1 — sealed/published contract (identity)",
+   "metadata": [
+    {
+     "path": "core/identity/contracts/identity.v1",
+     "domain": "identity"
+    }
+   ]
+  },
+  {
+   "unique-id": "acts.v1",
+   "node-type": "contract",
+   "name": "acts.v1",
+   "description": "acts.v1 — sealed/published contract (meetings)",
+   "metadata": [
+    {
+     "path": "core/meetings/contracts/acts.v1",
+     "domain": "meetings"
+    }
+   ]
+  },
+  {
+   "unique-id": "captured-signal.v1",
+   "node-type": "contract",
+   "name": "captured-signal.v1",
+   "description": "captured-signal.v1 — sealed/published contract (meetings)",
+   "metadata": [
+    {
+     "path": "core/meetings/contracts/captured-signal.v1",
+     "domain": "meetings"
+    }
+   ]
+  },
+  {
+   "unique-id": "flagged-issue.v1",
+   "node-type": "contract",
+   "name": "flagged-issue.v1",
+   "description": "flagged-issue.v1 — sealed/published contract (meetings)",
+   "metadata": [
+    {
+     "path": "core/meetings/contracts/flagged-issue.v1",
+     "domain": "meetings"
+    }
+   ]
+  },
+  {
+   "unique-id": "invocation.v1",
+   "node-type": "contract",
+   "name": "invocation.v1",
+   "description": "invocation.v1 — sealed/published contract (meetings)",
+   "metadata": [
+    {
+     "path": "core/meetings/contracts/invocation.v1",
+     "domain": "meetings"
+    }
+   ]
+  },
+  {
+   "unique-id": "lifecycle.v1",
+   "node-type": "contract",
+   "name": "lifecycle.v1",
+   "description": "lifecycle.v1 — sealed/published bot status with producer-observed transition time (meetings)",
+   "metadata": [
+    {
+     "path": "core/meetings/contracts/lifecycle.v1",
+     "domain": "meetings"
+    }
+   ]
+  },
+  {
+   "unique-id": "service-authority.v1",
+   "node-type": "contract",
+   "name": "service-authority.v1",
+   "description": "service-authority.v1 — sealed opt-in admission and active-service decision contract without hosted billing data",
+   "metadata": [
+    {
+     "path": "core/meetings/contracts/service-authority.v1",
+     "domain": "meetings"
+    }
+   ]
+  },
+  {
+   "unique-id": "transcript.v1",
+   "node-type": "contract",
+   "name": "transcript.v1",
+   "description": "transcript.v1 — sealed/published contract (meetings)",
+   "metadata": [
+    {
+     "path": "core/meetings/contracts/transcript.v1",
+     "domain": "meetings"
+    }
+   ]
+  },
+  {
+   "unique-id": "webhook.v1",
+   "node-type": "contract",
+   "name": "webhook.v1",
+   "description": "webhook.v1 — sealed/published delivery including privacy-safe terminal service provenance (meetings)",
+   "metadata": [
+    {
+     "path": "core/meetings/contracts/webhook.v1",
+     "domain": "meetings"
+    }
+   ]
+  },
+  {
+   "unique-id": "runtime.v1",
+   "node-type": "contract",
+   "name": "runtime.v1",
+   "description": "runtime.v1 — sealed/published contract (runtime)",
+   "metadata": [
+    {
+     "path": "core/runtime/contracts/runtime.v1",
+     "domain": "runtime"
+    }
+   ]
+  },
+  {
+   "unique-id": "schedule.v1",
+   "node-type": "contract",
+   "name": "schedule.v1",
+   "description": "schedule.v1 — sealed/published contract (runtime)",
+   "metadata": [
+    {
+     "path": "core/runtime/contracts/schedule.v1",
+     "domain": "runtime"
+    }
+   ]
+  },
+  {
+   "unique-id": "execution-targets.v1",
+   "node-type": "contract",
+   "name": "execution-targets.v1",
+   "description": "execution-targets.v1 — sealed/published contract (deploy)",
+   "metadata": [
+    {
+     "path": "deploy/contracts/execution-targets.v1",
+     "domain": "deploy"
+    }
+   ]
+  },
+  {
+   "unique-id": "config.v1",
+   "node-type": "contract",
+   "name": "config.v1",
+   "description": "config.v1 — sealed/published contract (deploy): per-service deployment-config declaration (required-explicit / defaulted / capability tri-state + live probes), preflight + gate:config-contract (ADR-0026)",
+   "metadata": [
+    {
+     "path": "deploy/contracts/config.v1",
+     "domain": "deploy"
+    }
+   ]
+  },
+  {
+   "unique-id": "slim",
+   "node-type": "webclient",
+   "name": "slim",
+   "description": "slim — client",
+   "metadata": [
+    {
+     "path": "clients/slim"
+    }
+   ]
+  },
+  {
+   "unique-id": "extension",
+   "node-type": "webclient",
+   "name": "extension",
+   "description": "viewer-only MV3 client. Lists and reads account-authorized Bot snapshots through Meeting API and saved Desktop journal snapshots through Desktop REST, using X-API-Key when configured; exact source identities and request scopes prevent stale transcript reads from crossing accounts or meetings. Opens Bot rows in Terminal or Dashboard and Desktop rows in Desktop transcript review. Has no capture WebSocket, microphone or tab-capture permissions, meeting-site scripts, or auto-start.",
+   "metadata": [
+    {
+     "path": "clients/extension"
+    }
+   ]
+  },
+  {
+   "unique-id": "claude-plugin",
+   "node-type": "webclient",
+   "name": "claude-plugin",
+   "description": "claude-plugin — client (Claude Code plugin: manifest, skills, hosted MCP config; no code)",
+   "metadata": [
+    {
+     "path": "clients/claude-plugin"
+    }
+   ]
+  },
+  {
+   "unique-id": "terminal",
+   "node-type": "webclient",
+   "name": "terminal",
+   "description": "terminal — client Manual ChatGPT OAuth callback handoff from another browser completes only in the initiating authenticated TINA session; anonymous or mismatched callbacks do not consume pending state. Per-user ChatGPT disconnect keeps TINA/ASR sessions separate. Terminal OAuth state is cancelled locally; authenticated internal Agent API owns profile writes, disconnect and generation checks under the same file lock as token refresh. Credentials stay in the private auth volume; callbacks from a disconnected generation cannot restore an old account. Existing in-flight workers may retain short-lived tokens. /routine authoring includes the browser IANA zone and asks when cadence is missing. Routines Edit has Save/Cancel, source SHA preconditions, stable-ID controls and next-run presentation in the declared timezone.",
+   "metadata": [
+    {
+     "path": "clients/terminal"
+    }
+   ],
+   "controls": {
+    "render-only": {
+     "description": "A reader must not re-derive a producer's data. The terminal renders raw|processed; it must NOT contain a transcript-shaping transform (e.g. clustering).",
+     "requirements": [
+      {
+       "requirement-url": "urn:tina:calm:controls:render-only",
+       "config": {
+        "forbidden-symbols": [
+         "buildMeetingNotes"
+        ]
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "unique-id": "segments-stream",
+   "node-type": "data-asset",
+   "name": "transcription_segments (stream)",
+   "description": "durable raw segment feed (transcript.v1); bot XADDs, collector XREADGROUPs",
+   "controls": {
+    "ownership": {
+     "description": "single writer",
+     "requirements": [
+      {
+       "requirement-url": "urn:tina:calm:controls:single-writer",
+       "config": {
+        "writers": [
+         "bot"
+        ],
+        "match": "transcription_segments",
+        "op": "xadd"
+       }
+      }
+     ]
+    }
+   },
+   "metadata": [
+    {
+     "contract": "transcript.v1"
+    },
+    {
+     "stage": "raw"
+    }
+   ]
+  },
+  {
+   "unique-id": "tc-mutable",
+   "node-type": "data-asset",
+   "name": "tc:meeting:{id}:mutable (pubsub)",
+   "description": "change-only transcript deltas the gateway + agent-api subscribe to",
+   "controls": {
+    "ownership": {
+     "description": "shared — review (P23 prefers one writer)",
+     "requirements": [
+      {
+       "requirement-url": "urn:tina:calm:controls:single-writer",
+       "config": {
+        "writers": [
+         "bot",
+         "meeting-api"
+        ],
+        "match": "tc:meeting:.*:mutable",
+        "op": "publish"
+       }
+      }
+     ]
+    }
+   },
+   "metadata": [
+    {
+     "contract": "transcript.v1"
+    },
+    {
+     "stage": "raw"
+    }
+   ]
+  },
+  {
+   "unique-id": "tc-stream",
+   "node-type": "data-asset",
+   "name": "tc:meeting:{id} (stream)",
+   "description": "native per-meeting transcript stream the agent worker + terminal SSE read; the collector (meetings) is the single writer (P23)",
+   "controls": {
+    "ownership": {
+     "description": "single writer",
+     "requirements": [
+      {
+       "requirement-url": "urn:tina:calm:controls:single-writer",
+       "config": {
+        "writers": [
+         "meeting-api"
+        ],
+        "match": "tc:meeting:[^:]*$",
+        "op": "xadd"
+       }
+      }
+     ]
+    }
+   },
+   "metadata": [
+    {
+     "contract": "transcript.v1"
+    },
+    {
+     "stage": "raw"
+    }
+   ]
+  },
+  {
+   "unique-id": "out-stream",
+   "node-type": "data-asset",
+   "name": "unit:{id}:out (stream)",
+   "description": "worker output stream (agent activity / message deltas); agent-api relays as SSE",
+   "controls": {
+    "ownership": {
+     "description": "single writer (P23)",
+     "requirements": [
+      {
+       "requirement-url": "urn:tina:calm:controls:single-writer",
+       "config": {
+        "writers": [
+         "agent-worker"
+        ],
+        "match": "unit:.*:out",
+        "op": "xadd"
+       }
+      }
+     ]
+    }
+   },
+   "metadata": [
+    {
+     "contract": "proactive-card.v1"
+    },
+    {
+     "stage": "cards"
+    }
+   ]
+  },
+  {
+   "unique-id": "segments-table",
+   "node-type": "database",
+   "name": "transcription_segments (table)",
+   "description": "persisted raw transcript rows",
+   "controls": {
+    "ownership": {
+     "description": "single writer",
+     "requirements": [
+      {
+       "requirement-url": "urn:tina:calm:controls:single-writer",
+       "config": {
+        "writers": [
+         "meeting-api"
+        ],
+        "match": "transcription_segments",
+        "op": "db-write"
+       }
+      }
+     ]
+    }
+   },
+   "metadata": [
+    {
+     "contract": "transcript.v1"
+    },
+    {
+     "stage": "raw"
+    }
+   ]
+  },
+  {
+   "unique-id": "terminal-app",
+   "node-type": "module",
+   "name": "terminal/app",
+   "description": "Next.js routes + SSE proxy (terminal)",
+   "metadata": [
+    {
+     "path": "clients/terminal/src/app"
+    }
+   ]
+  },
+  {
+   "unique-id": "terminal-canvas",
+   "node-type": "module",
+   "name": "terminal/canvas",
+   "description": "render engine: kit, runtime, useMeeting, notes (terminal)",
+   "metadata": [
+    {
+     "path": "clients/terminal/src/canvas"
+    }
+   ]
+  },
+  {
+   "unique-id": "terminal-contributions",
+   "node-type": "module",
+   "name": "terminal/contributions",
+   "description": "contributed surfaces/commands (terminal)",
+   "metadata": [
+    {
+     "path": "clients/terminal/src/contributions"
+    }
+   ]
+  },
+  {
+   "unique-id": "terminal-lib",
+   "node-type": "module",
+   "name": "terminal/lib",
+   "description": "Terminal boundary helpers: ASR status validation, bounded browser timing telemetry and server-side ChatGPT connection support.",
+   "metadata": [
+    {
+     "path": "clients/terminal/src/lib"
+    }
+   ]
+  },
+  {
+   "unique-id": "terminal-platform",
+   "node-type": "module",
+   "name": "terminal/platform",
+   "description": "platform adapters (terminal)",
+   "metadata": [
+    {
+     "path": "clients/terminal/src/platform"
+    }
+   ]
+  },
+  {
+   "unique-id": "terminal-surfaces",
+   "node-type": "module",
+   "name": "terminal/surfaces",
+   "description": "state stores + surfaces (meetingLive, chat, gatewayWS) (terminal)",
+   "metadata": [
+    {
+     "path": "clients/terminal/src/surfaces"
+    }
+   ]
+  },
+  {
+   "unique-id": "terminal-ui-kit",
+   "node-type": "module",
+   "name": "terminal/ui-kit",
+   "description": "shared UI primitives (terminal)",
+   "metadata": [
+    {
+     "path": "clients/terminal/src/ui-kit"
+    }
+   ]
+  },
+  {
+   "unique-id": "terminal-workbench",
+   "node-type": "module",
+   "name": "terminal/workbench",
+   "description": "dockview workbench shell (terminal)",
+   "metadata": [
+    {
+     "path": "clients/terminal/src/workbench"
+    }
+   ]
+  },
+  {
+   "unique-id": "recording-blob",
+   "node-type": "data-asset",
+   "name": "recordings bucket (blob)",
+   "description": "chunked meeting recordings: bot uploads chunks (record-chunker), meeting-api PUTs the stitched master",
+   "controls": {
+    "ownership": {
+     "description": "two writers by design: bot=chunks, meeting-api=master",
+     "requirements": [
+      {
+       "requirement-url": "urn:tina:calm:controls:single-writer",
+       "config": {
+        "writers": [
+         "bot",
+         "meeting-api"
+        ]
+       }
+      }
+     ]
+    }
+   },
+   "metadata": [
+    {
+     "stage": "audio"
+    }
+   ]
+  },
+  {
+   "unique-id": "userdata-blob",
+   "node-type": "data-asset",
+   "name": "userdata bucket (blob)",
+   "description": "authenticated-bot browser sessions (auth-essential profile subset): remote-browser's provisioning login uploads the signed-in session; the bot restores it before launch and writes the rotated session back on clean teardown",
+   "controls": {
+    "ownership": {
+     "description": "two writers by design: remote-browser=provisioning upload, bot=write-back on teardown",
+     "requirements": [
+      {
+       "requirement-url": "urn:tina:calm:controls:single-writer",
+       "config": {
+        "writers": [
+         "remote-browser",
+         "bot"
+        ]
+       }
+      }
+     ]
+    }
+   },
+   "metadata": [
+    {
+     "stage": "session"
+    }
+   ]
+  },
+  {
+   "unique-id": "runtime",
+   "node-type": "service",
+   "name": "runtime",
+   "description": "runtime.v1 kernel: POST /workloads spawns containers (docker/k8s/process) Cron schedules carry an IANA timezone (legacy UTC); local wall-clock boundaries avoid DST arithmetic drift. Atomic Redis claim, cancellation tombstones and completion/retry/rearm publication prevent canceled jobs from recurring, including cancellation of a completed job snapshot whose successor already exists.",
+   "interfaces": [
+    {
+     "unique-id": "runtime-rest",
+     "type": "api"
+    }
+   ],
+   "metadata": [
+    {
+     "path": "core/runtime/src"
+    }
+   ]
+  },
+  {
+   "unique-id": "agent-worker",
+   "node-type": "service",
+   "name": "agent-worker",
+   "description": "spawned isolated workspace-agent worker; selectable Claude Code, Codex app-server, or Antigravity CLI (agy) harness; every dispatch mounts the ordered [_global, active workspaces, _system] stack, fails closed without _global, and loads its authoritative entry context. Codex maps TINA write grants to app-server sandbox roots while excluding default temporary write roots, loads workspace instructions and skills, maps TINA auto/gate MCP grants to Codex approval modes, streams tool lifecycle events, pauses gate calls for owner-scoped, one-call decisions over chat streams using tool-approval.v1, and participates in the shared transcript-size resume cap. Antigravity maps TINA mount grants to read_file/write_file permissions, sandboxes commands, loads governed skills, exposes only auto-granted non-secret MCP servers in headless mode, and normalizes streamed events and conversation ids. Its model setting requires a persisted Terms warning acknowledgment; consumer OAuth access through third-party software is prohibited by Google's terms. Harness-written kg/entities files are workspace.v1-validated before commit. Post-meeting summary uses a tool-less CompletionPort and a deterministic writer that commits only the meeting entity path. Meeting Q&A uses a private short-lived, tool-less CompletionPort job with read-only mounts and no public chat history.",
+   "metadata": [
+    {
+     "path": "core/agent/worker"
+    }
+   ]
+  },
+  {
+   "unique-id": "meeting-wiki-entity",
+   "node-type": "data-asset",
+   "name": "kg/entities/meeting/{id}.md (workspace)",
+   "description": "post-meeting workspace.v1 entity in the active mounted Git workspace; the meeting writer commits only this path"
+  },
+  {
+   "unique-id": "platform",
+   "node-type": "system",
+   "name": "platform",
+   "description": "shared infra backing the services"
+  },
+  {
+   "unique-id": "redis",
+   "node-type": "service",
+   "name": "redis",
+   "description": "stream + pub/sub broker for the live + durable transcript planes"
+  },
+  {
+   "unique-id": "postgres",
+   "node-type": "database",
+   "name": "postgres",
+   "description": "durable relational store"
+  },
+  {
+   "unique-id": "object-store",
+   "node-type": "service",
+   "name": "object-store",
+   "description": "S3-compatible object store for recordings: the versitygw storage sidecar in Lite and Compose (plain files in a local volume); the chart's MinIO or the operator's S3 under Helm"
+  },
+  {
+   "unique-id": "bm-status",
+   "node-type": "data-asset",
+   "name": "bm:meeting:{id}:status (pubsub)",
+   "description": "bot/meeting status pub/sub; gateway fans out",
+   "controls": {
+    "ownership": {
+     "description": "single writer (P23)",
+     "requirements": [
+      {
+       "requirement-url": "urn:tina:calm:controls:single-writer",
+       "config": {
+        "writers": [
+         "meeting-api"
+        ],
+        "match": "bm:meeting:.*:status",
+        "op": "publish"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "unique-id": "u-meetings",
+   "node-type": "data-asset",
+   "name": "u:{user}:meetings (pubsub)",
+   "description": "per-user meeting-status pub/sub; gateway auto-subscribes",
+   "controls": {
+    "ownership": {
+     "description": "single writer (P23)",
+     "requirements": [
+      {
+       "requirement-url": "urn:tina:calm:controls:single-writer",
+       "config": {
+        "writers": [
+         "meeting-api"
+        ],
+        "match": "u:.*:meetings",
+        "op": "publish"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "unique-id": "bot-commands",
+   "node-type": "data-asset",
+   "name": "bot_commands:meeting:{id} (pubsub)",
+   "description": "acts.v1 commands (leave/speak) to the bot",
+   "controls": {
+    "ownership": {
+     "description": "single writer (P23)",
+     "requirements": [
+      {
+       "requirement-url": "urn:tina:calm:controls:single-writer",
+       "config": {
+        "writers": [
+         "meeting-api"
+        ],
+        "match": "bot_commands:",
+        "op": "publish"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "unique-id": "unit-in",
+   "node-type": "data-asset",
+   "name": "unit:{id}:in (stream)",
+   "description": "interactive input stream for warm chat units; agent-api writes prompts and owner-scoped MCP decisions, agent-worker reads"
+  },
+  {
+   "unique-id": "va-chat",
+   "node-type": "data-asset",
+   "name": "va:meeting:{id}:chat (pubsub)",
+   "description": "in-meeting chat pub/sub; gateway fans out. NO in-repo writer in this carve"
+  },
+  {
+   "unique-id": "identity-db",
+   "node-type": "data-asset",
+   "name": "identity (users/api_tokens)",
+   "description": "users + scoped API tokens",
+   "controls": {
+    "ownership": {
+     "description": "single writer (P23)",
+     "requirements": [
+      {
+       "requirement-url": "urn:tina:calm:controls:single-writer",
+       "config": {
+        "writers": [
+         "admin-api"
+        ]
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "unique-id": "dashboard",
+   "node-type": "webclient",
+   "name": "dashboard (deprecated)",
+   "description": "Optional Next.js Dashboard over the authenticated Gateway. Per-user cookie keys front Agent API chat sessions, shared model preferences, private workspace documents and meeting Q&A. Meeting knowledge uses bounded canonical evidence, explicit Wiki Apply and revision-safe action/decision review. No service-token identity fallback or direct Agent API browser path.",
+   "metadata": [
+    {
+     "path": "deploy/compose",
+     "external-image": "tina/dashboard"
+    }
+   ]
+  },
+  {
+   "unique-id": "flows",
+   "node-type": "system",
+   "name": "flows",
+   "description": "the reaction engine; owns the reaction row and its effect receipts",
+   "metadata": [
+    {
+     "path": "core/flows"
+    }
+   ]
+  },
+  {
+   "unique-id": "flows-engine",
+   "node-type": "module",
+   "name": "flows-engine",
+   "description": "the engine: stdlib-only at module scope — step implementations and flow definitions are values it receives, never imports",
+   "metadata": [
+    {
+     "path": "core/flows/src/flows"
+    }
+   ]
+  },
+  {
+   "unique-id": "flows-api",
+   "node-type": "service",
+   "name": "flows-api",
+   "description": "the flows HTTP surface: fact ingress (/events), the flow registry and lifecycle, the reaction projection, the person-scoped timeline",
+   "metadata": [
+    {
+     "path": "core/flows/src/flows_integrations"
+    }
+   ],
+   "interfaces": [
+    {
+     "unique-id": "flows-http",
+     "type": "api"
+    }
+   ]
+  },
+  {
+   "unique-id": "flows-worker",
+   "node-type": "service",
+   "name": "flows-worker",
+   "description": "the one leased loop; a SKIP LOCKED poll over next_run_at is the only clock consumer — time is a column, not a scheduler",
+   "metadata": [
+    {
+     "path": "core/flows/src/flows_worker"
+    }
+   ]
+  },
+  {
+   "unique-id": "flows-defs",
+   "node-type": "module",
+   "name": "flows-defs",
+   "description": "product behaviour as DATA: each flow is a typed event trigger plus an ordered list of step FUNCTIONS, one registration per version; in-flight reactions keep the version stamped at admission",
+   "metadata": [
+    {
+     "path": "core/flows/src/flows_defs"
+    }
+   ]
+  },
+  {
+   "unique-id": "flows-steps",
+   "node-type": "module",
+   "name": "flows-steps",
+   "description": "the step implementations a flow names — one function per capability, registered by __name__; the real adapters call domain HTTP surfaces and sit OUTSIDE the engine's import graph, and fakes.py mirrors the same names so every fixture runs with zero domains attached",
+   "metadata": [
+    {
+     "path": "core/flows/src/flows_steps"
+    }
+   ]
+  },
+  {
+   "unique-id": "flows-schema",
+   "node-type": "module",
+   "name": "flows-schema",
+   "description": "the schema source of truth: declarative SQLAlchemy models from which core/flows/schema.sql is generated (scripts/gen_schema.py, drift-tested); lives outside src/flows so the engine stays stdlib-pure at import",
+   "metadata": [
+    {
+     "path": "core/flows/src/flows_schema"
+    }
+   ]
+  },
+  {
+   "unique-id": "flows-timeline",
+   "node-type": "module",
+   "name": "flows-timeline",
+   "description": "one person's day in order: the READ back over reactions and effect receipts along the time axis. It admits nothing, claims nothing and writes nothing — the read model for the timeline and queue surfaces",
+   "metadata": [
+    {
+     "path": "core/flows/src/flows_timeline"
+    }
+   ]
+  },
+  {
+   "unique-id": "flows-rows",
+   "node-type": "data-asset",
+   "name": "flows-rows",
+   "description": "the reaction + effect_receipt tables (core/flows/schema.sql); a retry consults the receipt before touching the outside world again. TWO writers: flows-worker runs the steps and stamps the receipts, and flows-api admits facts (POST /events → admit() → INSERT INTO reaction) and registers flow versions (INSERT INTO flow_version) in its own process"
+  },
+  {
+   "unique-id": "flows.v1",
+   "node-type": "contract",
+   "name": "flows.v1",
+   "description": "flows.v1 — the carrier census (flows): one producing domain per event type, with the refs a consumer may rely on and the cardinality it may assume. Read by gate:config-contract (a publish-edge key's carriers must be registered here, owned by that service's domain), by gate:schema and by the flows suite. Unsealed by intent — see the contract's README",
+   "metadata": [
+    {
+     "path": "core/flows/contracts/flows.v1",
+     "domain": "flows"
+    }
+   ]
+  },
+  {
+   "unique-id": "processed-notes.v1",
+   "node-type": "contract",
+   "name": "processed-notes.v1",
+   "description": "Canonical-window request/result and approved notes; Meeting API owns source fingerprint/lease CAS, invalidation and publication. Legacy unconfigured processing remains compatible.",
+   "metadata": [
+    {
+     "path": "core/agent/contracts/processed-notes.v1",
+     "domain": "agent"
+    }
+   ]
+  },
+  {
+   "unique-id": "native-capture",
+   "node-type": "service",
+   "name": "TINA Capture",
+   "description": "Tauri/Rust macOS 15+ client: explicit meeting capture of microphone and system audio plus hold-to-dictate from a global Fn shortcut. Separate source channels are validated, resampled to 16 kHz with SpeexDSP and sent as capture.v1 to local Desktop. Native Capture does not link Sherpa/ONNX for resampling, avoiding incompatible KissFFT symbols between Sherpa and fixed-point Speex. Resampler float samples use PCM16 units internally and return normalized PCM; packet boundaries do not change the output waveform. Default dual-source capture uses Speex AEC plus residual echo suppression with channel 999 as far-end reference, preserves raw mic on archive-only channel 1002 and routes processed mic on channel 1000 to ASR. Aligned dual-source blocks additionally use a stateful 70 Hz high-pass on mic/reference and Speex denoising capped at -3 dB; AGC/VAD remain off and no samples are gated out. TINA_MIC_CLEANUP=0 restores AEC plus residual-only behavior; TINA_SPEEX_RESIDUAL_SUPPRESSION=0 keeps linear AEC only and TINA_SPEEX_AEC=0 uses raw mic. Capture Diagnostics distinguishes configured AEC from actual processed blocks, reports bypassed samples and source mic clipping, and exposes setup fallback reasons without audio or text. Pause/resume clears pending audio and DSP state while retaining session counters. Missing sample-index.v1, DSP initialization failure or unavailable reference passes original mic through. CoreAudio process metadata raises a non-focusable detect/record/ended overlay for allowlisted meeting apps after a 5 s sustain; capture never auto-starts, pause drops frames and freezes the elapsed clock, and a meeting-end reminder offers a 15 s keep-recording grace. Live captions subscribe to Desktop WS /ws, keep a rolling confirmed/pending window for the floating subtitle window, and never affect audio. Markdown export reads the Desktop transcript. Dictation uses microphone only; after stop, Desktop may forward only final transcript text through the authenticated polish bridge, while TINA Capture keeps raw ASR available for copy/restore and pastes raw text if polish is unavailable. No screen images or active-app contents are read; no model or service credentials are loaded in this process.",
+   "metadata": [
+    {
+     "path": "clients/desktop-native"
+    }
+   ]
+  },
+  {
+   "unique-id": "foreground-application",
+   "node-type": "system",
+   "name": "foreground application",
+   "description": "User-selected local application with the focused text field; receives only the transcript pasted after the explicit dictation hotkey is released."
+  },
+  {
+   "unique-id": "transcript-document.v1",
+   "node-type": "data-asset",
+   "name": "transcript-document.v1",
+   "description": "Owner-only raw/normalized/corrected transcript with immutable source audio references and revision history",
+   "metadata": [
+    {
+     "path": "core/meetings/contracts/transcript-document.v1"
+    }
+   ]
+  },
+  {
+   "unique-id": "asr-status.v1",
+   "node-type": "data-asset",
+   "name": "asr-status.v1",
+   "description": "Read-only ASR model, queue and latency diagnostics",
+   "metadata": [
+    {
+     "path": "core/meetings/contracts/asr-status.v1"
+    }
+   ]
+  },
+  {
+   "unique-id": "desktop-journal",
+   "node-type": "database",
+   "name": "Desktop transcript journal",
+   "description": "Local SQLite WAL: durable meetings, immutable per-source Float32 PCM timeline and original ASR with compare-and-swap correction history. Single writer Desktop. Audio cap 2 GiB/session is surfaced as archive incomplete; ASR continues. Stores refinement jobs/proposals and atomic apply with ASR model/audio hash provenance. Canonical FTS5 current-text index and transactional revision outbox, rebuilt/replayed across restart. Additive asr_language_reviews table stores pending original/retry results and Float32 request audio, deduplicated per meeting/session/PCM hash; 90-second request and 256 MiB per-meeting audio limits. Additive audio_capture_sessions maps meeting/client nonce to persistent archive id; audio_chunks acts as durable exact sample-range receipt with byte/timestamp comparison and overlap rejection. Existing 2 GiB session quota includes pre-restart bytes. Additive asr_sessions, asr_windows and asr_coverage persist routing digests, source/sample jobs and processed intervals; speaker_name is stored with audio chunks. Live confirmed text and its coverage commit atomically. Recovery transcript, FTS index, sample checkpoint and completed job share one SQLite transaction. Running jobs become retryable after process restart. Historical PCM without routing metadata is not auto-decoded. Additive journal_metadata and foundation_versions retain source authority identity and export sequence across restart. Additive speaker_registries, diarization_jobs and canonical_projections persist independent speaker revisions, source-bound proposals and canonical projection versions. Speaker updates and speaker-revision.v1 outbox commit atomically; raw PCM/text remain unchanged. Speaker-aware stt-foundation.v1 exports preserve optional speaker ID/revision. Additive alignment_jobs and alignment_results store accepted-text timing independent from raw ASR; transcript_sequences supplies monotonic metadata invalidation sequences independent of text history length. Alignment result and metadata-only event commit in one SQLite transaction. Original source timestamps and accepted/raw text never change during alignment.",
+   "metadata": [
+    {
+     "contract": "transcript-document.v1"
+    }
+   ]
+  },
+  {
+   "unique-id": "transcript-refinement.v1",
+   "node-type": "data-asset",
+   "name": "transcript-refinement.v1",
+   "description": "Owner-only second-pass ASR proposals for Desktop and clocked bot recordings. Optional fixed vocabulary; explicit revision-safe Apply and immutable raw Restore.",
+   "metadata": [
+    {
+     "path": "core/meetings/contracts/transcript-refinement.v1"
+    }
+   ]
+  },
+  {
+   "unique-id": "transcript-alignment.v1",
+   "node-type": "data-asset",
+   "name": "transcript-alignment.v1",
+   "description": "Owner-only word timestamps and conservative word-level speaker attribution over raw ASR and verified saved audio",
+   "metadata": [
+    {
+     "path": "core/meetings/contracts/transcript-alignment.v1"
+    }
+   ]
+  },
+  {
+   "unique-id": "transcript-revision.v1",
+   "node-type": "data-asset",
+   "name": "transcript-revision.v1",
+   "description": "Metadata-only canonical revision notifications; durable outbox, exact-ID ack, replay-safe snapshot invalidation.",
+   "metadata": [
+    {
+     "path": "core/meetings/contracts/transcript-revision.v1"
+    }
+   ]
+  },
+  {
+   "unique-id": "speaker-revision.v1",
+   "node-type": "data-asset",
+   "name": "speaker-revision.v1",
+   "description": "Metadata-only identity revisions. Owner CAS writes and observed Meet metadata share the durable revision outbox; identities and text use independent revision counters.",
+   "metadata": [
+    {
+     "path": "core/meetings/contracts/speaker-revision.v1"
+    }
+   ]
+  },
+  {
+   "unique-id": "canonical-transcript.v1",
+   "node-type": "data-asset",
+   "name": "canonical-transcript.v1",
+   "description": "Durable owner-only accepted transcript with raw text, source-clock aligned words, attribution and source hashes.",
+   "metadata": [
+    {
+     "path": "core/meetings/contracts/canonical-transcript.v1"
+    }
+   ]
+  },
+  {
+   "unique-id": "meeting-memory.v1",
+   "node-type": "data-asset",
+   "name": "meeting-memory.v1",
+   "description": "Conversation windows over finalized canonical speech and VI/EN extraction candidates with exact-quote revision evidence.",
+   "metadata": [
+    {
+     "path": "core/meetings/contracts/meeting-memory.v1"
+    }
+   ]
+  },
+  {
+   "unique-id": "meeting-memory-revision.v1",
+   "node-type": "data-asset",
+   "name": "meeting-memory-revision.v1",
+   "description": "Metadata-only owner projection revisions, delivered through the durable outbox; contains no quotes or identities.",
+   "metadata": [
+    {
+     "path": "core/meetings/contracts/meeting-memory-revision.v1"
+    }
+   ]
+  },
+  {
+   "unique-id": "asr-recovery.v1",
+   "node-type": "data-asset",
+   "name": "asr-recovery.v1",
+   "description": "Owner-scoped Desktop recovery status: source/sample checkpoints and bounded ASR window attempts; no provider credentials or PCM.",
+   "metadata": [
+    {
+     "path": "core/meetings/contracts/asr-recovery.v1"
+    }
+   ]
+  },
+  {
+   "unique-id": "stt-foundation.v1",
+   "node-type": "data-asset",
+   "name": "stt-foundation.v1",
+   "description": "Portable authoritative source snapshots: global IDs, immutable raw, revision history, exact source sample references and owner-scoped CAS replicas.",
+   "metadata": [
+    {
+     "path": "core/meetings/contracts/stt-foundation.v1"
+    }
+   ]
+  },
+  {
+   "unique-id": "stt-metrics.v1",
+   "node-type": "data-asset",
+   "name": "stt-metrics.v1",
+   "description": "Content-free bounded STT stage metrics; foreground UI timing remains client-reported and distinct from server stages.",
+   "metadata": [
+    {
+     "path": "core/meetings/contracts/stt-metrics.v1"
+    }
+   ]
+  },
+  {
+   "unique-id": "transcript-sync",
+   "node-type": "service",
+   "name": "Owner transcript synchronization CLI",
+   "description": "Explicit owner invocation copies a completed source snapshot to a read-only Meeting API replica. It never uploads PCM, changes authority or starts AI processing. Keys remain in environment; redirects and unbounded responses are refused.",
+   "metadata": [
+    {
+     "path": "deploy/compose/bin/sync-transcript.mjs"
+    }
+   ]
+  },
+  {
+   "unique-id": "diarization-worker",
+   "node-type": "service",
+   "name": "Local speaker diarization worker",
+   "description": "Existing optional authenticated loopback CPU worker; bounded mono 16 kHz PCM16 WAV input, acoustic turns with model and audio SHA-256 output. No real-name recognition, no direct database writes. Used after capture by independent Desktop and Meeting API authorities.",
+   "metadata": [
+    {
+     "path": "deploy/transcription/diarization"
+    }
+   ],
+   "interfaces": [
+    {
+     "unique-id": "diarization-worker-http",
+     "type": "api"
+    }
+   ]
+  },
+  {
+   "unique-id": "canonical-notes-requests",
+   "node-type": "data-asset",
+   "name": "canonical_notes_requests",
+   "description": "Canonical readable notes; generation-bound source fingerprints, exact evidence; raw ASR is immutable. Legacy proc writers are disabled when canonical processing is configured.",
+   "controls": {
+    "ownership": {
+     "description": "single canonical writer",
+     "requirements": [
+      {
+       "requirement-url": "urn:tina:calm:controls:single-writer",
+       "config": {
+        "writers": [
+         "meeting-api"
+        ],
+        "match": "canonical_notes_requests",
+        "op": "xadd"
+       }
+      }
+     ]
+    }
+   },
+   "metadata": [
+    {
+     "contract": "processed-notes.v1"
+    },
+    {
+     "stage": "derived"
+    }
+   ]
+  },
+  {
+   "unique-id": "canonical-notes-results",
+   "node-type": "data-asset",
+   "name": "canonical_notes_results",
+   "description": "Canonical readable notes; generation-bound source fingerprints, exact evidence; raw ASR is immutable. Legacy proc writers are disabled when canonical processing is configured.",
+   "controls": {
+    "ownership": {
+     "description": "single canonical writer",
+     "requirements": [
+      {
+       "requirement-url": "urn:tina:calm:controls:single-writer",
+       "config": {
+        "writers": [
+         "agent-worker"
+        ],
+        "match": "canonical_notes_results",
+        "op": "xadd"
+       }
+      }
+     ]
+    }
+   },
+   "metadata": [
+    {
+     "contract": "processed-notes.v1"
+    },
+    {
+     "stage": "derived"
+    }
+   ]
+  },
+  {
+   "unique-id": "canonical-notes-approved",
+   "node-type": "data-asset",
+   "name": "proc:meeting:{id} (canonical approved notes)",
+   "description": "Canonical readable notes; generation-bound source fingerprints, exact evidence; raw ASR is immutable. Legacy proc writers are disabled when canonical processing is configured. Approved entity cards and sanitized model failures use this same stream; unit output retains its worker-only writer.",
+   "controls": {
+    "ownership": {
+     "description": "single canonical writer",
+     "requirements": [
+      {
+       "requirement-url": "urn:tina:calm:controls:single-writer",
+       "config": {
+        "writers": [
+         "meeting-api"
+        ],
+        "match": "proc:meeting:.*",
+        "op": "xadd"
+       }
+      }
+     ]
+    }
+   },
+   "metadata": [
+    {
+     "contract": "processed-notes.v1"
+    },
+    {
+     "stage": "derived"
+    }
+   ]
+  },
+  {
+   "unique-id": "meeting-knowledge-pages",
+   "node-type": "data-asset",
+   "name": "Reviewed meeting answers and Wiki pages",
+   "description": "Private .meeting-knowledge/{meeting_id}/{answer_id}.json snapshots and create-only wiki/meetings/{meeting_id}/{answer_id}.md pages. Source fingerprints are rechecked on answer review, Apply and Wiki opening; this is cross-store freshness checking, not a distributed transaction. Source-bound fact reviews live in reviews/{fact_id}.json with explicit approved/discarded/pending state, edited display text and review CAS; canonical facts and raw audio/text are unchanged."
+  },
+  {
+   "unique-id": "workspace-human-documents",
+   "node-type": "data-asset",
+   "name": "Explicit private Markdown document edits",
+   "description": "Owner-authorized content document PUT with expected SHA-256, existing workspace write lock, entity frontmatter validation and atomic file replacement. Explicit per-path Git commit leaves unrelated staged paths and remotes untouched; shared workspaces remain read-only here. General harness writers retain their existing filesystem behavior."
+  }
+ ],
+ "relationships": [
+  {
+   "unique-id": "agent-composed",
+   "relationship-type": {
+    "composed-of": {
+     "container": "agent",
+     "nodes": [
+      "agent-api",
+      "event.v1",
+      "invoke.v1",
+      "proactive-card.v1",
+      "routine.v1",
+      "task.v1",
+      "tool.v1",
+      "tool-approval.v1",
+      "unit.v1",
+      "workspace.v1",
+      "agent-worker",
+      "meeting-wiki-entity",
+      "out-stream",
+      "unit-in",
+      "va-chat",
+      "meeting-knowledge-pages",
+      "workspace-human-documents"
+     ]
+    }
+   }
+  },
+  {
+   "unique-id": "gateway-composed",
+   "relationship-type": {
+    "composed-of": {
+     "container": "gateway-system",
+     "nodes": [
+      "conformance",
+      "gateway",
+      "api.v1",
+      "logevent.v1",
+      "ws.v1"
+     ]
+    }
+   }
+  },
+  {
+   "unique-id": "identity-composed",
+   "relationship-type": {
+    "composed-of": {
+     "container": "identity",
+     "nodes": [
+      "admin-api",
+      "identity.v1",
+      "identity-db"
+     ]
+    }
+   }
+  },
+  {
+   "unique-id": "meetings-composed",
+   "relationship-type": {
+    "composed-of": {
+     "container": "meetings",
+     "nodes": [
+      "bot",
+      "discord-connector",
+      "desktop",
+      "meeting-api",
+      "alignment-worker",
+      "mcp",
+      "buffer",
+      "capture-codec",
+      "gmeet-capture",
+      "gmeet-pipeline",
+      "jitsi-capture",
+      "join",
+      "mixed-capture-core",
+      "mixed-pipeline",
+      "record-chunker",
+      "recording",
+      "remote-browser",
+      "teams-capture",
+      "whisper",
+      "zoom-capture",
+      "acts.v1",
+      "captured-signal.v1",
+      "flagged-issue.v1",
+      "invocation.v1",
+      "lifecycle.v1",
+      "service-authority.v1",
+      "transcript.v1",
+      "webhook.v1",
+      "transcription",
+      "segments-stream",
+      "tc-stream",
+      "tc-mutable",
+      "bm-status",
+      "u-meetings",
+      "bot-commands",
+      "segments-table",
+      "recording-blob",
+      "userdata-blob",
+      "transcript-document.v1",
+      "transcript-alignment.v1",
+      "asr-status.v1",
+      "desktop-journal",
+      "transcript-refinement.v1",
+      "transcript-revision.v1",
+      "speaker-revision.v1",
+      "canonical-transcript.v1",
+      "meeting-memory.v1",
+      "meeting-memory-revision.v1",
+      "stt-foundation.v1",
+      "stt-metrics.v1",
+      "transcript-sync",
+      "diarization-worker"
+     ]
+    }
+   }
+  },
+  {
+   "unique-id": "service-authority-composed",
+   "relationship-type": {
+    "composed-of": {
+     "container": "service-authority-system",
+     "nodes": [
+      "service-authority"
+     ]
+    }
+   }
+  },
+  {
+   "unique-id": "system-webhook-composed",
+   "relationship-type": {
+    "composed-of": {
+     "container": "system-webhook-system",
+     "nodes": [
+      "system-webhook"
+     ]
+    }
+   }
+  },
+  {
+   "unique-id": "runtime-composed",
+   "relationship-type": {
+    "composed-of": {
+     "container": "runtime-system",
+     "nodes": [
+      "runtime.v1",
+      "schedule.v1",
+      "runtime"
+     ]
+    }
+   }
+  },
+  {
+   "unique-id": "bot-writes-segments-stream",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "bot"
+     },
+     "destination": {
+      "node": "segments-stream"
+     }
+    }
+   },
+   "metadata": [
+    {
+     "access": "write"
+    }
+   ]
+  },
+  {
+   "unique-id": "bot-publishes-mutable",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "bot"
+     },
+     "destination": {
+      "node": "tc-mutable"
+     }
+    }
+   },
+   "metadata": [
+    {
+     "access": "write"
+    }
+   ]
+  },
+  {
+   "unique-id": "collector-reads-segments",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "meeting-api"
+     },
+     "destination": {
+      "node": "segments-stream"
+     }
+    }
+   },
+   "metadata": [
+    {
+     "access": "read"
+    }
+   ],
+   "description": "Producer session_uid is retained durably for recording-to-segment mapping."
+  },
+  {
+   "unique-id": "collector-publishes-mutable",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "meeting-api"
+     },
+     "destination": {
+      "node": "tc-mutable"
+     }
+    }
+   },
+   "metadata": [
+    {
+     "access": "write"
+    }
+   ]
+  },
+  {
+   "unique-id": "collector-writes-table",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "meeting-api"
+     },
+     "destination": {
+      "node": "segments-table"
+     }
+    }
+   },
+   "metadata": [
+    {
+     "access": "write"
+    }
+   ]
+  },
+  {
+   "unique-id": "collector-writes-tc",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "meeting-api"
+     },
+     "destination": {
+      "node": "tc-stream"
+     }
+    }
+   },
+   "metadata": [
+    {
+     "access": "write"
+    }
+   ]
+  },
+  {
+   "unique-id": "agent-reads-tc",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "agent-api"
+     },
+     "destination": {
+      "node": "tc-stream"
+     }
+    }
+   },
+   "metadata": [
+    {
+     "access": "read"
+    }
+   ]
+  },
+  {
+   "unique-id": "gateway-reads-mutable",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "gateway"
+     },
+     "destination": {
+      "node": "tc-mutable"
+     }
+    }
+   },
+   "metadata": [
+    {
+     "access": "read"
+    }
+   ]
+  },
+  {
+   "unique-id": "terminal-reads-tc",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "terminal"
+     },
+     "destination": {
+      "node": "tc-stream"
+     }
+    }
+   },
+   "metadata": [
+    {
+     "access": "read"
+    }
+   ]
+  },
+  {
+   "unique-id": "terminal-reads-out",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "terminal"
+     },
+     "destination": {
+      "node": "out-stream"
+     }
+    }
+   },
+   "metadata": [
+    {
+     "access": "read"
+    }
+   ]
+  },
+  {
+   "unique-id": "terminal-composed",
+   "relationship-type": {
+    "composed-of": {
+     "container": "terminal",
+     "nodes": [
+      "terminal-app",
+      "terminal-canvas",
+      "terminal-contributions",
+      "terminal-lib",
+      "terminal-platform",
+      "terminal-surfaces",
+      "terminal-ui-kit",
+      "terminal-workbench"
+     ]
+    }
+   }
+  },
+  {
+   "unique-id": "bot-writes-recording",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "bot"
+     },
+     "destination": {
+      "node": "recording-blob"
+     }
+    }
+   },
+   "metadata": [
+    {
+     "access": "write"
+    }
+   ]
+  },
+  {
+   "unique-id": "bot-userdata",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "bot"
+     },
+     "destination": {
+      "node": "userdata-blob"
+     }
+    }
+   },
+   "description": "restore session before launch (read) + write rotated session back on clean teardown (write)",
+   "protocol": "HTTPS",
+   "metadata": [
+    {
+     "access": "read-write"
+    }
+   ]
+  },
+  {
+   "unique-id": "remote-browser-userdata",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "remote-browser"
+     },
+     "destination": {
+      "node": "userdata-blob"
+     }
+    }
+   },
+   "description": "provisioning login uploads the confirmed signed-in session",
+   "protocol": "HTTPS",
+   "metadata": [
+    {
+     "access": "write"
+    }
+   ]
+  },
+  {
+   "unique-id": "gateway-reads-recording",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "gateway"
+     },
+     "destination": {
+      "node": "recording-blob"
+     }
+    }
+   },
+   "metadata": [
+    {
+     "access": "read"
+    }
+   ]
+  },
+  {
+   "unique-id": "platform-composed",
+   "relationship-type": {
+    "composed-of": {
+     "container": "platform",
+     "nodes": [
+      "redis",
+      "postgres",
+      "object-store"
+     ]
+    }
+   }
+  },
+  {
+   "unique-id": "workers-deployed",
+   "description": "bot + agent-worker are runtime.v1 workloads",
+   "relationship-type": {
+    "deployed-in": {
+     "container": "runtime",
+     "nodes": [
+      "bot",
+      "agent-worker"
+     ]
+    }
+   }
+  },
+  {
+   "unique-id": "bot-stt",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "bot"
+     },
+     "destination": {
+      "node": "transcription",
+      "interface": "stt-endpoint"
+     }
+    }
+   },
+   "description": "audio -> first-party STT via TRANSCRIPTION_SERVICE_URL; the local CPU stack reaches STT on the main TINA Compose network",
+   "protocol": "HTTPS",
+   "metadata": [
+    {
+     "access": "call"
+    }
+   ],
+   "controls": {
+    "data-egress": {
+     "description": "STT is first-party and self-hostable; default destination is tenant-hosted, so audio need not leave the tenant",
+     "requirements": [
+      {
+       "requirement-url": "urn:tina:calm:controls:no-egress",
+       "config": {
+        "dataClass": "audio",
+        "destination": "tenant-hosted",
+        "egressApproved": true
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "unique-id": "terminal-stt",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "terminal-app"
+     },
+     "destination": {
+      "node": "transcription",
+      "interface": "stt-endpoint"
+     }
+    }
+   },
+   "description": "authenticated composer dictation -> selected STT via /api/stt with request IDs and capture-lag metadata; Docker Desktop routes host.docker.internal to loopback FunASR",
+   "protocol": "HTTP",
+   "metadata": [
+    {
+     "access": "call"
+    }
+   ],
+   "controls": {
+    "data-egress": {
+     "description": "local FunASR receives audio through Docker Desktop's host gateway and remains bound to host loopback",
+     "requirements": [
+      {
+       "requirement-url": "urn:tina:calm:controls:no-egress",
+       "config": {
+        "dataClass": "audio",
+        "destination": "tenant-hosted",
+        "egressApproved": true
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "unique-id": "terminal-asr-status",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "terminal-app"
+     },
+     "destination": {
+      "node": "transcription",
+      "interface": "asr-status-endpoint"
+     }
+    }
+   },
+   "description": "verified admin-only GET /api/admin/asr-status resolves selected backend and reads content-free asr-status.v1; no audio or transcript text; browser render timings remain local",
+   "protocol": "HTTP",
+   "metadata": [
+    {
+     "access": "read"
+    }
+   ]
+  },
+  {
+   "unique-id": "terminal-dictation-polish",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "terminal-app"
+     },
+     "destination": {
+      "node": "agent-api",
+      "interface": "agent-api-rest"
+     }
+    }
+   },
+   "description": "after stop, the authenticated Terminal sends only final transcript text to /api/dictation/polish; raw text remains in the composer for restore and no chat history is written",
+   "protocol": "HTTP",
+   "metadata": [
+    {
+     "access": "call"
+    }
+   ]
+  },
+  {
+   "unique-id": "agent-worker-dictation-completion",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "agent-worker"
+     },
+     "destination": {
+      "node": "completion-provider",
+      "interface": "completion-provider-api"
+     }
+    }
+   },
+   "description": "one-shot, tool-less CompletionPort call for the final transcript using effective per-user model settings; sends text only, never audio or chat history",
+   "protocol": "HTTP",
+   "metadata": [
+    {
+     "access": "call"
+    }
+   ],
+   "controls": {
+    "data-egress": {
+     "description": "transcript text follows the caller's configured CompletionPort, which may be tenant-hosted or external",
+     "requirements": [
+      {
+       "requirement-url": "urn:tina:calm:controls:no-egress",
+       "config": {
+        "dataClass": "transcript",
+        "destination": "external-saas",
+        "egressApproved": true
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "unique-id": "agent-worker-meeting-summary-completion",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "agent-worker"
+     },
+     "destination": {
+      "node": "completion-provider",
+      "interface": "completion-provider-api"
+     }
+    }
+   },
+   "description": "on meeting end, a tool-less CompletionPort summarizes surfaced cards only; it receives no raw transcript or filesystem tools",
+   "protocol": "HTTP",
+   "metadata": [
+    {
+     "access": "call"
+    }
+   ],
+   "controls": {
+    "data-egress": {
+     "description": "surfaced meeting cards follow the caller's configured CompletionPort, which may be tenant-hosted or external",
+     "requirements": [
+      {
+       "requirement-url": "urn:tina:calm:controls:no-egress",
+       "config": {
+        "dataClass": "transcript",
+        "destination": "external-saas",
+        "egressApproved": true
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "unique-id": "agent-worker-validates-workspace-entity",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "agent-worker"
+     },
+     "destination": {
+      "node": "workspace.v1"
+     }
+    }
+   },
+   "description": "validate changed entity frontmatter against workspace.v1 before committing each writable mount",
+   "metadata": [
+    {
+     "access": "read"
+    }
+   ]
+  },
+  {
+   "unique-id": "agent-worker-writes-meeting-entity",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "agent-worker"
+     },
+     "destination": {
+      "node": "meeting-wiki-entity"
+     }
+    }
+   },
+   "description": "deterministically serialize the validated summary/cards and commit only kg/entities/meeting/{id}.md",
+   "metadata": [
+    {
+     "access": "write"
+    }
+   ]
+  },
+  {
+   "unique-id": "bot-commands-read",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "bot"
+     },
+     "destination": {
+      "node": "bot-commands"
+     }
+    }
+   },
+   "description": "SUBSCRIBE acts.v1 commands",
+   "metadata": [
+    {
+     "access": "read"
+    }
+   ]
+  },
+  {
+   "unique-id": "ma-status",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "meeting-api"
+     },
+     "destination": {
+      "node": "bm-status"
+     }
+    }
+   },
+   "description": "PUBLISH status",
+   "metadata": [
+    {
+     "access": "write"
+    }
+   ]
+  },
+  {
+   "unique-id": "ma-umeetings",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "meeting-api"
+     },
+     "destination": {
+      "node": "u-meetings"
+     }
+    }
+   },
+   "description": "PUBLISH per-user status",
+   "metadata": [
+    {
+     "access": "write"
+    }
+   ]
+  },
+  {
+   "unique-id": "ma-commands",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "meeting-api"
+     },
+     "destination": {
+      "node": "bot-commands"
+     }
+    }
+   },
+   "description": "PUBLISH leave/speak",
+   "metadata": [
+    {
+     "access": "write"
+    }
+   ]
+  },
+  {
+   "unique-id": "ma-recording",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "meeting-api"
+     },
+     "destination": {
+      "node": "recording-blob"
+     }
+    }
+   },
+   "description": "S3 PUT stitched master",
+   "protocol": "HTTPS",
+   "metadata": [
+    {
+     "access": "write"
+    }
+   ]
+  },
+  {
+   "unique-id": "ma-pg",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "meeting-api"
+     },
+     "destination": {
+      "node": "postgres"
+     }
+    }
+   },
+   "protocol": "JDBC",
+   "metadata": [
+    {
+     "access": "write"
+    }
+   ]
+  },
+  {
+   "unique-id": "ma-object-store",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "meeting-api"
+     },
+     "destination": {
+      "node": "object-store"
+     }
+    }
+   },
+   "protocol": "HTTPS",
+   "metadata": [
+    {
+     "access": "write"
+    }
+   ]
+  },
+  {
+   "unique-id": "ma-runtime",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "meeting-api"
+     },
+     "destination": {
+      "node": "runtime",
+      "interface": "runtime-rest"
+     }
+    }
+   },
+   "description": "POST /workloads spawn bot",
+   "protocol": "HTTPS"
+  },
+  {
+   "unique-id": "ma-admin-calendar",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "meeting-api"
+     },
+     "destination": {
+      "node": "admin-api",
+      "interface": "admin-api-rest"
+     }
+    }
+   },
+   "description": "GET /internal/calendar-configs discovers secret-gated calendar connections for sync and disconnect cleanup",
+   "protocol": "HTTPS"
+  },
+  {
+   "unique-id": "ma-service-authority",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "meeting-api"
+     },
+     "destination": {
+      "node": "service-authority",
+      "interface": "service-authority-rest"
+     }
+    }
+   },
+   "description": "optional signed service-authority.v1 admit/continue decision; unset is explicit OSS allow-all, configured failure is closed",
+   "protocol": "HTTPS"
+  },
+  {
+   "unique-id": "ma-system-webhook",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "meeting-api"
+     },
+     "destination": {
+      "node": "system-webhook",
+      "interface": "system-webhook-rest"
+     }
+    }
+   },
+   "description": "optional signed terminal webhook.v1 delivery to a boot-frozen operator destination; customer webhook SSRF policy remains separate",
+   "protocol": "HTTP(S)"
+  },
+  {
+   "unique-id": "aa-watch",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "agent-api"
+     },
+     "destination": {
+      "node": "segments-stream"
+     }
+    }
+   },
+   "description": "XREADGROUP agent_copilot (proactive watcher)",
+   "metadata": [
+    {
+     "access": "read"
+    }
+   ]
+  },
+  {
+   "unique-id": "aa-runtime",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "agent-api"
+     },
+     "destination": {
+      "node": "runtime",
+      "interface": "runtime-rest"
+     }
+    }
+   },
+   "description": "POST /workloads spawn agent-worker",
+   "protocol": "HTTPS"
+  },
+  {
+   "unique-id": "aa-unitout",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "agent-api"
+     },
+     "destination": {
+      "node": "out-stream"
+     }
+    }
+   },
+   "description": "SSE relay (/api/chat, /api/meeting/stream)",
+   "metadata": [
+    {
+     "access": "read"
+    }
+   ]
+  },
+  {
+   "unique-id": "aa-unitin-approval",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "agent-api"
+     },
+     "destination": {
+      "node": "unit-in"
+     }
+    }
+   },
+   "description": "POST /api/chat/approval verifies the owner and session, then XADDs a one-call decision",
+   "metadata": [
+    {
+     "access": "write"
+    }
+   ]
+  },
+  {
+   "unique-id": "aw-tcnative",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "agent-worker"
+     },
+     "destination": {
+      "node": "tc-stream"
+     }
+    }
+   },
+   "description": "copilot tails transcript",
+   "metadata": [
+    {
+     "access": "read"
+    }
+   ]
+  },
+  {
+   "unique-id": "aw-unitout",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "agent-worker"
+     },
+     "destination": {
+      "node": "out-stream"
+     }
+    }
+   },
+   "description": "XADD turn events, MCP approval requests and resolutions, cards, and notes",
+   "metadata": [
+    {
+     "access": "write"
+    }
+   ]
+  },
+  {
+   "unique-id": "aw-unitin",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "agent-worker"
+     },
+     "destination": {
+      "node": "unit-in"
+     }
+    }
+   },
+   "description": "chat path XREADs prompts and matching owner decisions while Codex waits for MCP approval",
+   "metadata": [
+    {
+     "access": "read"
+    }
+   ]
+  },
+  {
+   "unique-id": "mcp-gw",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "mcp"
+     },
+     "destination": {
+      "node": "gateway",
+      "interface": "gateway-rest"
+     }
+    }
+   },
+   "description": "every MCP tool forwards the caller's X-API-Key to the public REST surface",
+   "protocol": "HTTPS"
+  },
+  {
+   "unique-id": "gw-ma",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "gateway"
+     },
+     "destination": {
+      "node": "meeting-api",
+      "interface": "meeting-api-rest"
+     }
+    }
+   },
+   "description": "proxy /bots /transcripts /meetings /recordings and per-calendar sync",
+   "protocol": "HTTPS"
+  },
+  {
+   "unique-id": "gw-aa",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "gateway"
+     },
+     "destination": {
+      "node": "agent-api",
+      "interface": "agent-api-rest"
+     }
+    }
+   },
+   "description": "proxy /agent/*",
+   "protocol": "HTTPS"
+  },
+  {
+   "unique-id": "gw-mcp",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "gateway"
+     },
+     "destination": {
+      "node": "mcp",
+      "interface": "mcp-http"
+     }
+    }
+   },
+   "description": "proxy /mcp — POST buffered, GET relayed unbuffered (SSE stream)",
+   "protocol": "HTTPS"
+  },
+  {
+   "unique-id": "gw-admin",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "gateway"
+     },
+     "destination": {
+      "node": "admin-api",
+      "interface": "admin-api-rest"
+     }
+    }
+   },
+   "description": "POST /internal/validate (authz oracle) plus user calendar connection CRUD",
+   "protocol": "HTTPS"
+  },
+  {
+   "unique-id": "gw-status",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "gateway"
+     },
+     "destination": {
+      "node": "bm-status"
+     }
+    }
+   },
+   "description": "WS fan-out",
+   "metadata": [
+    {
+     "access": "read"
+    }
+   ]
+  },
+  {
+   "unique-id": "gw-umeetings",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "gateway"
+     },
+     "destination": {
+      "node": "u-meetings"
+     }
+    }
+   },
+   "description": "WS auto-subscribe",
+   "metadata": [
+    {
+     "access": "read"
+    }
+   ]
+  },
+  {
+   "unique-id": "gw-chat",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "gateway"
+     },
+     "destination": {
+      "node": "va-chat"
+     }
+    }
+   },
+   "description": "WS fan-out",
+   "metadata": [
+    {
+     "access": "read"
+    }
+   ]
+  },
+  {
+   "unique-id": "admin-db",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "admin-api"
+     },
+     "destination": {
+      "node": "identity-db"
+     }
+    }
+   },
+   "protocol": "JDBC",
+   "metadata": [
+    {
+     "access": "write"
+    }
+   ]
+  },
+  {
+   "unique-id": "admin-pg",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "admin-api"
+     },
+     "destination": {
+      "node": "postgres"
+     }
+    }
+   },
+   "protocol": "JDBC",
+   "metadata": [
+    {
+     "access": "write"
+    }
+   ]
+  },
+  {
+   "unique-id": "term-gw-rest",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "terminal"
+     },
+     "destination": {
+      "node": "gateway",
+      "interface": "gateway-rest"
+     }
+    }
+   },
+   "description": "all REST via gateway",
+   "protocol": "HTTPS"
+  },
+  {
+   "unique-id": "term-gw-ws",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "terminal"
+     },
+     "destination": {
+      "node": "gateway",
+      "interface": "gateway-ws"
+     }
+    }
+   },
+   "description": "live WS via gateway",
+   "protocol": "WebSocket"
+  },
+  {
+   "unique-id": "dash-gw-rest",
+   "description": "dashboard → gateway REST (hosted-compat aliases; the hosted-proven wiring)",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "dashboard"
+     },
+     "destination": {
+      "node": "gateway",
+      "interface": "gateway-rest"
+     }
+    }
+   }
+  },
+  {
+   "unique-id": "dash-gw-ws",
+   "description": "dashboard → gateway /ws (live transcript view)",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "dashboard"
+     },
+     "destination": {
+      "node": "gateway",
+      "interface": "gateway-ws"
+     }
+    }
+   }
+  },
+  {
+   "unique-id": "slim-gw",
+   "description": "Python client; REST via gateway",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "slim"
+     },
+     "destination": {
+      "node": "gateway",
+      "interface": "gateway-rest"
+     }
+    }
+   },
+   "protocol": "HTTPS"
+  },
+  {
+   "unique-id": "deploy-composed",
+   "relationship-type": {
+    "composed-of": {
+     "container": "deploy",
+     "nodes": [
+      "execution-targets.v1",
+      "config.v1"
+     ]
+    }
+   }
+  },
+  {
+   "unique-id": "extension-gw",
+   "description": "read-only authenticated Bot transcript list and exact-row snapshots",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "extension"
+     },
+     "destination": {
+      "node": "gateway",
+      "interface": "gateway-rest"
+     }
+    }
+   },
+   "protocol": "HTTP"
+  },
+  {
+   "unique-id": "extension-desktop",
+   "description": "read-only Desktop archive listing and exact transcript snapshots; opens the saved review page",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "extension"
+     },
+     "destination": {
+      "node": "desktop",
+      "interface": "desktop-rest"
+     }
+    }
+   },
+   "protocol": "HTTP"
+  },
+  {
+   "unique-id": "stack-deployed",
+   "description": "the long-running services ship as the deploy/compose stack (transcription has its own deploy unit)",
+   "relationship-type": {
+    "deployed-in": {
+     "container": "deploy",
+     "nodes": [
+      "gateway",
+      "meeting-api",
+      "agent-api",
+      "admin-api",
+      "runtime",
+      "redis",
+      "postgres",
+      "object-store",
+      "transcription"
+     ]
+    }
+   }
+  },
+  {
+   "unique-id": "flows-composed",
+   "relationship-type": {
+    "composed-of": {
+     "container": "flows",
+     "nodes": [
+      "flows-engine",
+      "flows-defs",
+      "flows-steps",
+      "flows-schema",
+      "flows-timeline",
+      "flows-api",
+      "flows-worker",
+      "flows-rows",
+      "flows.v1"
+     ]
+    }
+   }
+  },
+  {
+   "unique-id": "flows-worker-writes-rows",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "flows-worker"
+     },
+     "destination": {
+      "node": "flows-rows"
+     }
+    }
+   },
+   "metadata": [
+    {
+     "access": "write"
+    }
+   ]
+  },
+  {
+   "unique-id": "flows-api-writes-rows",
+   "description": "the second writer, recorded because it is real: POST /events admits a fact in the API process (flows_integrations/flows_api.py → flows.admit → INSERT INTO reaction) and the registry writes flow_version there too. The chart carried only flows-worker, so the one shared carrier in this domain read as single-writer",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "flows-api"
+     },
+     "destination": {
+      "node": "flows-rows"
+     }
+    }
+   },
+   "metadata": [
+    {
+     "access": "write"
+    }
+   ]
+  },
+  {
+   "unique-id": "flows-api-reads-rows",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "flows-api"
+     },
+     "destination": {
+      "node": "flows-rows"
+     }
+    }
+   },
+   "metadata": [
+    {
+     "access": "read"
+    }
+   ]
+  },
+  {
+   "unique-id": "flows-worker-calls-agent-api",
+   "description": "steps reach domains only over their published HTTP surfaces (core/flows/src/flows_steps/common.py) — a domain never knows flows exists",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "flows-worker"
+     },
+     "destination": {
+      "node": "agent-api"
+     }
+    }
+   }
+  },
+  {
+   "unique-id": "flows-worker-calls-gateway",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "flows-worker"
+     },
+     "destination": {
+      "node": "gateway"
+     }
+    }
+   }
+  },
+  {
+   "unique-id": "flows-worker-calls-admin-api",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "flows-worker"
+     },
+     "destination": {
+      "node": "admin-api"
+     }
+    }
+   }
+  },
+  {
+   "unique-id": "flows-deployed",
+   "description": "helm only today (deploy/helm/charts/tina/templates/flows.yaml); the two processes are not services in deploy/compose, so a compose stack runs no flows",
+   "relationship-type": {
+    "deployed-in": {
+     "container": "deploy",
+     "nodes": [
+      "flows-api",
+      "flows-worker"
+     ]
+    }
+   }
+  },
+  {
+   "unique-id": "native-capture-desktop",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "native-capture"
+     },
+     "destination": {
+      "node": "desktop",
+      "interface": "desktop-ingest-ws"
+     }
+    }
+   },
+   "description": "TINA Capture connects to loopback :9099, verifies a per-user HMAC challenge proof, then sends capture.v1 named PCM frames through the launcher proxy to Desktop's ephemeral loopback ingest port. Dual-source capture defaults to Speex AEC plus residual suppression: channel 999 is system audio, channel 1002 archives original mic without ASR, and channel 1000 sends derived mic to ASR. Runtime =0 overrides can disable AEC or residual suppression. Missing sample-index.v1, failed DSP initialization or unavailable reference falls back to original mic. Stop closes ingest and finalizes the existing pipeline. The local token is not the Gateway API key.",
+   "protocol": "WebSocket",
+   "metadata": [
+    {
+     "access": "write"
+    }
+   ]
+  },
+  {
+   "unique-id": "native-dictation-paste",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "native-capture"
+     },
+     "destination": {
+      "node": "foreground-application"
+     }
+    }
+   },
+   "description": "holding Fn captures microphone-only audio through the existing Desktop ASR path; on release, TINA copies the final transcript to the system clipboard and sends Command+V to the focused local application. No screen context is read.",
+   "protocol": "macOS global shortcut + system clipboard + CGEvent",
+   "metadata": [
+    {
+     "access": "write"
+    },
+    {
+     "requirement-url": "urn:tina:calm:controls:no-egress",
+     "config": {
+      "dataClass": "transcript",
+      "destination": "user-selected local application",
+      "egressApproved": true
+     }
+    }
+   ]
+  },
+  {
+   "unique-id": "desktop-native-stt",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "desktop"
+     },
+     "destination": {
+      "node": "transcription",
+      "interface": "stt-endpoint"
+     }
+    }
+   },
+   "description": "bounded WAV windows from Desktop to selected loopback STT via TRANSCRIPTION_SERVICE_URL; native profile uses :18001, alias custom; original VAD segment offsets return on the same transcription contract",
+   "protocol": "HTTP",
+   "metadata": [
+    {
+     "access": "call"
+    }
+   ]
+  },
+  {
+   "unique-id": "desktop-resolves-transcription-settings",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "desktop",
+      "interface": "desktop-rest"
+     },
+     "destination": {
+      "node": "admin-api",
+      "interface": "admin-api-rest"
+     }
+    }
+   },
+   "protocol": "HTTP",
+   "description": "Internal-secret POST /internal/transcription/resolve at new capture-session admission; optional user API key resolves personal preference, otherwise platform default. Selected STT URL/token stay inside Desktop; clients receive only safe backend metadata. Existing sessions retain their selection."
+  },
+  {
+   "unique-id": "native-capture-desktop-settings",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "native-capture"
+     },
+     "destination": {
+      "node": "desktop",
+      "interface": "desktop-rest"
+     }
+    }
+   },
+   "protocol": "HTTP",
+   "description": "Loopback-only GET /transcription/config for safe next-session ASR metadata and GET /transcripts for captured-session results; no provider credentials cross to the native client."
+  },
+  {
+   "unique-id": "native-capture-dictation-polish",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "native-capture"
+     },
+     "destination": {
+      "node": "desktop",
+      "interface": "desktop-rest"
+     }
+    }
+   },
+   "protocol": "HTTP",
+   "description": "After Fn dictation stops, TINA Capture sends only the final raw transcript to Desktop's loopback-only :8057 polish proxy. The proxy uses the server-held TINA_DESKTOP_API_KEY; when the Agent API or CompletionPort is unavailable the client retains and inserts raw ASR.",
+   "metadata": [
+    {
+     "access": "call"
+    }
+   ]
+  },
+  {
+   "unique-id": "desktop-dictation-polish",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "desktop",
+      "interface": "desktop-rest"
+     },
+     "destination": {
+      "node": "agent-api",
+      "interface": "agent-api-rest"
+     }
+    }
+   },
+   "protocol": "HTTP",
+   "description": "Desktop forwards final transcript text only to Gateway POST /agent/dictation/polish under the bound user's API key; audio, raw transcript and credentials are never placed in the native client request to the Agent API.",
+   "metadata": [
+    {
+     "access": "call"
+    }
+   ]
+  },
+  {
+   "unique-id": "native-capture-live-translation",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "native-capture"
+     },
+     "destination": {
+      "node": "desktop",
+      "interface": "desktop-translation-proxy"
+     }
+    }
+   },
+   "protocol": "HTTP",
+   "description": "Live Translation sends only confirmed transcript text and a target language to the loopback Desktop translation proxy. The result is a presentation-only caption sidecar; it does not write ASR, canonical transcript, revision history or audio.",
+   "metadata": [
+    {
+     "access": "call"
+    }
+   ]
+  },
+  {
+   "unique-id": "desktop-live-translation",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "desktop",
+      "interface": "desktop-translation-proxy"
+     },
+     "destination": {
+      "node": "agent-api",
+      "interface": "agent-api-rest"
+     }
+    }
+   },
+   "protocol": "HTTP",
+   "description": "Desktop forwards confirmed transcript text and target language to Gateway POST /agent/dictation/translate using the server-held API key. Agent runs a tool-less CompletionPort job; the translation is not persisted.",
+   "metadata": [
+    {
+     "access": "call"
+    }
+   ]
+  },
+  {
+   "unique-id": "native-capture-desktop-live",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "native-capture"
+     },
+     "destination": {
+      "node": "desktop",
+      "interface": "desktop-live-ws"
+     }
+    }
+   },
+   "description": "Loopback-only WS /ws subscription per captured meeting (platform desktop, native_id tina-native-<uuid>) carrying transcript.v1 confirmed/pending frames for the overlay and floating subtitle window; reconnect failures never stop audio capture and are not written back.",
+   "protocol": "WebSocket",
+   "metadata": [
+    {
+     "access": "read"
+    }
+   ]
+  },
+  {
+   "unique-id": "desktop-journal-write",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "desktop"
+     },
+     "destination": {
+      "node": "desktop-journal"
+     }
+    }
+   },
+   "description": "Desktop persists source PCM once per captured frame, confirmed ASR and correction history on the local owner boundary. Owner review highlights token changes, filters changed segments and plays source clips next to proposals. Corrections atomically update revision history, current-text FTS and a metadata-only durable outbox. Speaker CAS writes append speaker-revision.v1 in the same SQLite transaction. Canonical and exact-quote candidate memory are owner projections over finalized accepted text and identities, not client-derived data."
+  },
+  {
+   "unique-id": "meeting-api-alignment-worker",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "meeting-api",
+      "interface": "meeting-api-rest"
+     },
+     "destination": {
+      "node": "alignment-worker",
+      "interface": "alignment-worker-http"
+     }
+    }
+   },
+   "protocol": "HTTP",
+   "description": "Owner-triggered post-meeting MFA job sends only the verified segment WAV and its raw ASR text to a token-authenticated loopback worker; model, source hashes and word timings return to the owner-only alignment view.",
+   "metadata": [
+    {
+     "access": "call"
+    }
+   ]
+  },
+  {
+   "unique-id": "canonical-revision-notifications",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "meeting-api"
+     },
+     "destination": {
+      "node": "gateway"
+     }
+    }
+   },
+   "protocol": "Redis",
+   "description": "After a correction or word-alignment transaction commits, replay metadata-only transcript.revised events from meeting JSONB to the owner user channel and authorized meeting channel. Clients refetch exact transcript and alignment snapshots on changes/reconnect. Speaker assignments use the same transaction/outbox/channel flow with speaker-revision.v1; audio and raw ASR remain unchanged. Canonical/memory projections use the same owner-scoped durable outbox (meeting-memory-revision.v1); clients poll the memory snapshot while open and refresh transcript on revision events."
+  },
+  {
+   "unique-id": "sync-reads-desktop-source",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "transcript-sync"
+     },
+     "destination": {
+      "node": "desktop",
+      "interface": "desktop-rest"
+     }
+    }
+   },
+   "description": "Owner-triggered GET /transcripts/{platform}/{native}/foundation after capture stops; stt-foundation.v1 contains references, not PCM.",
+   "protocol": "HTTP",
+   "metadata": [
+    {
+     "access": "read"
+    }
+   ]
+  },
+  {
+   "unique-id": "sync-writes-owned-replica",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "transcript-sync"
+     },
+     "destination": {
+      "node": "gateway",
+      "interface": "gateway-rest"
+     }
+    }
+   },
+   "description": "Authenticated owner GET/PUT /transcripts/by-id/{row}/replicas/{meeting_uid}; expected_revision and immutable source history protect the meeting.data replica.",
+   "protocol": "HTTP",
+   "metadata": [
+    {
+     "access": "call"
+    }
+   ]
+  },
+  {
+   "unique-id": "ma-discord-connector",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "meeting-api",
+      "interface": "meeting-api-rest"
+     },
+     "destination": {
+      "node": "discord-connector",
+      "interface": "discord-connector-runtime"
+     }
+    }
+   },
+   "protocol": "HTTP",
+   "description": "POST/GET/DELETE /workloads on the connector's runtime.v1 surface: a Discord spawn creates one in-process voice session whose WorkloadSpec.env carries the invocation.v1 document; stop is confirmed (left, flushed, terminal lifecycle emitted).",
+   "metadata": [
+    {
+     "access": "call"
+    }
+   ]
+  },
+  {
+   "unique-id": "dc-writes-segments-stream",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "discord-connector"
+     },
+     "destination": {
+      "node": "segments-stream"
+     }
+    }
+   },
+   "description": "XADD transcription_segments with transcript.v1 segments; one named lane per speaker, session_uid = invocation.connectionId",
+   "metadata": [
+    {
+     "access": "write"
+    }
+   ]
+  },
+  {
+   "unique-id": "dc-publishes-mutable",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "discord-connector"
+     },
+     "destination": {
+      "node": "tc-mutable"
+     }
+    }
+   },
+   "metadata": [
+    {
+     "access": "write"
+    }
+   ]
+  },
+  {
+   "unique-id": "dc-commands-read",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "discord-connector"
+     },
+     "destination": {
+      "node": "bot-commands"
+     }
+    }
+   },
+   "description": "SUBSCRIBE acts.v1 commands; only `leave` is served in this increment",
+   "metadata": [
+    {
+     "access": "read"
+    }
+   ]
+  },
+  {
+   "unique-id": "dc-stt",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "discord-connector"
+     },
+     "destination": {
+      "node": "transcription",
+      "interface": "stt-endpoint"
+     }
+    }
+   },
+   "description": "decoded per-speaker PCM -> first-party STT via the invocation's TRANSCRIPTION_SERVICE_URL",
+   "protocol": "HTTPS",
+   "metadata": [
+    {
+     "access": "call"
+    }
+   ],
+   "controls": {
+    "data-egress": {
+     "description": "STT is first-party and self-hostable; default destination is tenant-hosted, so audio need not leave the tenant",
+     "requirements": [
+      {
+       "requirement-url": "urn:tina:calm:controls:no-egress",
+       "config": {
+        "dataClass": "audio",
+        "destination": "tenant-hosted",
+        "egressApproved": true
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "unique-id": "desktop-diarization-worker",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "desktop"
+     },
+     "destination": {
+      "node": "diarization-worker",
+      "interface": "diarization-worker-http"
+     }
+    }
+   },
+   "protocol": "HTTP",
+   "description": "Owner-triggered post-meeting speaker analysis sends saved system audio to the token-authenticated loopback worker; bounded acoustic turns return as proposals. Authority retains raw audio/text and applies identities with revision protection.",
+   "metadata": [
+    {
+     "access": "call"
+    }
+   ]
+  },
+  {
+   "unique-id": "meeting-api-diarization-worker",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "meeting-api"
+     },
+     "destination": {
+      "node": "diarization-worker",
+      "interface": "diarization-worker-http"
+     }
+    }
+   },
+   "protocol": "HTTP",
+   "description": "Owner-triggered post-meeting speaker analysis sends saved system audio to the token-authenticated loopback worker; bounded acoustic turns return as proposals. Authority retains raw audio/text and applies identities with revision protection.",
+   "metadata": [
+    {
+     "access": "call"
+    }
+   ]
+  },
+  {
+   "unique-id": "desktop-alignment-worker",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "desktop",
+      "interface": "desktop-rest"
+     },
+     "destination": {
+      "node": "alignment-worker",
+      "interface": "alignment-worker-http"
+     }
+    }
+   },
+   "protocol": "HTTP",
+   "description": "Owner-triggered post-meeting batch sends verified capture PCM16 and accepted text to the existing authenticated loopback MFA worker. Exact tokens, duration, model and source hashes are validated; revision-safe timing is a derived owner projection, never a text rewrite.",
+   "metadata": [
+    {
+     "access": "call"
+    }
+   ]
+  },
+  {
+   "unique-id": "meeting-api-write-canonical-notes-requests",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "meeting-api"
+     },
+     "destination": {
+      "node": "canonical-notes-requests"
+     }
+    }
+   },
+   "metadata": [
+    {
+     "access": "write"
+    }
+   ],
+   "description": "Canonical source snapshot -> isolated tool-less CompletionPort -> meeting-row source/lease CAS -> approved derived view."
+  },
+  {
+   "unique-id": "agent-api-read-canonical-notes-requests",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "agent-api"
+     },
+     "destination": {
+      "node": "canonical-notes-requests"
+     }
+    }
+   },
+   "metadata": [
+    {
+     "access": "read"
+    }
+   ],
+   "description": "Agent API verifies the request proof and owner-scoped lease before dispatching a trusted canonical worker; untrusted event prompts cannot select this path."
+  },
+  {
+   "unique-id": "agent-worker-write-canonical-notes-results",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "agent-worker"
+     },
+     "destination": {
+      "node": "canonical-notes-results"
+     }
+    }
+   },
+   "metadata": [
+    {
+     "access": "write"
+    }
+   ],
+   "description": "Only a proof-and-lease-verified dispatch enters the canonical worker; it binds job user_id to TINA_OWNER before publishing results."
+  },
+  {
+   "unique-id": "meeting-api-read-canonical-notes-results",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "meeting-api"
+     },
+     "destination": {
+      "node": "canonical-notes-results"
+     }
+    }
+   },
+   "metadata": [
+    {
+     "access": "read"
+    }
+   ],
+   "description": "Canonical source snapshot -> isolated tool-less CompletionPort -> meeting-row source/lease CAS -> approved derived view."
+  },
+  {
+   "unique-id": "meeting-api-write-canonical-notes-approved",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "meeting-api"
+     },
+     "destination": {
+      "node": "canonical-notes-approved"
+     }
+    }
+   },
+   "metadata": [
+    {
+     "access": "write"
+    }
+   ],
+   "description": "Canonical source snapshot -> isolated tool-less CompletionPort -> meeting-row source/lease CAS -> approved derived view."
+  },
+  {
+   "unique-id": "agent-api-read-canonical-notes-approved",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "agent-api"
+     },
+     "destination": {
+      "node": "canonical-notes-approved"
+     }
+    }
+   },
+   "metadata": [
+    {
+     "access": "read"
+    }
+   ],
+   "description": "Canonical source snapshot -> isolated tool-less CompletionPort -> meeting-row source/lease CAS -> approved derived view."
+  },
+  {
+   "unique-id": "agent-api-reads-meeting-canonical",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "agent-api"
+     },
+     "destination": {
+      "node": "meeting-api",
+      "interface": "meeting-api-rest"
+     }
+    }
+   },
+   "protocol": "HTTP",
+   "description": "Owner-scoped GET meeting and canonical transcript for bounded evidence-backed Q&A; no transcript writes."
+  },
+  {
+   "unique-id": "agent-api-writes-meeting-knowledge",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "agent-api"
+     },
+     "destination": {
+      "node": "meeting-knowledge-pages"
+     }
+    }
+   },
+   "metadata": [
+    {
+     "access": "write"
+    }
+   ],
+   "description": "Persist private answer/source snapshots and explicitly reviewed create-only Wiki pages; no overwrites."
+  },
+  {
+   "unique-id": "terminal-reads-meeting-knowledge",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "terminal"
+     },
+     "destination": {
+      "node": "meeting-knowledge-pages"
+     }
+    }
+   },
+   "metadata": [
+    {
+     "access": "read"
+    }
+   ],
+   "description": "Through existing authenticated Gateway workspace proxy: related docs, bounded answers, source quotes/audio and freshness warnings."
+  },
+  {
+   "unique-id": "agent-api-writes-private-documents",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "agent-api"
+     },
+     "destination": {
+      "node": "workspace-human-documents"
+     }
+    }
+   },
+   "metadata": [
+    {
+     "access": "write"
+    }
+   ],
+   "description": "Authenticated explicit Markdown edit and optional selected-path local commit; owner and content preconditions are enforced in the control plane."
+  }
+ ],
+ "flows": [
+  {
+   "unique-id": "live-transcript-flow",
+   "name": "live transcript",
+   "description": "raw -> durable collector -> native stream -> render. One render engine; terminal never re-derives.",
+   "transitions": [
+    {
+     "relationship-unique-id": "bot-writes-segments-stream",
+     "sequence-number": 1,
+     "description": "bot XADDs raw ASR segments"
+    },
+    {
+     "relationship-unique-id": "collector-reads-segments",
+     "sequence-number": 2,
+     "description": "collector consumes (XREADGROUP collector_group)"
+    },
+    {
+     "relationship-unique-id": "collector-writes-tc",
+     "sequence-number": 3,
+     "description": "collector writes the native stream (single writer, P23)"
+    },
+    {
+     "relationship-unique-id": "aw-tcnative",
+     "sequence-number": 4,
+     "description": "the agent reads the native stream for chat grounding"
+    }
+   ]
+  },
+  {
+   "unique-id": "discord-transcript-flow",
+   "name": "discord transcript",
+   "description": "Discord delivers one Opus stream per speaker, so the connector's lane is named at capture exactly like the gmeet lane: no diarization, no mixed lane.",
+   "transitions": [
+    {
+     "relationship-unique-id": "ma-discord-connector",
+     "sequence-number": 1,
+     "description": "meeting-api creates a runtime.v1 discord-bot workload carrying the invocation.v1 document"
+    },
+    {
+     "relationship-unique-id": "dc-stt",
+     "sequence-number": 2,
+     "description": "each speaker's decoded PCM is transcribed on its own named lane"
+    },
+    {
+     "relationship-unique-id": "dc-writes-segments-stream",
+     "sequence-number": 3,
+     "description": "the connector XADDs transcript.v1 segments"
+    },
+    {
+     "relationship-unique-id": "collector-reads-segments",
+     "sequence-number": 4,
+     "description": "collector consumes (XREADGROUP collector_group)"
+    },
+    {
+     "relationship-unique-id": "collector-writes-tc",
+     "sequence-number": 5,
+     "description": "collector writes the native stream (single writer, P23)"
+    }
+   ]
+  },
+  {
+   "unique-id": "native-live-translation-flow",
+   "name": "native live translation",
+   "description": "capture.v1 audio continues through Desktop's existing STT and transcript.v1 stream; confirmed text alone is translated through the server-side CompletionPort and rendered as an in-memory subtitle sidecar. Original ASR and transcript revisions remain authoritative.",
+   "transitions": [
+    {
+     "relationship-unique-id": "native-capture-desktop",
+     "sequence-number": 1,
+     "description": "TINA Capture sends the existing timestamped, source-separated PCM session"
+    },
+    {
+     "relationship-unique-id": "native-capture-desktop-live",
+     "sequence-number": 2,
+     "description": "Desktop sends confirmed and pending original transcript frames"
+    },
+    {
+     "relationship-unique-id": "native-capture-live-translation",
+     "sequence-number": 3,
+     "description": "Capture submits confirmed text and the selected target language over loopback"
+    },
+    {
+     "relationship-unique-id": "desktop-live-translation",
+     "sequence-number": 4,
+     "description": "Desktop sends text-only translation work to the authenticated CompletionPort"
+    }
+   ]
+  },
+  {
+   "unique-id": "dispatch-flow",
+   "name": "agent dispatch",
+   "description": "a trigger spawns an isolated agent-worker via the runtime kernel; output streams back to the client.",
+   "transitions": [
+    {
+     "relationship-unique-id": "aa-runtime",
+     "sequence-number": 1,
+     "description": "agent-api POST /workloads"
+    },
+    {
+     "relationship-unique-id": "workers-deployed",
+     "sequence-number": 2,
+     "description": "runtime spawns agent-worker container"
+    },
+    {
+     "relationship-unique-id": "aw-unitout",
+     "sequence-number": 3,
+     "description": "worker XADDs output"
+    },
+    {
+     "relationship-unique-id": "aa-unitout",
+     "sequence-number": 4,
+     "description": "agent-api relays as SSE"
+    }
+   ]
+  },
+  {
+   "unique-id": "meeting-wiki-flow",
+   "name": "post-meeting Wiki update",
+   "description": "on session_end, the worker summarizes surfaced cards without filesystem tools, validates workspace.v1 frontmatter, then writes one path-scoped meeting entity",
+   "transitions": [
+    {
+     "relationship-unique-id": "agent-worker-meeting-summary-completion",
+     "sequence-number": 1,
+     "description": "tool-less CompletionPort returns summary text from surfaced cards only"
+    },
+    {
+     "relationship-unique-id": "agent-worker-validates-workspace-entity",
+     "sequence-number": 2,
+     "description": "validate meeting frontmatter against workspace.v1"
+    },
+    {
+     "relationship-unique-id": "agent-worker-writes-meeting-entity",
+     "sequence-number": 3,
+     "description": "write and commit only kg/entities/meeting/{id}.md"
+    }
+   ]
+  }
+ ]
+}

@@ -1,0 +1,124 @@
+# Gipformer 1.5 + FSMN-VAD for TINA
+
+Optional HTTP-window backend: **FunASR runs FSMN-VAD on CPU**, then **Sherpa-ONNX
+runs Gipformer 1.5 INT8 on each speech interval**. Gipformer is not loaded through
+FunASR `AutoModel`. The worker preserves VAD offsets on the original 16 kHz source
+timeline, including silence between intervals. It does not concatenate speech and
+invent compressed timestamps. Segment intervals are VAD speech ranges, not word
+alignment. Existing Desktop/Bot window confirmation remains responsible for live
+drafts/finals; this backend is not token streaming or diarization.
+
+The checkpoint is Vietnamese. Do not assume complete English/code-switch support.
+Explicit English language requests return 422; auto/unspecified requests return
+`language: unknown` because this model does not detect language. Prior-text `prompt`
+is accepted for wire compatibility but is not used as a hotword/prefix mechanism.
+There are no synthesized confidence scores or word timestamps.
+
+## Install and run
+
+Requires Python 3.11 on the tested macOS arm64 host. A separate environment avoids
+changing the installed Qwen/FunASR or diarization workers:
+
+```sh
+uv venv --python 3.11 .venv/gipformer-fsmn
+uv pip install --python .venv/gipformer-fsmn/bin/python -r deploy/transcription/gipformer/requirements.txt
+python3 deploy/transcription/gipformer/install-models.py
+```
+
+`model-assets.json` pins the upstream Hugging Face revision and SHA-256 of the
+INT8 encoder/decoder/joiner, tokens and model card. FSMN assets are separately
+checksum-pinned and reused from the existing ModelScope cache when exact; otherwise
+the installer downloads and verifies them. A differing existing file fails rather
+than being overwritten. Models live in ignored `deploy/transcription/models/`.
+Startup verifies every pinned asset; it never executes downloaded model code.
+Gipformer weights are MIT according to the upstream model card. Preserve upstream
+notices and independently check the FSMN/PyTorch/runtime terms when redistributing.
+
+Create `~/.config/tina/gipformer.env` with mode 0600:
+
+```sh
+TINA_GIPFORMER_TOKEN=replace-with-at-least-32-random-characters
+TINA_GIPFORMER_PORT=18002
+```
+
+```sh
+sh deploy/transcription/gipformer/start.sh
+curl --fail http://127.0.0.1:18002/health
+```
+
+The local deployment has launchd label `local.tina.gipformer`; logs are under
+`~/Library/Logs/TINA/gipformer.*.log`. Inference uses two CPU threads per runtime,
+one resident model pair, one running request and at most three waiting requests.
+The queue wait limit is 10 seconds. Cancelled native inference retains its lock
+until the model thread finishes. No browser CORS is enabled. The serving interface
+binds only loopback and transcriptions require a Bearer token before upload parsing.
+
+## Docker Compose (`tina-production`)
+
+The root Compose stack has an optional `asr` profile for this same Gipformer server.
+It mounts the verified model files from `deploy/transcription/models/gipformer-fsmn`,
+publishes loopback port 18002, and uses the Compose CPU-only PyTorch wheels. Set
+`COMPOSE_PROFILES=asr,automation,dashboard`, `TRANSCRIPTION_SERVICE_URL=http://gipformer:8000`,
+`TRANSCRIPTION_MODEL=custom`, and copy the token from
+`~/.config/tina/gipformer.env` into `TRANSCRIPTION_SERVICE_TOKEN` in
+`deploy/compose/.env`. The host LaunchAgent and Compose service both use port 18002;
+stop/unload the LaunchAgent before starting Compose. Publishing the service on that
+same loopback port keeps existing `host.docker.internal:18002` clients working.
+
+## Select from Terminal Settings
+
+Keep the current platform default **FunASR / Qwen + FSMN**. To opt in for your next
+session, use **Settings → Models → Transcription → Custom endpoint**:
+
+- Service URL: `http://host.docker.internal:18002`
+- Token: the private `TINA_GIPFORMER_TOKEN` from the file above.
+
+The shared setting uses the Docker hostname for Bot/Meeting API. Host Desktop's
+existing resolver translates it to `127.0.0.1`; do not put a container's loopback
+URL in shared settings. Select Vietnamese or automatic language for the session.
+Saving settings applies to the next session, and does not start/stop OS services.
+Choose **Follow platform default** to return to Qwen. This implementation does not
+change any user's saved preferences or the platform default automatically.
+
+The legacy Custom endpoint client sends model `whisper-1` when no model is supplied.
+Here `whisper-1` and `custom` are compatibility aliases for the same pinned
+Gipformer model; `/status` reports its actual checkpoint. They do not load Whisper.
+
+## HTTP and verification
+
+- `GET /health`, `/v1/models`, `/capabilities`.
+- `GET /status`: existing content-free `asr-status.v1`, including model, queue,
+  errors and bounded latency samples. It contains no transcript/audio/token.
+- `POST /v1/audio/transcriptions`: multipart `file`, `model`, optional `language`,
+  `prompt`, `response_format` (`json`, `verbose_json`, `text`), and
+  `min_silence_duration_ms` (100–2000; default 800). Bearer token required.
+
+Input limit: 25 MiB, 90 seconds, 1–8 channels, 8–192 kHz, bounded decoded sample
+count. SoundFile decodes WAV/FLAC and supported formats; scipy resamples to 16 kHz.
+Stereo is downmixed. Digital silence returns empty text. Short tails are padded
+only for VAD analysis and output stays clipped to the original duration. Speech
+longer than 30 seconds is decoded in bounded windows; boundary accuracy is not
+proven for such long continuous speech. Invalid VAD results, model failures and
+bad audio fail explicitly; they are not successful empty transcripts.
+
+```sh
+cd deploy/transcription/gipformer
+../../../.venv/gipformer-fsmn/bin/python -m unittest -v test_server.py
+```
+
+From the root, after building the existing Desktop/Bot packages, opt into a real
+worker smoke with a supplied speech WAV (mono 16 kHz PCM16, at most 30 seconds):
+
+```sh
+node deploy/transcription/gipformer/smoke.mjs /path/to/existing-speech.wav
+```
+
+The smoke drives the real Bot lane and ephemeral Desktop capture.v1 ingest into
+the worker, then checks finalized transcript, canonical and memory, source identity
+and credential exclusion. It does not join an external meeting or write real
+meeting state. See the bounded replay results and limitations in
+[`gipformer-fsmn-20261027.md`](../../../docs/research/gipformer-fsmn-20261027.md).
+
+Sources: [Gipformer inference](https://github.com/ggroup-ai-lab/gipformer/blob/0cac5b183d2e1a9e3429ff69080e09cc62ebdf9b/infer_onnx.py),
+[pinned model card](https://huggingface.co/g-group-ai-lab/gipformer1.5-68M-rnnt/tree/dd9227dcd8705c13f33bdbe59728d546ab94480f),
+[FunASR](https://github.com/modelscope/FunASR).

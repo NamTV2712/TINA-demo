@@ -1,0 +1,82 @@
+%% GENERATED — pnpm arch:dsl --write
+flowchart LR
+  segments_stream[("transcription_segments (stream)")]
+  tc_mutable[("tc:meeting:{id}:mutable (pubsub)")]
+  style tc_mutable stroke-dasharray: 5 5,stroke-width:3px
+  tc_stream[("tc:meeting:{id} (stream)")]
+  out_stream[("unit:{id}:out (stream)")]
+  segments_table[("transcription_segments (table)")]
+  recording_blob[("recordings bucket (blob)")]
+  style recording_blob stroke-dasharray: 5 5,stroke-width:3px
+  userdata_blob[("userdata bucket (blob)")]
+  style userdata_blob stroke-dasharray: 5 5,stroke-width:3px
+  meeting_wiki_entity[("kg/entities/meeting/{id}.md (workspace)")]
+  bm_status[("bm:meeting:{id}:status (pubsub)")]
+  u_meetings[("u:{user}:meetings (pubsub)")]
+  bot_commands[("bot_commands:meeting:{id} (pubsub)")]
+  unit_in[("unit:{id}:in (stream)")]
+  va_chat[("va:meeting:{id}:chat (pubsub)")]
+  identity_db[("identity (users/api_tokens)")]
+  flows_rows[("flows-rows")]
+  transcript_document_v1[("transcript-document.v1")]
+  asr_status_v1[("asr-status.v1")]
+  transcript_refinement_v1[("transcript-refinement.v1")]
+  transcript_alignment_v1[("transcript-alignment.v1")]
+  transcript_revision_v1[("transcript-revision.v1")]
+  speaker_revision_v1[("speaker-revision.v1")]
+  canonical_transcript_v1[("canonical-transcript.v1")]
+  meeting_memory_v1[("meeting-memory.v1")]
+  meeting_memory_revision_v1[("meeting-memory-revision.v1")]
+  asr_recovery_v1[("asr-recovery.v1")]
+  stt_foundation_v1[("stt-foundation.v1")]
+  stt_metrics_v1[("stt-metrics.v1")]
+  canonical_notes_requests[("canonical_notes_requests")]
+  canonical_notes_results[("canonical_notes_results")]
+  canonical_notes_approved[("proc:meeting:{id} (canonical approved notes)")]
+  meeting_knowledge_pages[("Reviewed meeting answers and Wiki pages")]
+  workspace_human_documents[("Explicit private Markdown document edits")]
+  bot -->|write| segments_stream
+  bot -->|write| tc_mutable
+  meeting_api -.->|read| segments_stream
+  meeting_api -->|write| tc_mutable
+  meeting_api -->|write| segments_table
+  meeting_api -->|write| tc_stream
+  agent_api -.->|read| tc_stream
+  gateway -.->|read| tc_mutable
+  terminal -.->|read| tc_stream
+  terminal -.->|read| out_stream
+  bot -->|write| recording_blob
+  bot -.->|read-write| userdata_blob
+  remote_browser -->|write| userdata_blob
+  gateway -.->|read| recording_blob
+  agent_worker -->|write| meeting_wiki_entity
+  bot -.->|read| bot_commands
+  meeting_api -->|write| bm_status
+  meeting_api -->|write| u_meetings
+  meeting_api -->|write| bot_commands
+  meeting_api -->|write| recording_blob
+  agent_api -.->|read| segments_stream
+  agent_api -.->|read| out_stream
+  agent_api -->|write| unit_in
+  agent_worker -.->|read| tc_stream
+  agent_worker -->|write| out_stream
+  agent_worker -.->|read| unit_in
+  gateway -.->|read| bm_status
+  gateway -.->|read| u_meetings
+  gateway -.->|read| va_chat
+  admin_api -->|write| identity_db
+  flows_worker -->|write| flows_rows
+  flows_api -->|write| flows_rows
+  flows_api -.->|read| flows_rows
+  discord_connector -->|write| segments_stream
+  discord_connector -->|write| tc_mutable
+  discord_connector -.->|read| bot_commands
+  meeting_api -->|write| canonical_notes_requests
+  agent_api -.->|read| canonical_notes_requests
+  agent_worker -->|write| canonical_notes_results
+  meeting_api -.->|read| canonical_notes_results
+  meeting_api -->|write| canonical_notes_approved
+  agent_api -.->|read| canonical_notes_approved
+  agent_api -->|write| meeting_knowledge_pages
+  terminal -.->|read| meeting_knowledge_pages
+  agent_api -->|write| workspace_human_documents

@@ -1,0 +1,271 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "meeting_id",
+    "status",
+    "segments"
+  ],
+  "properties": {
+    "version": {
+      "const": "transcript-document.v1"
+    },
+    "meeting_id": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "status": {
+      "type": "string"
+    },
+    "archive_error": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "segments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "segment_id",
+          "speaker",
+          "start_ms",
+          "end_ms",
+          "raw_text",
+          "normalized_text",
+          "text",
+          "revision",
+          "history",
+          "audio"
+        ],
+        "properties": {
+          "segment_id": {
+            "type": "string"
+          },
+          "speaker": {
+            "type": "string"
+          },
+          "start_ms": {
+            "type": "number"
+          },
+          "end_ms": {
+            "type": "number"
+          },
+          "raw_text": {
+            "type": "string"
+          },
+          "normalized_text": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "history": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "revision",
+                "text",
+                "kind",
+                "at"
+              ],
+              "properties": {
+                "revision": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "text": {
+                  "type": "string"
+                },
+                "kind": {
+                  "enum": [
+                    "manual",
+                    "restore",
+                    "refinement"
+                  ]
+                },
+                "at": {
+                  "type": "string"
+                },
+                "actor_id": {
+                  "type": "integer"
+                },
+                "job_id": {
+                  "type": "string"
+                },
+                "model": {
+                  "type": "string"
+                },
+                "audio_sha256": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              },
+              "allOf": [
+                {
+                  "if": {
+                    "properties": {
+                      "kind": {
+                        "const": "refinement"
+                      }
+                    }
+                  },
+                  "then": {
+                    "required": [
+                      "job_id",
+                      "model",
+                      "audio_sha256"
+                    ],
+                    "properties": {
+                      "job_id": {
+                        "type": "string"
+                      },
+                      "model": {
+                        "type": "string"
+                      },
+                      "audio_sha256": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{64}$"
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "audio": {
+            "type": "array",
+            "items": {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "chunk_id",
+                    "session_id",
+                    "channel",
+                    "start_ms",
+                    "end_ms",
+                    "kind",
+                    "chunk_count"
+                  ],
+                  "properties": {
+                    "chunk_id": {
+                      "type": "string"
+                    },
+                    "session_id": {
+                      "type": "string"
+                    },
+                    "channel": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "start_ms": {
+                      "type": "number"
+                    },
+                    "end_ms": {
+                      "type": "number"
+                    },
+                    "kind": {
+                      "const": "capture-span"
+                    },
+                    "chunk_count": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  },
+                  "description": "A bounded capture span on one session/channel. chunk_id anchors one retained frame in the span; chunk_count counts matching frames. Use the segment audio endpoint for the complete clip, including gaps."
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "kind",
+                    "recording_id",
+                    "session_id",
+                    "start_ms",
+                    "end_ms"
+                  ],
+                  "properties": {
+                    "kind": {
+                      "const": "recording-span"
+                    },
+                    "recording_id": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "session_id": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "start_ms": {
+                      "type": "number",
+                      "minimum": 0
+                    },
+                    "end_ms": {
+                      "type": "number",
+                      "minimum": 0
+                    }
+                  },
+                  "description": "Audio-relative offsets on a completed recording with explicit capture epoch origin. Require exactly one span before playback/refinement; timestamps are not forced alignment."
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "recordings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "recording_id",
+          "status",
+          "session_id",
+          "playback_url"
+        ],
+        "properties": {
+          "recording_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "status": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "session_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "playback_url": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tina:schemas/transcript-document.v1",
+  "title": "transcript-document.v1",
+  "description": "Owner review: immutable source audio and raw ASR; manual corrections append revision history. Times are producer timestamps, not forced-aligned word timestamps."
+}

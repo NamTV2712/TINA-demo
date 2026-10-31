@@ -1,0 +1,419 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tina:schemas/processed-notes.v1",
+  "title": "processed-notes.v1",
+  "description": "Canonical-window processing exchange: Meeting API signs requests, workers produce candidates, Meeting API commits with source/lease CAS then publishes notes. Legacy proc stream remains supported for unconfigured meetings.",
+  "$defs": {
+    "Note": {
+      "description": "One cleaned note, 1:1 with a transcript segment (id == segment_id). Re-emitting an id UPGRADES the note in place (baseline at ingest, LLM polish per beat) — consumers upsert by id, never append duplicates.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "text"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "the source segment_id — the upsert key"
+        },
+        "text": {
+          "type": "string",
+          "description": "the cleaned utterance (latest pass wins)"
+        },
+        "speaker": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "chapter": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "running chapter heading; may be cleared by a later pass"
+        },
+        "t": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "segment start, seconds (epoch)"
+        },
+        "pass": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "rewrite pass that produced this text (0 = ingest baseline)"
+        },
+        "frozen": {
+          "type": "boolean",
+          "description": "true once no further passes may rewrite this note"
+        },
+        "source": {
+          "$ref": "#/$defs/Source"
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Evidence"
+          }
+        },
+        "stale": {
+          "type": "boolean"
+        },
+        "publication_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "provenance": {
+          "$ref": "#/$defs/Params"
+        },
+        "withdrawn": {
+          "type": "boolean"
+        }
+      }
+    },
+    "Params": {
+      "description": "Provenance stamped on note entries: what pipeline/provider/model produced the cleaning. Persisted verbatim into the durable view's params (reproducibility).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pipeline",
+        "version"
+      ],
+      "properties": {
+        "pipeline": {
+          "type": "string"
+        },
+        "version": {
+          "type": "integer"
+        },
+        "provider": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "prompt_version": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "prompt_sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      }
+    },
+    "ViewEnd": {
+      "description": "The terminal marker (ADR 0027): the worker XADDs it after its final post-session_end beat — the stream is COMPLETE at this entry. The db-writer flushes the durable view on it (a missing marker is covered by a bounded deadline, never assumed); the live SSE closes on it.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "const": "view_end"
+        },
+        "cursor": {
+          "type": "string",
+          "description": "the last raw tc:meeting:{row_id} stream id processed — makes completion auditable"
+        }
+      }
+    },
+    "Evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "segment_id",
+        "revision",
+        "start_ms",
+        "end_ms",
+        "speaker_id",
+        "speaker_name",
+        "quote"
+      ],
+      "properties": {
+        "segment_id": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "start_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "end_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "speaker_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "speaker_name": {
+          "type": "string"
+        },
+        "quote": {
+          "type": "string"
+        }
+      }
+    },
+    "Source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "window_id",
+        "fingerprint",
+        "generation",
+        "canonical_revision"
+      ],
+      "properties": {
+        "window_id": {
+          "type": "string"
+        },
+        "fingerprint": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "generation": {
+          "type": "string"
+        },
+        "canonical_revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "evidence": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 120,
+          "items": {
+            "$ref": "#/$defs/Evidence"
+          }
+        }
+      }
+    },
+    "Request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "meeting_id",
+        "user_id",
+        "source",
+        "lease_until",
+        "proof"
+      ],
+      "properties": {
+        "meeting_id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "user_id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "source": {
+          "$ref": "#/$defs/Source"
+        },
+        "lease_until": {
+          "type": "number"
+        },
+        "proof": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "native_meeting_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "platform": {
+          "type": "string"
+        }
+      }
+    },
+    "Result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "meeting_id",
+        "user_id",
+        "source",
+        "params"
+      ],
+      "anyOf": [
+        {
+          "required": [
+            "notes"
+          ]
+        },
+        {
+          "required": [
+            "error"
+          ]
+        }
+      ],
+      "properties": {
+        "meeting_id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "user_id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "source": {
+          "$ref": "#/$defs/Source"
+        },
+        "params": {
+          "$ref": "#/$defs/Params"
+        },
+        "notes": {
+          "type": "array",
+          "maxItems": 120,
+          "items": {
+            "type": "object"
+          }
+        },
+        "cards": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "object"
+          }
+        },
+        "error": {
+          "type": "string",
+          "maxLength": 160
+        }
+      }
+    },
+    "ApprovedCard": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "title",
+        "source",
+        "evidence",
+        "stale",
+        "publication_revision"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/Source"
+        },
+        "provenance": {
+          "$ref": "#/$defs/Params"
+        },
+        "evidence": {
+          "type": "array",
+          "maxItems": 3,
+          "items": {
+            "$ref": "#/$defs/Evidence"
+          }
+        },
+        "stale": {
+          "type": "boolean"
+        },
+        "publication_revision": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "ModelFailure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "stage",
+        "message"
+      ],
+      "properties": {
+        "stage": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      }
+    },
+    "MetadataEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "version",
+        "meeting_id",
+        "event_id",
+        "revision",
+        "at"
+      ],
+      "properties": {
+        "type": {
+          "const": "meeting.notes.updated"
+        },
+        "version": {
+          "const": "processed-notes.v1"
+        },
+        "meeting_id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "event_id": {
+          "type": "string"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "at": {
+          "type": "string"
+        },
+        "note_ids": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "card_ids": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

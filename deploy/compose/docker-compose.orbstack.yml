@@ -1,0 +1,30 @@
+# Match the existing production assembly when moving it to OrbStack.
+# Enable all three optional automation services with COMPOSE_PROFILES=automation.
+services:
+  meeting-api:
+    environment:
+      DISCORD_CONNECTOR_URL: ""
+  flows-api:
+    profiles: ["automation"]
+  flows-worker:
+    profiles: ["automation"]
+  mcp:
+    profiles: ["automation"]
+
+# Imported data is managed outside Compose; an ordinary down/destroy must not erase it.
+volumes:
+  postgres-data:
+    external: true
+    name: ${COMPOSE_PROJECT_NAME}_postgres-data
+  redis-data:
+    external: true
+    name: ${COMPOSE_PROJECT_NAME}_redis-data
+  storage-data:
+    external: true
+    name: ${COMPOSE_PROJECT_NAME}_storage-data
+  agent-workspaces:
+    external: true
+    name: ${COMPOSE_PROJECT_NAME}_agent-workspaces
+  openai-auth:
+    external: true
+    name: ${COMPOSE_PROJECT_NAME}_openai-auth

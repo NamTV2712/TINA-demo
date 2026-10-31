@@ -1,0 +1,10 @@
+import assert from 'node:assert/strict';import {SourceSampleClock} from './audio-clock.js';
+const clock=new SourceSampleClock();
+assert.equal(clock.map(1000,1000,0,16000),0);
+assert.equal(clock.map(1000,2000,16000,16000),16000);
+assert.equal(clock.map(999,2000,0,16000),0);
+assert.equal(clock.map(1000,10000,0,4096),144000);
+assert.equal(clock.map(1000,10256,4096,4096),148096);
+assert.equal(clock.map(1000,2000,16000,4096),null);
+clock.reset();assert.equal(clock.map(1000,20000,0,100),0);
+console.log('source clock: independent channels, paused timeline, context restart and stale packets OK');

@@ -1,0 +1,8 @@
+%% GENERATED — pnpm arch:dsl --write
+sequenceDiagram
+  autonumber
+  meeting_api->>discord_connector: meeting-api creates a runtime.v1 discord-bot workload carrying the invocation.v1 document
+  discord_connector->>transcription: each speaker's decoded PCM is transcribed on its own named lane
+  discord_connector->>segments_stream: the connector XADDs transcript.v1 segments
+  meeting_api->>segments_stream: collector consumes (XREADGROUP collector_group)
+  meeting_api->>tc_stream: collector writes the native stream (single writer, P23)

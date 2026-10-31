@@ -1,0 +1,30 @@
+name: Report a problem
+description: Report a reproducible problem in a self-hosted TINA deployment.
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: Include what you expected, what occurred, and the deployment surface.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: TINA version or commit
+      placeholder: Version from the TINA UI or git revision
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Deployment surface
+      options:
+        - Docker Compose
+        - TINA Lite
+        - Kubernetes / Helm
+        - Local development
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Logs or reproduction steps
+      description: Remove secrets and private meeting data before posting.

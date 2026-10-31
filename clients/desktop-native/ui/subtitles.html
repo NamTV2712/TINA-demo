@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>TINA Live Captions</title>
+  <link rel="stylesheet" href="subtitles.css">
+</head>
+<body>
+  <section class="subtitle-container" aria-label="Live captions">
+    <!-- Speakly Style Subtitle Header / Drag Surface -->
+    <div class="sub-header" data-tauri-drag-region>
+      <div class="sub-brand" data-tauri-drag-region>
+        <span class="live-dot" aria-hidden="true"></span>
+        <span class="brand-text" data-tauri-drag-region>TINA <span class="badge">LIVE</span></span>
+      </div>
+
+      <div class="drag-handle" data-tauri-drag-region title="Drag to move subtitles">
+        <div class="level-bars" data-tauri-drag-region>
+          <span></span><span></span><span></span><span></span><span></span>
+        </div>
+      </div>
+
+      <div class="sub-controls">
+        <button id="smaller" class="ctrl-btn" type="button" aria-label="Smaller captions" title="Smaller font">A−</button>
+        <button id="larger" class="ctrl-btn" type="button" aria-label="Larger captions" title="Larger font">A+</button>
+        <button id="opacityBtn" class="ctrl-btn" type="button" aria-label="Adjust opacity" title="Adjust background opacity">
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+            <circle cx="8" cy="8" r="7" stroke="currentColor" stroke-width="1.2" fill="none"/>
+            <path d="M8 1a7 7 0 0 0 0 14V1z"/>
+          </svg>
+        </button>
+        <div id="opacityPop" class="opacity-pop" hidden>
+          <span class="opacity-label">Opacity</span>
+          <input id="opacitySlider" type="range" min="30" max="98" value="90">
+        </div>
+        <div class="ctrl-divider"></div>
+        <button id="hide" class="ctrl-btn close-btn" type="button" aria-label="Hide subtitles" title="Hide window">
+          <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8">
+            <path d="M1 1L11 11M1 11L11 1"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- Error / Status Notice -->
+    <p id="status" class="status" role="status" hidden></p>
+
+    <!-- Subtitle Scrolling Content -->
+    <div id="lines" class="lines" aria-live="polite" aria-relevant="additions text"></div>
+  </section>
+
+  <script src="subtitles.js"></script>
+</body>
+</html>

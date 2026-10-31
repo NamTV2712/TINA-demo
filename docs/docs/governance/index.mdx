@@ -1,0 +1,25 @@
+---
+title: "TINA project governance"
+description: "Architecture, local change workflow, and current repository boundaries."
+---
+
+TINA is currently a self-hosted local project with an independent Git repository and no remote,
+issue tracker, or public release channel configured.
+
+## Core documents
+
+| Document | Purpose |
+|---|---|
+| [Architecture](/governance/architecture) | Architecture principles and the codebase's data-flow model. |
+| [Architecture compliance](/governance/arch-compliance) | Generated map of architecture principles to local gates. |
+| [Local change workflow](/governance/delivery) | Scope, implement, verify, and report changes in this checkout. |
+| `AGENTS.md` | Instructions for agents working in the repository. |
+| `CONTRIBUTING.md` | Local development and contribution guidance. |
+| `CONTRIBUTOR_RIGHTS.md` | Current rights policy and its unconfigured boundaries. |
+| `SECURITY.md` | Security reporting status. |
+
+## Repository boundaries
+
+TINA has a standalone `.git` directory and no configured remote. The commit history is retained
+for provenance, and Apache-2.0 plus third-party attribution files remain in the checkout. Do not
+push or publish images until the TINA owner configures destinations and contribution controls.

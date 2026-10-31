@@ -1,0 +1,94 @@
+flowchart LR
+  subgraph CLIENTS["Client entry points"]
+    direction TB
+    TERM["TINA Terminal<br/>Meeting controls + Copilot UI"]
+    DASH["Dashboard (optional legacy UI)<br/>Bot controls + transcript UI"]
+    EXT["Chrome Extension<br/>Browser capture controls"]
+    CAP["TINA Capture<br/>Native macOS audio + Live Translation"]
+  end
+
+  subgraph BOT["A. Bot-based audio route — Terminal and Dashboard"]
+    direction LR
+    API["Gateway / client API proxies"]
+    MEETING_API["Meeting API<br/>POST /bots"]
+    BOT_RUNTIME["Bot runtime<br/>joins the meeting"]
+    PLATFORM["Meeting platform audio"]
+    BOT_BRIDGE["Browser capture bridge<br/>audio + timestamps + speaker hints"]
+    BOT_LANE["Bot transcription lane<br/>Google Meet: per-channel<br/>Zoom: per-track → per-channel engine<br/>Teams: CSRC virtual channels<br/>Jitsi: mixed/Pyannote"]
+    BOT_WINDOW["Audio windows + endpointing"]
+    BOT_ASR["Deployment-configured<br/>ASR HTTP endpoint"]
+    BOT_TX["transcript.v1<br/>draft / confirmed / retract"]
+    REDIS_STREAM[("Redis<br/>transcription_segments")]
+    COLLECTOR["Meeting API collector"]
+    POSTGRES[("Postgres<br/>meeting + transcript rows")]
+    REDIS_PUB[("Redis live Pub/Sub")]
+    GATEWAY_WS["Gateway /ws"]
+    AGENT_WATCH["Agent watcher"]
+    MEETING_FEED["tc:meeting feed"]
+    COPILOT["Opt-in isolated<br/>Copilot runtime"]
+    AGENT_SSE["Agent API meeting stream<br/>SSE"]
+    RECORDING["Optional recording.v1<br/>RecordingSink → media file"]
+  end
+
+  TERM -->|"meeting/bot API calls"| API
+  DASH -->|"Next API proxy"| API
+  API -->|"POST /bots"| MEETING_API
+  MEETING_API --> BOT_RUNTIME
+  BOT_RUNTIME --> PLATFORM
+  PLATFORM --> BOT_BRIDGE
+  BOT_BRIDGE --> BOT_LANE --> BOT_WINDOW --> BOT_ASR --> BOT_TX
+  BOT_TX --> REDIS_STREAM --> COLLECTOR --> POSTGRES
+  REDIS_STREAM --> REDIS_PUB
+  COLLECTOR --> REDIS_PUB --> GATEWAY_WS
+  GATEWAY_WS -->|"live status + transcript"| DASH
+  GATEWAY_WS -->|"meeting status"| TERM
+  REDIS_STREAM --> AGENT_WATCH
+  COLLECTOR --> MEETING_FEED
+  AGENT_WATCH -. "only when Copilot is enabled" .-> COPILOT
+  MEETING_FEED --> COPILOT
+  REDIS_STREAM --> AGENT_SSE
+  COPILOT --> AGENT_SSE -->|"live transcript + Copilot output"| TERM
+  BOT_BRIDGE -. "if recording is enabled" .-> RECORDING
+  RECORDING -. "playback when available" .-> DASH
+
+  subgraph LOCAL["B. capture.v1 route — Extension and Capture (Desktop preset)"]
+    direction LR
+    EXT_BG["Extension MV3<br/>background worker"]
+    EXT_AUDIO["Browser audio<br/>Meet: participant channels<br/>Zoom/Teams/YouTube: mixed tab<br/>Zoom/Teams may add local mic"]
+    SCREEN_CAPTURE["ScreenCaptureKit<br/>system audio ch 999<br/>microphone ch 1000"]
+    CAPTURE_V1["capture.v1<br/>audio / event frames"]
+    AUTH_INGEST["Authenticated loopback<br/>ingest proxy :9099"]
+    DESKTOP_INGEST["TINA Desktop ingest WS"]
+    AUDIO_POOL["AudioTimelinePool<br/>ring buffer + lane routing"]
+    LOCAL_WINDOW["Audio windows + endpointing"]
+    LOCAL_ASR["Desktop-configured<br/>ASR HTTP endpoint"]
+    LOCAL_TX["transcript.v1<br/>draft / confirmed"]
+    JOURNAL[("TranscriptJournal SQLite<br/>transcripts + ASR checkpoints<br/>PCM archive when ACK is enabled")]
+    DESKTOP_API["TINA Desktop Gateway :8056<br/>GET /transcripts + WS /ws"]
+    TRANSLATE_CMD["Capture Tauri command<br/>translate_live_caption"]
+    TRANSLATE_PROXY["Desktop translation proxy :8057"]
+    COMPLETION["TINA Gateway / Agent<br/>CompletionPort"]
+  end
+
+  EXT --> EXT_BG --> EXT_AUDIO --> CAPTURE_V1
+  CAP --> SCREEN_CAPTURE --> CAPTURE_V1
+  CAPTURE_V1 --> AUTH_INGEST --> DESKTOP_INGEST --> AUDIO_POOL
+  AUDIO_POOL --> LOCAL_WINDOW --> LOCAL_ASR --> LOCAL_TX
+  LOCAL_TX --> JOURNAL
+  LOCAL_TX --> DESKTOP_API
+  DESKTOP_API -->|"live feed + history/review"| EXT
+  DESKTOP_API -->|"live transcript + captions"| CAP
+  CAP -->|"confirmed transcript text only"| TRANSLATE_CMD
+  TRANSLATE_CMD --> TRANSLATE_PROXY --> COMPLETION
+  COMPLETION -->|"translated text (current session only)"| CAP
+
+  classDef client fill:#e9efff,stroke:#5667b8,color:#171a2b,stroke-width:1.5px;
+  classDef capture fill:#e6f5ff,stroke:#2878a8,color:#102331,stroke-width:1.5px;
+  classDef pipeline fill:#f3f4f6,stroke:#697386,color:#161b22;
+  classDef store fill:#fff4df,stroke:#b7791f,color:#30220a;
+  classDef agent fill:#efe7ff,stroke:#7353a6,color:#211433;
+  class TERM,DASH client;
+  class EXT,CAP capture;
+  class BOT_RUNTIME,BOT_BRIDGE,BOT_LANE,BOT_WINDOW,BOT_ASR,BOT_TX,AUTH_INGEST,DESKTOP_INGEST,AUDIO_POOL,LOCAL_WINDOW,LOCAL_ASR,LOCAL_TX pipeline;
+  class REDIS_STREAM,POSTGRES,REDIS_PUB,JOURNAL,RECORDING store;
+  class AGENT_WATCH,COPILOT,AGENT_SSE,TRANSLATE_CMD,TRANSLATE_PROXY,COMPLETION agent;

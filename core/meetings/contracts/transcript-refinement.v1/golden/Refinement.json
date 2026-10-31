@@ -1,0 +1,18 @@
+{
+  "version": "transcript-refinement.v1",
+  "id": "job-example",
+  "meeting": "desktop/example",
+  "status": "completed",
+  "model": "custom",
+  "backend": "FunASR",
+  "created_at": "2026-10-21T00:00:00Z",
+  "items": [
+    {
+      "segment_id": "seg-1",
+      "expected_revision": 0,
+      "state": "ready",
+      "text": "API sẽ deploy thứ Sáu.",
+      "audio_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  ]
+}

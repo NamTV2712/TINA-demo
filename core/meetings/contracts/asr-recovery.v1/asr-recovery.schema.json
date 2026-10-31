@@ -1,0 +1,136 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tina:schemas/asr-recovery.v1",
+  "title": "asr-recovery.v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "sessions",
+    "windows",
+    "checkpoints"
+  ],
+  "properties": {
+    "version": {
+      "const": "asr-recovery.v1"
+    },
+    "sessions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "session",
+          "state",
+          "error"
+        ],
+        "properties": {
+          "session": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "pending",
+              "blocked",
+              "completed"
+            ]
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    "windows": {
+      "maxItems": 100,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "session",
+          "source",
+          "start_sample",
+          "end_sample",
+          "state",
+          "attempts",
+          "error"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "session": {
+            "type": "string"
+          },
+          "source": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "start_sample": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "end_sample": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "state": {
+            "enum": [
+              "queued",
+              "running",
+              "retry",
+              "completed",
+              "superseded"
+            ]
+          },
+          "attempts": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    "checkpoints": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "session",
+          "source",
+          "start_sample",
+          "end_sample"
+        ],
+        "properties": {
+          "session": {
+            "type": "string"
+          },
+          "source": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "start_sample": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "end_sample": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      }
+    }
+  }
+}

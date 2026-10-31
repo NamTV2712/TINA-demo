@@ -1,0 +1,158 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tina:schemas/audio-timeline.v1",
+  "title": "audio-timeline.v1",
+  "description": "Owner-scoped Desktop sample timeline; legacy rows keep null sample indices. PCM range reads return WAV or explicit missing ranges.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "sample_rate",
+    "memory",
+    "sources",
+    "events"
+  ],
+  "properties": {
+    "version": {
+      "const": "audio-timeline.v1"
+    },
+    "sample_rate": {
+      "const": 16000
+    },
+    "memory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sources",
+        "maxSources",
+        "capacitySamples",
+        "sampleRate",
+        "bytes"
+      ],
+      "properties": {
+        "sources": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "maxSources": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "capacitySamples": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sampleRate": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "session",
+          "source",
+          "start_sample",
+          "end_sample",
+          "start_ms",
+          "end_ms",
+          "stored_bytes",
+          "clock_quality"
+        ],
+        "properties": {
+          "session": {
+            "type": "string"
+          },
+          "source": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "start_sample": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "end_sample": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 0
+          },
+          "start_ms": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "end_ms": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "stored_bytes": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "clock_quality": {
+            "enum": [
+              "samples",
+              "legacy-or-unknown"
+            ]
+          }
+        }
+      }
+    },
+    "events": {
+      "type": "array",
+      "maxItems": 512,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "session",
+          "source",
+          "kind",
+          "start_sample",
+          "end_sample"
+        ],
+        "properties": {
+          "session": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "gap",
+              "overflow",
+              "duplicate",
+              "clock-discontinuity",
+              "source-limit"
+            ]
+          },
+          "start_sample": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "end_sample": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    }
+  }
+}

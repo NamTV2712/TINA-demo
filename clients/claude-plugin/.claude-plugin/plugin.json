@@ -1,0 +1,32 @@
+{
+  "name": "tina",
+  "displayName": "TINA",
+  "version": "0.1.0",
+  "description": "Connect to a self-hosted TINA server for meeting bots and transcripts.",
+  "author": { "name": "TINA" },
+  "license": "Apache-2.0",
+  "keywords": ["meetings", "transcription", "google-meet", "microsoft-teams", "zoom", "meeting-bot", "mcp"],
+  "userConfig": {
+    "tina_api_key": {
+      "type": "string",
+      "title": "TINA API key",
+      "description": "The API key printed when you start your self-hosted TINA stack.",
+      "sensitive": true,
+      "required": true
+    },
+    "tina_mcp_url": {
+      "type": "string",
+      "title": "TINA MCP URL",
+      "description": "The MCP endpoint for your self-hosted TINA gateway.",
+      "default": "http://localhost:18056/mcp",
+      "required": false
+    }
+  },
+  "mcpServers": {
+    "tina": {
+      "type": "http",
+      "url": "${user_config.tina_mcp_url}",
+      "headers": { "Authorization": "Bearer ${user_config.tina_api_key}" }
+    }
+  }
+}

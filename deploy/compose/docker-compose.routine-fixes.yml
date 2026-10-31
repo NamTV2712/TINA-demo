@@ -1,0 +1,8 @@
+# Narrow local release: preserves deployed code outside the routine fixes.
+services:
+  runtime:
+    image: tina/v012-runtime:routines-20261029
+  agent-api:
+    image: tina/v012-agent-api:routines-20261029
+  terminal:
+    image: tina/v012-terminal:routines-20261029

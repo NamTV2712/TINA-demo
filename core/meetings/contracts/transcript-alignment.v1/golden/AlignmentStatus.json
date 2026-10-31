@@ -1,0 +1,36 @@
+{
+  "version": "transcript-alignment.v1",
+  "available": true,
+  "job": {
+    "version": "transcript-alignment.v1",
+    "id": "0dca38fa-dd59-462b-ae92-2522e19332fb",
+    "status": "completed",
+    "backend": "mfa",
+    "model": "mfa-vietnamese_mfa-3.0.0:abcdef123456",
+    "created_at": "2026-10-23T00:00:00Z",
+    "finished_at": "2026-10-23T00:00:03Z",
+    "published_at": "2026-10-23T00:00:03Z",
+    "items": [
+      {
+        "segment_id": "seg-1",
+        "state": "aligned",
+        "expected_revision": 0,
+        "text_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "audio_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "recording_id": 3,
+        "recording_start_ms": 1000,
+        "recording_end_ms": 2000,
+        "duration_ms": 1000,
+        "model": "mfa-vietnamese_mfa-3.0.0:abcdef123456",
+        "speaker_id": null,
+        "words": [
+          {"index": 0, "text": "xin", "start_ms": 120, "end_ms": 310, "aligned": true, "speaker_id": null, "speaker_name": "Unknown speaker", "speaker_source": "unknown"},
+          {"index": 1, "text": "chào.", "start_ms": null, "end_ms": null, "aligned": false, "speaker_id": null, "speaker_name": "Unknown speaker", "speaker_source": "unknown"}
+        ],
+        "phrases": [
+          {"speaker_id": null, "speaker_name": "Unknown speaker", "text": "xin chào.", "start_ms": 120, "end_ms": 310, "word_indices": [0, 1]}
+        ]
+      }
+    ]
+  }
+}

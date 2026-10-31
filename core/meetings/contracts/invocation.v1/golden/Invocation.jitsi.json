@@ -1,0 +1,8 @@
+{
+  "platform": "jitsi",
+  "meetingUrl": "https://meet.jit.si/TinaStandup",
+  "botName": "TINA",
+  "passcode": "golden-passcode",
+  "nativeMeetingId": "TinaStandup",
+  "redisUrl": "redis://redis:6379"
+}

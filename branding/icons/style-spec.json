@@ -1,0 +1,27 @@
+{
+  "name": "tina-icons",
+  "preset": "clean",
+  "grid": 24,
+  "strokeWidth": 1.5,
+  "strokeLinecap": "round",
+  "strokeLinejoin": "round",
+  "cornerRadius": 2,
+  "padding": 2,
+  "opticalBalance": true,
+  "iconCount": 12,
+  "icons": [
+    "microphone",
+    "microphone-off",
+    "room",
+    "participants",
+    "transcript",
+    "task-draft",
+    "review",
+    "accept",
+    "reject",
+    "deadline",
+    "source",
+    "summary"
+  ],
+  "generated": "2026-09-28"
+}

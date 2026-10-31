@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tina:schemas/transcript-revision.v1",
+  "title": "transcript-revision.v1",
+  "description": "Metadata-only transcript invalidation sequence. Alignment can advance it without changing accepted text revisions. Consumers reload the exact meeting and alignment snapshots; duplicates and older sequences are safe to ignore. No text, history, actor or credentials cross this event.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "type", "event_id", "meeting_id", "platform", "native_meeting_id", "segment_id", "revision", "kind", "at"],
+  "properties": {
+    "version": {"const": "transcript-revision.v1"},
+    "type": {"const": "transcript.revised"},
+    "event_id": {"type": "string", "format": "uuid"},
+    "meeting_id": {"type": "integer", "minimum": 1},
+    "platform": {"type": "string"},
+    "native_meeting_id": {"type": ["string", "null"]},
+    "segment_id": {"type": "string", "minLength": 1},
+    "revision": {"type": "integer", "minimum": 1},
+    "kind": {"enum": ["manual", "restore", "refinement", "alignment"]},
+    "at": {"type": "string", "format": "date-time"}
+  }
+}

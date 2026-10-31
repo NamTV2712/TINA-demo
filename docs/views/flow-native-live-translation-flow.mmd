@@ -1,0 +1,7 @@
+%% GENERATED — pnpm arch:dsl --write
+sequenceDiagram
+  autonumber
+  native_capture->>desktop: TINA Capture sends the existing timestamped, source-separated PCM session
+  native_capture->>desktop: Desktop sends confirmed and pending original transcript frames
+  native_capture->>desktop: Capture submits confirmed text and the selected target language over loopback
+  desktop->>agent_api: Desktop sends text-only translation work to the authenticated CompletionPort

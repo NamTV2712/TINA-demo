@@ -1,0 +1,24 @@
+{
+  "version": "audio-timeline.v1",
+  "sample_rate": 16000,
+  "memory": {
+    "sources": 0,
+    "maxSources": 16,
+    "capacitySamples": 480000,
+    "sampleRate": 16000,
+    "bytes": 0
+  },
+  "sources": [
+    {
+      "session": "capture-session",
+      "source": 1000,
+      "start_sample": 0,
+      "end_sample": 16000,
+      "start_ms": 1800000000000,
+      "end_ms": 1800000001000,
+      "stored_bytes": 64000,
+      "clock_quality": "samples"
+    }
+  ],
+  "events": []
+}

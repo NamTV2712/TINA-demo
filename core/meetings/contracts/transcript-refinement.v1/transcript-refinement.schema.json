@@ -1,0 +1,181 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tina:schemas/transcript-refinement.v1",
+  "title": "transcript-refinement.v1",
+  "description": "Owner-only second-pass ASR proposals for Desktop capture and bot recordings. Originals remain unchanged until explicit Apply.",
+  "type": [
+    "object",
+    "null"
+  ],
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "id",
+    "meeting",
+    "status",
+    "model",
+    "backend",
+    "created_at",
+    "items"
+  ],
+  "properties": {
+    "version": {
+      "const": "transcript-refinement.v1"
+    },
+    "id": {
+      "type": "string"
+    },
+    "meeting": {
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "running",
+        "paused",
+        "cancelling",
+        "completed",
+        "failed",
+        "cancelled",
+        "interrupted"
+      ]
+    },
+    "model": {
+      "type": "string"
+    },
+    "backend": {
+      "type": "string"
+    },
+    "created_at": {
+      "type": "string"
+    },
+    "error": {
+      "type": "string"
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "segment_id",
+          "expected_revision",
+          "state"
+        ],
+        "properties": {
+          "segment_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "state": {
+            "enum": [
+              "pending",
+              "ready",
+              "skipped",
+              "failed",
+              "applied"
+            ]
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10000
+          },
+          "audio_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "state": {
+                  "enum": [
+                    "ready",
+                    "applied"
+                  ]
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "text",
+                "audio_sha256"
+              ],
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 10000
+                },
+                "audio_sha256": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{64}$"
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    "glossary": {
+      "type": "array",
+      "maxItems": 40,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 80
+      },
+      "description": "Optional fixed vocabulary hints, not reference transcript. Combined terms limited to 700 characters by both services."
+    }
+  },
+  "$defs": {
+    "Start": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "glossary": {
+          "type": "array",
+          "maxItems": 40,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 80
+          },
+          "description": "Optional fixed vocabulary hints, not reference transcript. Combined terms limited to 700 characters by both services."
+        }
+      }
+    },
+    "Apply": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "job_id",
+        "segment_id",
+        "expected_revision"
+      ],
+      "properties": {
+        "job_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "segment_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "expected_revision": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}

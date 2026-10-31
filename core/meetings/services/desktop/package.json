@@ -1,0 +1,33 @@
+{
+  "name": "@tina/desktop",
+  "version": "0.1.0",
+  "description": "The meetings all-in-one host (dual-lane): capture.v1 ingest WS \u2192 gmeet-pipeline (per-channel, glow-named) OR mixed-pipeline (zoom/teams/youtube \u2014 pyannote-cut, hint-named) \u2192 real STT \u2192 gateway /transcripts. One process, no Docker/Postgres/Redis. The bricks the cloud splits across services, composed as one deployable.",
+  "private": true,
+  "type": "module",
+  "main": "dist/desktop.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/desktop.js",
+    "dev": "tsx watch src/desktop.ts",
+    "test": "tsx src/asr-short-recovery.test.ts && tsx src/asr-checkpoint.test.ts && tsx src/mixed-transcript.test.ts && tsx src/foundation.test.ts && tsx src/stt-metrics.test.ts && tsx src/speaker-mapping.test.ts && tsx src/alignment.test.ts && tsx src/canonical-http.test.ts && tsx src/canonical-live.test.ts && tsx src/canonical-transcript.test.ts && tsx src/transcript-journal.test.ts && tsx src/refinement.test.ts && tsx src/transcript-review.test.ts && tsx src/transcript-store.test.ts && tsx src/recording-sink.test.ts && tsx src/recording-e2e.test.ts && tsx src/health.test.ts && tsx src/transcription-settings.test.ts && tsx src/dictation-polish.test.ts && tsx src/dictation-polish-proxy.test.ts && tsx src/authenticated-ingest-proxy.test.ts && tsx src/access.test.ts && tsx src/audio-routing.test.ts && tsx src/desktop-e2e.live.test.ts && tsx src/audio-timeline.test.ts && tsx src/language-review.test.ts && tsx src/recording-reconnect.test.ts && tsx src/pcm-reconnect.test.ts && pnpm build && tsx src/asr-recovery.test.ts",
+    "check:isolation": "node scripts/check-isolation.js",
+    "test:soak": "tsx src/foundation-soak.ts"
+  },
+  "dependencies": {
+    "@tina/capture-codec": "workspace:*",
+    "@tina/gmeet-pipeline": "workspace:*",
+    "@tina/mixed-pipeline": "workspace:*",
+    "@tina/recording": "workspace:*",
+    "@tina/transcribe-buffer": "workspace:*",
+    "@tina/transcribe-whisper": "workspace:*",
+    "ws": "^8.21.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/ws": "^8.5.0",
+    "ajv": "^8.17.0",
+    "ajv-formats": "^3.0.1",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}

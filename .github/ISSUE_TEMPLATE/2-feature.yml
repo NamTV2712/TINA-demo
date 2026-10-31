@@ -1,0 +1,19 @@
+name: Request a capability
+description: Describe an outcome you need from TINA.
+labels: ["feature"]
+body:
+  - type: textarea
+    id: job
+    attributes:
+      label: What are you trying to do?
+      description: Describe the user outcome, not a proposed implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: current
+    attributes:
+      label: Current workaround
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: How would you know it works?

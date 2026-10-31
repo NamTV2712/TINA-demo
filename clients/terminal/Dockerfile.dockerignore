@@ -1,0 +1,8 @@
+**
+!clients/
+!clients/terminal/
+!clients/terminal/**
+!branding/
+!branding/tokens.css
+clients/terminal/.next/
+clients/terminal/node_modules/

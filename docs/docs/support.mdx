@@ -1,0 +1,24 @@
+---
+title: "Support"
+description: "Collect the information needed to diagnose a self-hosted TINA deployment."
+---
+
+TINA is self-hosted and has no hosted support service or public issue tracker configured yet.
+Contact the person who provided this checkout through a private channel for deployment help.
+
+## What to collect
+
+- TINA version or Git commit.
+- Deployment surface: Compose, Lite, or Kubernetes/Helm.
+- The command or UI action that failed and what you expected.
+- Relevant service logs and the HTTP status/error body.
+- For a meeting issue, platform and `native_meeting_id`.
+
+Remove API keys, OAuth tokens, calendar feed URLs, meeting URLs, and transcript content before
+sharing logs. Use `docker compose logs <service>` for Compose or `kubectl logs` for Kubernetes.
+
+## Security reports
+
+No private security contact is configured yet. Do not publish vulnerability details. Follow the
+instructions in [`SECURITY.md`](../../SECURITY.md) and contact the person who provided the TINA
+deployment privately.
