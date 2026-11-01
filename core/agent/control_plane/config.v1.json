@@ -404,6 +404,16 @@
       "targets": []
     },
     {
+      "key": "GEMINI_API_KEY",
+      "class": "defaulted",
+      "default": "(unset — Antigravity can use its stored API key or OAuth credential)",
+      "secret": true,
+      "description": "Optional deployment fallback for Google Antigravity Gemini API-key authentication. Dispatch forwards it only to Antigravity agent workers; keep it private.",
+      "targets": [
+        "compose"
+      ]
+    },
+    {
       "key": "OPENAI_API_KEY",
       "class": "defaulted",
       "default": "(unset — an openai-api provider entry must carry its own api_key)",

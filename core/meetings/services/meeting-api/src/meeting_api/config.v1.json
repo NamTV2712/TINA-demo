@@ -148,6 +148,25 @@
       ]
     },
     {
+      "key": "TTS_SERVICE_URL",
+      "class": "defaulted",
+      "default": "(unset — Speak is unavailable unless an enabled bot request supplies voice)",
+      "description": "Optional OpenAI-compatible speech endpoint. Meeting API forwards it only into voice-enabled bot workloads; it is never sent to the Dashboard/browser.",
+      "targets": [
+        "compose"
+      ]
+    },
+    {
+      "key": "TTS_API_TOKEN",
+      "class": "defaulted",
+      "default": "(unset)",
+      "secret": true,
+      "description": "Optional bearer token paired with TTS_SERVICE_URL. It is forwarded only into voice-enabled bot workloads and must remain server-side.",
+      "targets": [
+        "compose"
+      ]
+    },
+    {
       "key": "DIARIZATION_SERVICE_URL",
       "class": "defaulted",
       "default": "",
