@@ -1,7 +1,15 @@
 #!/bin/sh
 set -eu
 repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
-config_file=${TINA_DIARIZATION_ENV_FILE:-"$HOME/.config/tina/diarization.env"}
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+config_file=${TINA_DIARIZATION_ENV_FILE:-""}
+if [ -z "$config_file" ]; then
+  if [ -f "$here/.env" ]; then
+    config_file="$here/.env"
+  else
+    config_file="$HOME/.config/tina/diarization.env"
+  fi
+fi
 if [ -f "$config_file" ]; then
   set -a
   . "$config_file"

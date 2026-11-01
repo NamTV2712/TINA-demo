@@ -7,10 +7,23 @@ __pycache__/
 .pytest_cache/
 *.log
 .DS_Store
-.env
-.env.*
+# Local unencrypted overrides & private keys (NEVER commit)
+.env.keys
+.env.keys.*
+**/.env.keys
+**/.env.keys.*
+.env.local
+.env.*.local
+.env.vault
+
+# Allow committed encrypted .env and examples
 !.env.example
 !**/.env.example
+!deploy/compose/.env
+!deploy/transcription/.env
+!deploy/transcription/gipformer/.env
+!deploy/transcription/diarization/.env
+!deploy/transcription/alignment/.env
 .recordings/
 deploy/execution-targets.json
 # local test/debug artifacts (Playwright MCP screenshots + snapshots). The rule was added AFTER a
