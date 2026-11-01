@@ -10,23 +10,34 @@ supported shapes are [TINA Lite](/deployment-lite) (one container, no Docker soc
 
 ## Quick start (Docker Compose)
 
-Prerequisites: a Linux host, **Docker engine ≥ v26** (agent workers mount workspaces as isolated
-volume subpaths), `git`, `make`, and `curl`. `make all` builds images from this checkout and needs
-about **8 vCPUs / 16 GB RAM**. A Mac with Docker Desktop works for local development.
+Prerequisites: macOS with OrbStack or Docker Desktop, or Linux with **Docker Engine ≥ v26** and
+Compose supporting `up --wait`; also `git`, `make`, and Python **3.10+**. Building from source needs
+about **8 vCPUs / 16 GB RAM**.
+
+For a new local install, use the CLI with a private env file outside the checkout. The repository's
+default `.env` is Dotenvx-encrypted and its private key is not part of a public clone:
 
 ```bash
 cd /path/to/TINA
-make all      # build and start the full Docker Compose stack from source
+make cli-install
+export PATH="$HOME/.local/bin:$PATH"
+mkdir -p "$HOME/.config/tina"
+export ENV_FILE="$HOME/.config/tina/.env"
+tina setup --dry-run
+tina setup
 ```
 
-`make all` seeds `.env` from `.env.example`, mints the secrets the services refuse to boot without
-(`INTERNAL_API_SECRET`, `TINA_FLOWS_API_KEY`, `TINA_FLOWS_TIMELINE_KEY` — a value you already set is kept),
-builds and starts the stack, and **prints an API key plus the service URLs** when it is ready. For a
-transcript, configure `TRANSCRIPTION_SERVICE_URL` and `TRANSCRIPTION_SERVICE_TOKEN` in `.env` for a
-self-hosted STT service. The API is at `http://localhost:18056` (the gateway) and the
-terminal web workbench at `http://localhost:13000`.
+Setup creates a separate `tina-local` project with new volumes and prints the active URLs and API
+key. It does not adopt or stop existing deployments. To rebuild an already configured instance, use
+`make plan` then `make all` from its checkout; that path requires Dotenvx and the matching private
+`.env.keys` file. `make all` preserves Compose volumes.
 
-`make all` prints an API key when the self-hosted stack is ready.
+The default local ports are `13000` for the Terminal and `18056` for the API gateway. A bot needs a
+reachable transcription backend, and agent chat needs a configured model. For this repository's
+Gipformer 1.5 service, install the pinned model assets and follow the [Gipformer Compose guide](https://github.com/poor-frog/TINA-KT/blob/main/deploy/transcription/gipformer/README.md).
+Production Terminal sign-in requires configured Google or Microsoft OAuth; see
+[Terminal login](#terminal-login-google-or-microsoft). The deployment mints and prints an API key
+when it is ready; treat it as a secret.
 
 ## The stack
 
@@ -68,15 +79,40 @@ all` builds the browser image from source before starting the stack; use `make b
   network (`TINA_AGENT_MODEL` / mounted credentials).
 - **Secrets** — `ADMIN_TOKEN`, `INTERNAL_API_SECRET`, DB credentials. Set real values before exposing.
 
-## Transcription (the separate GPU unit)
+### Terminal login (Google or Microsoft)
 
-Speech-to-text is the one **GPU workload**, so it is **carved out** of the main stack: `make all`
-runs GPU-free and anywhere, and the STT service is its own deploy unit at
-`deploy/transcription`
-(`core/meetings/services/transcription`
-is the brick — faster-whisper / CTranslate2 behind an OpenAI-compatible `/v1/audio/transcriptions`).
+Production Terminal login requires a configured OAuth provider. Set the provider's client ID and
+secret in the private env file, set `NEXTAUTH_URL` to the Terminal's browser URL, and register the
+matching callback URI with the provider. For the default local port, Google uses
+`http://127.0.0.1:13000/api/auth/callback/google`; Microsoft uses
+`http://127.0.0.1:13000/api/auth/callback/microsoft`. After changing these values, restart the
+Terminal container with the same `ENV_FILE` selected. On a new instance, its first successful
+sign-in claims the administrator role. Passwordless test login is development-only.
+
+For local Google sign-in, the private env file includes:
+
+```dotenv
+NEXTAUTH_URL=http://127.0.0.1:13000
+GOOGLE_CLIENT_ID=your-client-id
+GOOGLE_CLIENT_SECRET=your-client-secret
+```
+
+Replace the values with the OAuth client from Google Cloud, use the exact callback URI above, then
+run `tina restart terminal --yes` while the same `ENV_FILE` is exported. Use the Microsoft client
+fields instead if you sign in with Microsoft.
+
+## Transcription backends
+
+The meeting API sends audio to the OpenAI-compatible endpoint configured by
+`TRANSCRIPTION_SERVICE_URL`. The stack does not start a model unless its profile or external service
+is configured. This repository includes an optional CPU-only **Gipformer 1.5 + FSMN-VAD** Compose
+service under the `asr` profile; install its pinned assets and follow the
+[Gipformer Compose guide](https://github.com/poor-frog/TINA-KT/blob/main/deploy/transcription/gipformer/README.md).
+The separate `deploy/transcription` stack provides Faster-Whisper for GPU or CPU deployments.
 Language is detected per transcription window and stamped on each segment; force a single language
 via the bot request's `language` (see [Send a bot](/how-to/send-a-bot)).
+
+### Run the separate Faster-Whisper unit
 
 Stand it up wherever a GPU lives (the same host or a dedicated GPU box):
 

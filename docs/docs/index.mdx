@@ -50,8 +50,8 @@ them.
 ## Explore
 
 <CardGroup cols={2}>
-  <Card title="Quickstart" icon="rocket" href="/deployment">
-    Self-host the full stack with one `make all`. Up in minutes on a single Linux host.
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Create a fresh local instance with the TINA CLI, or rebuild an existing Compose deployment.
   </Card>
   <Card title="Concepts" icon="cube" href="/concepts">
     The primitives everything composes from — workspace, meeting, agent, container, identity, scheduler.
@@ -75,13 +75,17 @@ them.
 
 ## Try it
 
+For a fresh install, follow the [Quickstart](/quickstart). From an already configured checkout,
+preview and then build/start its selected deployment:
+
 ```bash
 cd /path/to/TINA
-make all      # builds the full stack from source, brings it up, and prints your API key + URLs
+make plan     # inspect the selected project and services
+make all      # build, start, and print the API key + URLs
 ```
 
-The API comes up at `http://localhost:18056` (gateway) and the terminal web
-workbench at `http://localhost:13000`. Full options — no egress, bring-your-own
+The default API is at `http://127.0.0.1:18056` (gateway) and the Terminal web
+workbench at `http://127.0.0.1:13000`. Full options — no egress, bring-your-own
 inference — in [Deployment](/deployment).
 
 `make all` prints an API key when the self-hosted stack is ready.

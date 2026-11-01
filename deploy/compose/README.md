@@ -71,6 +71,23 @@ source build/start and optional ASR configuration. See [first installation](bin/
 Existing installations keep using `plan`/`deploy`; setup never replaces their env files or data.
 
 Prerequisites: Python 3, make, Docker engine >=26 and Docker Compose with `up --wait` support.
+When the selected env file is Dotenvx-encrypted, `make`/the TINA CLI also require the Dotenvx CLI and
+the matching private key in `.env.keys` (kept outside Git). Stack commands decrypt into a mode-0600
+temporary env file for Compose; generated credentials in a tracked env file are written encrypted.
+Plain private `ENV_FILE`s remain supported.
+
+To create a new local instance without the repository's private Dotenvx key, use the first-install
+CLI with a private config path outside this checkout. This avoids using the tracked encrypted `.env`
+or accidentally targeting an existing Compose project:
+
+```bash
+mkdir -p "$HOME/.config/tina"
+make cli-install
+export PATH="$HOME/.local/bin:$PATH"
+export ENV_FILE="$HOME/.config/tina/.env"
+tina setup --dry-run
+tina setup
+```
 
 ```bash
 make plan        # read-only: selected project, files, services, volumes and image references

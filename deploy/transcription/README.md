@@ -15,14 +15,21 @@ everywhere, and lets the GPU tier scale (add workers) and relocate independently
 ## Run
 
 ```bash
-cp .env.example .env          # set MODEL_SIZE, API_TOKEN, TRANSCRIPTION_LB_PORT
-docker compose up -d          # GPU (nvidia-container-toolkit required)
-# or, no GPU:
-docker compose -f docker-compose.cpu.yml up -d
+# With the committed encrypted env:
+dotenvx run --overload -f .env -fk ../../.env.keys -- docker compose up -d
+dotenvx run --overload -f .env -fk ../../.env.keys -- docker compose logs -f
+# Or make a private, ignored local config from the template:
+cp .env.example .env.local    # set MODEL_SIZE, API_TOKEN, TRANSCRIPTION_LB_PORT
+docker compose --env-file .env.local up -d
+docker compose --env-file .env.local logs -f
+# CPU-only variant:
+docker compose --env-file .env.local -f docker-compose.cpu.yml up -d
 
-docker compose logs -f        # wait for "Model loaded successfully"
 curl http://127.0.0.1:8083/health
 ```
+
+The checked-in `.env` is Dotenvx-encrypted; `.env.keys` stays private at the repository root. The
+host `start.sh` scripts detect encrypted env files and load them through Dotenvx automatically.
 
 The CPU profile publishes its nginx LB on loopback port `8083` (`TRANSCRIPTION_LB_PORT`); TINA
 reaches it over the main Compose network, not through the host port. Start the main TINA stack first

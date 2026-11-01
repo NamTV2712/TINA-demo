@@ -42,8 +42,8 @@ are outside this release.
 
 ### First installation (CLI 0.4.0)
 
-Obtain this source checkout from its owner; no public repository/package installer is configured.
-On macOS install and start OrbStack or Docker Desktop. On Linux start a local Docker engine.
+Clone `https://github.com/poor-frog/TINA-KT.git` or use an existing checkout. On macOS install and
+start OrbStack or Docker Desktop. On Linux start a local Docker engine.
 You need Python 3.10+, make (for CLI installation), git, bash, openssl and Docker engine >=26 with
 Compose supporting `up --wait` and optional `env_file` entries. Builds download dependencies and
 infrastructure images and can take several minutes; use a host with about 8 CPUs and 16 GB RAM.
@@ -52,11 +52,15 @@ infrastructure images and can take several minutes; use a host with about 8 CPUs
 cd /path/to/TINA
 make cli-install
 export PATH="$HOME/.local/bin:$PATH"  # add this to your shell profile for future terminals
-tina setup --dry-run                # optional: inspect the new install
-tina setup
+mkdir -p "$HOME/.config/tina"
+export ENV_FILE="$HOME/.config/tina/.env"
+tina setup --dry-run                # inspect the new install; creates no config or Docker resources
+tina setup                          # create the private config and a separate tina-local deployment
 ```
 
-Setup uses the local Docker context (or explicit DOCKER_CONTEXT), the base `docker-compose.yml`,
+Use the private path above for a fresh install: this checkout already contains an encrypted
+`deploy/compose/.env`, so the default setup path exists and is intentionally not overwritten. Setup
+uses the local Docker context (or explicit DOCKER_CONTEXT), the base `docker-compose.yml`,
 project/image tag `tina-local`, default loopback ports and new Compose-managed volumes. It does not
 inherit another deployment's shell settings, profiles, credentials or migration overlay. Optional
 Dashboard, Discord and mailbox profiles stay off. Base Compose includes MCP and flows; native

@@ -20,39 +20,70 @@ Run the complete system on infrastructure you control. TINA has no hosted API or
 
 ## ⚡ Quickstart
 
-Self-host the whole stack on one host, then explore it in the Terminal or drive it over the API.
-Linux (Ubuntu 24.04) is the production target; a Mac with Docker Desktop works fine for a local
-evaluation — everything runs in containers either way.
+This checkout starts the configured `tina-production` deployment with Gipformer 1.5. On macOS,
+start OrbStack or Docker Desktop first. You need Docker Engine 26+, Compose with `up --wait`, Python
+3.10+, `make`, and the private Dotenvx key that matches this repository's encrypted config.
 
-**Prerequisites** — Python 3, `make`, **Docker engine ≥ v26** (`make all` checks), and a transcription service.
-For a guided first local installation, run `make cli-install`, add `~/.local/bin` to PATH, then
-`tina setup`. See [the first-install guide](deploy/compose/bin/README.md#first-installation-cli-040).
-For air-gapped use, run the self-hosted transcription unit in `deploy/transcription`. By default,
-`POST /bots` **requires** STT and answers **503** when it is missing
-(`make all` warns when the credentials block in `.env` is empty). Capture-only is an explicit opt-out:
-`{"transcribe_enabled": false}` on the spawn (or set `TRANSCRIBE_ENABLED=false` for the deployment).
-
-
+### 1. Clone the repository
 
 ```bash
-cd /path/to/TINA
-make plan     # inspect project, profiles, files and volumes without changes
-make all      # build required images, start/wait for Compose, provision your API key + URLs
+git clone https://github.com/poor-frog/TINA-KT.git
+cd TINA-KT
 ```
 
-For local CLI/TUI operation, run `make cli-install`, then `tina` from any directory. Use
-`tina status`, `tina doctor`, or `tina deploy --dry-run` to inspect the selected deployment.
-Use `tina doctor --full` for host/ASR diagnostics and `tina check all` for the CLI, graph,
-dataflow and contract checks; they do not deploy or run inference.
-`tina asr status`, `tina asr verify` and `tina asr configure` provide scoped ASR inspection,
-connectivity checks and reviewed configuration through the existing Identity APIs.
-See the [CLI guide](deploy/compose/bin/README.md#local-tina-cli--tui) before deployment commands.
+### 2. Install Dotenvx
 
-When `make all` finishes it prints your key and URLs:
+On macOS, use the official Homebrew tap:
+
+```bash
+brew tap dotenvx/brew
+brew trust dotenvx/brew
+brew install dotenvx
+```
+
+Or install the CLI with npm: `npm install --global @dotenvx/dotenvx`.
+
+### 3. Add the matching private key
+
+Get the existing `.env.keys` file from your private password manager or secure backup and place it at
+the repository root. It must contain the `DOTENV_PRIVATE_KEY` matching `deploy/compose/.env`. The
+file is ignored by Git and must never be committed or pasted into documentation, shell commands, or
+chat. A newly generated key will not decrypt this repository's config.
+
+### 4. Install Gipformer model assets
+
+```bash
+python3 deploy/transcription/gipformer/install-models.py
+```
+
+The installer downloads and verifies the pinned Gipformer 1.5 and FSMN-VAD files into the ignored
+`deploy/transcription/models/gipformer-fsmn` directory. The checked-in deployment config already
+selects the `automation,asr,dashboard` profiles and points the bot at `http://gipformer:8000`.
+
+### 5. Preview and start TINA
+
+```bash
+make plan     # read-only: confirm project and enabled profiles
+make all      # build and start the configured stack; prints API key and URLs
+```
+
+`make all` uses the `tina-production` project and retains its database, recordings, and workspaces.
+It starts Gipformer because the selected env enables the `asr` profile and supplies its endpoint and
+token. The current local ports are Terminal `23000`, API gateway `28056`, and Gipformer health
+`18002`.
+
+Open Terminal after the command reports ready:
 
 ```text
-  Terminal UI : http://localhost:13000     # the web workbench
-  API gateway : http://localhost:18056     # the API
-  API key     : tina_…
+  Terminal UI : http://127.0.0.1:23000
+  API gateway : http://127.0.0.1:28056
 ```
+
+Google OAuth credentials are already in the encrypted deployment config; on an empty database, the
+first successful sign-in becomes administrator. Keep the API key printed by `make all` private.
+
+This is the existing `tina-production` deployment, not a clean-install recipe. If you do not have
+its matching private key, ask the owner for it through a secure channel. To create a separate local
+instance with new volumes instead, follow the [fresh-install guide](deploy/compose/bin/README.md#first-installation-cli-040).
+See the [Gipformer setup guide](deploy/transcription/gipformer/README.md) for model and service details.
 
