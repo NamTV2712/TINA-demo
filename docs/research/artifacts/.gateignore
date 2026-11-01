@@ -1,5 +1,0 @@
-# research run artifacts
-
-Output of dated research runs (captures, logs, intermediate tables) written by the research
-workflow. Nothing here is source and nothing is hand-maintained — the per-directory gates opt out
-of this subtree. Durable conclusions belong in the sibling `*.md` notes under `docs/research/`.

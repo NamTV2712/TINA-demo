@@ -48,6 +48,7 @@ deploy/transcription/models/
 releases/
 **/design-demos/
 design-demos/
+docs/research/
 test.txt
 meeting-*.png
 tina-pipeline.html
