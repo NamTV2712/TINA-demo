@@ -65,10 +65,11 @@ afterEach(() => {
 async function renderCanvas() {
   root = createRoot(container);
   const container2 = createContainer([reg(LayoutServiceId, () => createLayoutService("meetings"))]);
+  const meetingRecord = meetingsState[0] as ReturnType<typeof meetingRow> | undefined;
   await act(async () => {
     root.render(
       <ServicesProvider container={container2}>
-        <MeetingCanvasView meetingId="abc-defg-hij" />
+        <MeetingCanvasView meetingId="abc-defg-hij" meetingRecord={meetingRecord} />
       </ServicesProvider>,
     );
   });
@@ -120,7 +121,7 @@ describe("MeetingCanvasView — default view + toggle semantics", () => {
     const btn = toggleButton();
     expect(btn.getAttribute("aria-pressed")).toBe("true");
     expect(btn.textContent).toContain("Processed");
-    expect(container.textContent).toContain("cleaned + copilot");
+    expect(btn.textContent).toContain("Processed view");
     expect(container.textContent).toContain("We agreed to ship Friday.");
   });
 
@@ -131,8 +132,8 @@ describe("MeetingCanvasView — default view + toggle semantics", () => {
     await renderCanvas();
     const btn = toggleButton();
     expect(btn.getAttribute("aria-pressed")).toBe("false");
-    expect(btn.textContent).toContain("Raw");
-    expect(container.textContent).toContain("raw transcript");
+    expect(btn.textContent).toContain("Original ASR");
+    expect(container.textContent).toContain(LINE.text);
   });
 
   it("LIVE meeting keeps the current default (raw / processing off) even when notes exist", async () => {
@@ -142,7 +143,7 @@ describe("MeetingCanvasView — default view + toggle semantics", () => {
     await renderCanvas();
     const btn = toggleButton();
     expect(btn.getAttribute("aria-pressed")).toBe("false");
-    expect(btn.textContent).toContain("Processing off");
+    expect(btn.textContent).toContain("Original ASR");
   });
 
   it("COMPLETED meeting toggle is a pure view switch — never calls the arm endpoint", async () => {
@@ -165,7 +166,7 @@ describe("MeetingCanvasView — default view + toggle semantics", () => {
     await renderCanvas();
     await act(async () => { toggleButton().dispatchEvent(new MouseEvent("click", { bubbles: true })); });
     expect(toggleButton().getAttribute("aria-pressed")).toBe("true");
-    expect(toggleButton().textContent).toContain("Processing on");
+    expect(toggleButton().textContent).toContain("Processed view");
     expect(processCalls()).toBe(1);
   });
 });

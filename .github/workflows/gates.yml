@@ -63,6 +63,13 @@ jobs:
           python-version: "3.13"
       - run: pnpm install --frozen-lockfile
         env: { ONNXRUNTIME_NODE_INSTALL: skip }
+      - name: Ensure ffmpeg is available for recording tests
+        run: |
+          if ! command -v ffmpeg >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y --no-install-recommends ffmpeg
+          fi
+          ffmpeg -version
       # the runtime docker-backend lifecycle test creates containers via the docker socket API,
       # which (unlike `docker run`) does NOT implicit-pull — pre-pull its fixture image
       - run: docker pull alpine

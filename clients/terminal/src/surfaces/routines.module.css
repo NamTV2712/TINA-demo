@@ -185,7 +185,7 @@
 .statusSwitch { display: inline-flex; align-items: center; gap: 6px; padding: 4px 7px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--t2); font-size: 9.5px; white-space: nowrap; cursor: pointer; }
 .statusSwitch:hover:not(:disabled) { border-color: var(--line); background: var(--panel); }
 .statusSwitch:disabled { cursor: not-allowed; opacity: .58; }
-.statusDot { width: 6px; height: 6px; border-radius: 50%; background: #77857a; }
+.statusDot { width: 6px; height: 6px; border-radius: 50%; background: var(--t3); }
 .isEnabled .statusDot { background: var(--accent); }
 .actions { display: flex; gap: 5px; }
 .actions button,.secondaryButton { height: 26px; padding: 0 8px; border: 1px solid var(--line); border-radius: 5px; background: transparent; color: var(--muted); font-size: 9.5px; cursor: pointer; }

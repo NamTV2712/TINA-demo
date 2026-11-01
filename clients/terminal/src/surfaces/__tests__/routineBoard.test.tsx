@@ -30,7 +30,7 @@ it('keeps a conflicted draft and cancel does not write it', async () => {
 it('toggles and deletes by stable ID, not the editable display name', async () => {
   api.list.mockResolvedValue([row]); api.toggle.mockResolvedValue({}); api.remove.mockResolvedValue({});
   render(<RoutinesBoard />);
-  fireEvent.click(await screen.findByRole('switch', { name: 'Enable Morning' }));
+  fireEvent.click(await screen.findByRole('switch', { name: 'Disable Morning' }));
   await waitFor(() => expect(api.toggle).toHaveBeenCalledWith('stable', false, row.expected_sha256));
   await waitFor(() => expect((screen.getByRole('button', { name: 'Delete Morning' }) as HTMLButtonElement).disabled).toBe(false));
   fireEvent.click(screen.getByRole('button', { name: 'Delete Morning' }));

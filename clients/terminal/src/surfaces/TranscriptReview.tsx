@@ -188,7 +188,7 @@ export function TranscriptReview({ meetingId, openRef, hideTrigger = false }: { 
       <option value="" disabled>Choose a segment</option>{visible.map(s => <option key={s.segment_id} value={s.segment_id}>{s.speaker || "Speaker"} · {s.text.slice(0, 90)}</option>)}
     </select></label>}
     {segment && visible.some(s => s.segment_id === selected) && <>
-      <section aria-label="Refinement suggestion" style={{ padding: 14, border: "1px solid var(--line, #668d81)", borderRadius: 8 }}>
+      <section aria-label="Refinement suggestion" style={{ padding: 14, border: "1px solid var(--line)", borderRadius: 8 }}>
         {segment.audio?.length === 1 ? <audio ref={audioRef} key={`${meetingId}/${selected}/${alignmentItem?.audio_sha256 ?? "source"}`} controls preload="metadata" src={audioUrl} style={{ width: "100%" }} aria-label="Segment audio" onError={() => setError("Saved audio no longer matches this alignment; rerun alignment before playback.")} onTimeUpdate={e => { if (stopAt.current != null && e.currentTarget.currentTime >= stopAt.current) { e.currentTarget.pause(); stopAt.current = null; } }} /> : <p>Source audio is unavailable or ambiguous. Older recordings may lack capture timing.</p>}
         {alignmentItem?.state === "aligned" && alignmentItem.phrases?.length ? <div aria-label="Aligned words and speakers" style={{ display: "grid", gap: 8, marginTop: 12 }}>
           <h3>Word timing · raw ASR</h3>
