@@ -6,8 +6,10 @@ import json
 import os
 from pathlib import Path
 import shlex
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 
 HERE = Path(__file__).resolve().parent.parent
@@ -28,6 +30,44 @@ def run(args, *, env=None, capture=False, check=True):
     return result
 
 
+def _dotenvx_env_source(path: Path, env: dict[str, str]) -> tuple[Path, tempfile.TemporaryDirectory | None]:
+    encrypted = any(
+        line.partition("=")[2].strip().strip("\"'").startswith("encrypted:")
+        for line in path.read_text().splitlines()
+        if "=" in line and not line.lstrip().startswith("#")
+    )
+    if not encrypted:
+        return path, None
+
+    dotenvx = env.get("DOTENVX_BIN") or shutil.which("dotenvx")
+    if not dotenvx:
+        raise StackError("This env file is Dotenvx-encrypted; install dotenvx and provide its private key.")
+    explicit_key = env.get("DOTENVX_KEY_FILE")
+    explicit_path = Path(explicit_key).expanduser() if explicit_key else None
+    if explicit_path and not explicit_path.is_absolute():
+        explicit_path = ROOT / explicit_path
+    key_file = explicit_path if explicit_path else next(
+        (candidate for candidate in (path.parent / ".env.keys", ROOT / ".env.keys") if candidate.is_file()),
+        None,
+    )
+    if explicit_key and not key_file.is_file():
+        raise StackError("DOTENVX_KEY_FILE does not exist; no encrypted env values were read.")
+    command = [dotenvx, "decrypt", "--stdout", "-f", str(path)]
+    if key_file:
+        command += ["-fk", str(key_file)]
+    try:
+        plaintext = run(command, env=env, capture=True).stdout
+    except StackError:
+        raise StackError("Dotenvx could not decrypt the selected env file; check its matching private key.") from None
+
+    # Compose's service env_file reader cannot decrypt Dotenvx values itself.
+    temporary = tempfile.TemporaryDirectory(prefix="tina-dotenvx-")
+    decrypted = Path(temporary.name) / path.name
+    decrypted.write_text(plaintext, encoding="utf-8")
+    decrypted.chmod(0o600)
+    return decrypted, temporary
+
+
 def json_rows(text):
     if not text.strip():
         return []
@@ -46,12 +86,14 @@ class Stack:
             self.env_file = HERE / self.env_file
         # plan/doctor must not create a file. A fresh-install preview reads the template.
         source = self.env_file if self.env_file.exists() else HERE / ".env.example"
-        self.env["TINA_COMPOSE_ENV_FILE"] = str(source)
+        self._dotenvx_temp = None
+        compose_env_file, self._dotenvx_temp = _dotenvx_env_source(source, self.env)
+        self.env["TINA_COMPOSE_ENV_FILE"] = str(compose_env_file)
         project = self.env.get("PROJECT") or self.env.get("COMPOSE_PROJECT")
         if project:
             self.env["COMPOSE_PROJECT_NAME"] = project
         base = ["docker", "compose", "--project-directory", str(HERE),
-                "--env-file", str(source)]
+                "--env-file", str(compose_env_file)]
         interpolation = run([*base, "config", "--environment"], env=self.env, capture=True)
         values = dict(line.split("=", 1) for line in interpolation.stdout.splitlines() if "=" in line)
         # Global Docker context may change while a long build runs. Pin it once,

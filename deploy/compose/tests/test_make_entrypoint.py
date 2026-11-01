@@ -92,7 +92,8 @@ class EntryPointTest(unittest.TestCase):
     def setUp(self):
         self.docker = Docker()
         for item in [patch.object(stack, "run", self.docker),
-                     patch.dict(os.environ, {}, clear=True), patch.object(stack.time, "sleep")]:
+                     patch.dict(os.environ, {"ENV_FILE": str(ROOT / "deploy/compose/.env.example")}, clear=True),
+                     patch.object(stack.time, "sleep")]:
             item.start()
             self.addCleanup(item.stop)
 
@@ -308,6 +309,60 @@ class BootstrapTest(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertFalse(marker.exists(), target)
 
+
+@unittest.skipUnless(shutil.which("dotenvx"), "Dotenvx CLI required")
+class DotenvxEnvTest(unittest.TestCase):
+    @staticmethod
+    def values(text):
+        result = {}
+        for line in text.splitlines():
+            if "=" in line and not line.lstrip().startswith("#"):
+                key, value = line.split("=", 1)
+                result[key] = value.strip().strip("\"'")
+        return result
+
+    def test_encrypted_compose_env_is_materialized_private_without_changing_source(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            source, key_file = root / ".env", root / ".env.keys"
+            source.write_text("TEST_VALUE=round-trip\n")
+            subprocess.run(["dotenvx", "encrypt", "-f", str(source), "-fk", str(key_file)],
+                           capture_output=True, check=True)
+            encrypted = source.read_text()
+
+            decrypted, temporary = stack._dotenvx_env_source(
+                source, dict(os.environ, DOTENVX_KEY_FILE=str(key_file)))
+            try:
+                values = {}
+                for line in decrypted.read_text().splitlines():
+                    if "=" in line and not line.lstrip().startswith("#"):
+                        key, value = line.split("=", 1)
+                        values[key] = value.strip().strip("\"'")
+                self.assertEqual(values["TEST_VALUE"], "round-trip")
+                self.assertEqual(decrypted.stat().st_mode & 0o077, 0)
+                self.assertEqual(source.read_text(), encrypted)
+            finally:
+                temporary.cleanup()
+
+    def test_bootstrap_keeps_generated_secrets_encrypted(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            env_file, key_file = root / ".env", root / ".env.keys"
+            env_file.write_text("ADMIN_TOKEN=\nINTERNAL_API_SECRET=\nTINA_FLOWS_API_KEY=\nTINA_FLOWS_TIMELINE_KEY=\n")
+            subprocess.run(["dotenvx", "encrypt", "-f", str(env_file), "-fk", str(key_file)],
+                           capture_output=True, check=True)
+            subprocess.run(["bash", str(ROOT / "deploy/compose/mint-dev-env.sh"), str(env_file)],
+                           env=dict(os.environ, DOTENVX_KEY_FILE=str(key_file)),
+                           capture_output=True, check=True, text=True)
+
+            encrypted = env_file.read_text()
+            self.assertTrue(all(f"{key}=encrypted:" in encrypted for key in (
+                "ADMIN_TOKEN", "INTERNAL_API_SECRET", "TINA_FLOWS_API_KEY", "TINA_FLOWS_TIMELINE_KEY")))
+            decrypted = subprocess.run(["dotenvx", "decrypt", "--stdout", "-f", str(env_file), "-fk", str(key_file)],
+                                       capture_output=True, check=True, text=True).stdout
+            values = self.values(decrypted)
+            self.assertTrue(all(len(values[key]) == 64 for key in (
+                "ADMIN_TOKEN", "INTERNAL_API_SECRET", "TINA_FLOWS_API_KEY", "TINA_FLOWS_TIMELINE_KEY")))
 
 @unittest.skipUnless(shutil.which("docker"), "Compose CLI required; daemon not needed")
 class ComposeConfigTest(unittest.TestCase):

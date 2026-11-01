@@ -10,11 +10,8 @@ if [ -z "$config_file" ]; then
     config_file="$HOME/.config/tina/diarization.env"
   fi
 fi
-if [ -f "$config_file" ]; then
-  set -a
-  . "$config_file"
-  set +a
-fi
+. "$repo_dir/deploy/transcription/dotenvx-env.sh"
+tina_load_env "$config_file" "$repo_dir" "$@"
 : "${TINA_DIARIZATION_MODELS:?Set the model directory}"
 : "${TINA_DIARIZATION_TOKEN:?Set the worker token}"
 cd "$repo_dir/deploy/transcription/diarization"

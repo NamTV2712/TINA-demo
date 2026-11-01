@@ -10,11 +10,8 @@ if [ -z "$config_file" ]; then
     config_file="$HOME/.config/tina/gipformer.env"
   fi
 fi
-if [ -f "$config_file" ]; then
-  set -a
-  . "$config_file"
-  set +a
-fi
+. "$repo_dir/deploy/transcription/dotenvx-env.sh"
+tina_load_env "$config_file" "$repo_dir" "$@"
 : "${TINA_GIPFORMER_TOKEN:?Set a private worker token}"
 cd "$repo_dir/deploy/transcription/gipformer"
 exec "$repo_dir/.venv/gipformer-fsmn/bin/python" server.py

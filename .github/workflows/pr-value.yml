@@ -62,9 +62,12 @@ jobs:
           ref: ${{ inputs.pr && format('refs/pull/{0}/merge', inputs.pr) || '' }}
       - uses: jlumbroso/free-disk-space@v1.3.1
       - uses: astral-sh/setup-uv@v5
-      # agent-api reads deploy/compose/.env via env_file (single source of truth) — it must exist.
-      - name: Seed compose .env
-        run: bash deploy/compose/mint-dev-env.sh   # seeds .env and mints the keys the stack refuses to run without (0.12.27)
+      # The committed .env is Dotenvx-encrypted; CI uses a throwaway, ignored env file with test-only keys.
+      - name: Seed ephemeral compose env
+        working-directory: deploy/compose
+        env:
+          ENV_FILE: .env.ci.local
+        run: bash ./mint-dev-env.sh "$ENV_FILE"
       - name: Build the mock bot (local instrument image, never published)
         run: docker build -f core/meetings/services/bot/Dockerfile.mock -t mock-bot:dev .
       # No COMPOSE_NO_BUILD: the stack builds FROM THIS PR's TREE — that is the point.
@@ -73,6 +76,7 @@ jobs:
       - name: Value scenarios on the PR's stack (MOCK_BOT suite + always-on subset)
         working-directory: deploy/compose
         env:
+          ENV_FILE: .env.ci.local
           MOCK_BOT: "1"
           BROWSER_IMAGE: mock-bot:dev
           COMPOSE_DYNAMIC_PORTS: "1"

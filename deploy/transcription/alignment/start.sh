@@ -10,11 +10,8 @@ if [ -z "$config_file" ]; then
     config_file="$HOME/.config/tina/alignment.env"
   fi
 fi
-if [ -f "$config_file" ]; then
-  set -a
-  . "$config_file"
-  set +a
-fi
+. "$repo_dir/deploy/transcription/dotenvx-env.sh"
+tina_load_env "$config_file" "$repo_dir" "$@"
 : "${MFA_CONDA_PREFIX:?Set the MFA Conda environment prefix}"
 : "${MFA_ROOT_DIR:?Set the MFA model/config directory}"
 : "${MFA_DICTIONARY:?Set the Vietnamese MFA dictionary path}"

@@ -25,6 +25,13 @@ import pytest
 COMPOSE_DIR = Path(__file__).resolve().parent.parent
 COMPOSE_FILE = COMPOSE_DIR / "docker-compose.yml"
 
+def _env_file_path() -> Path | None:
+    value = os.getenv("ENV_FILE")
+    if not value:
+        return None
+    path = Path(value).expanduser()
+    return (path if path.is_absolute() else COMPOSE_DIR / path).resolve()
+
 # The 0.10 backward-compat suite (compat/) is OPT-IN via V010_COMPAT=1: without it the directory
 # is not collected at all, so the default gate:compose collection is unchanged (a compat/conftest.py
 # cannot own this gate — a second module named `conftest` shadows this one and breaks imports).
@@ -97,6 +104,9 @@ COMPOSE_EXTRA_FILES = [f for f in os.getenv("COMPOSE_EXTRA_FILES", "").split(":"
 
 def _compose(*args: str, env: dict | None = None, check: bool = True, timeout: int = 1200) -> subprocess.CompletedProcess:
     base = ["docker", "compose", "-p", PROJECT, "-f", str(COMPOSE_FILE)]
+    env_file = _env_file_path()
+    if env_file:
+        base += ["--env-file", str(env_file)]
     for extra in COMPOSE_EXTRA_FILES:
         base += ["-f", extra]
     full_env = {**os.environ, **_stack_env(), **(env or {})}
@@ -144,6 +154,7 @@ def _stack_env() -> dict:
         "MCP_HOST_PORT": MCP_HOST_PORT,
         "POSTGRES_HOST_PORT": POSTGRES_HOST_PORT,
         "STORAGE_HOST_PORT": STORAGE_HOST_PORT,
+        **({"TINA_COMPOSE_ENV_FILE": str(_env_file_path())} if _env_file_path() else {}),
         # Docker-Desktop / Linux root socket → group 0 is fine for the mounted socket.
         "DOCKER_GID": os.getenv("DOCKER_GID", "0"),
         "LOG_LEVEL": os.getenv("LOG_LEVEL", "info"),
