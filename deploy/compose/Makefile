@@ -4,7 +4,8 @@
 # session fixture, so `make stack-test` is the one entrypoint the gate calls. The bare up/down
 # targets below are for hand-driving the stack during development.
 ENV_FILE ?= .env
-export ENV_FILE PROJECT COMPOSE_PROJECT EMAIL SCOPES BOT_IMAGE DESTROY
+ALLOW_CONFIG_CHANGE ?= 1
+export ENV_FILE PROJECT COMPOSE_PROJECT EMAIL SCOPES BOT_IMAGE DESTROY ALLOW_CONFIG_CHANGE
 BROWSER_IMAGE ?= mock-bot:dev
 EMAIL ?= self-host@tina.test
 SCOPES ?= bot,tx

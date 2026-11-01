@@ -4,6 +4,8 @@
 .PHONY: all up dev down bot lite probe login help plan build doctor ps logs cli-install
 
 SURFACE ?= compose
+ALLOW_CONFIG_CHANGE ?= 1
+export ALLOW_CONFIG_CHANGE
 
 help:
 	@echo "TINA self-hosted deploy:"
