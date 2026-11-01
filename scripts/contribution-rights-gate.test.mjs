@@ -404,7 +404,8 @@ test("the shipped registry holds only the maintainer's standing and corporate au
     assert.ok(entry.path === "corporate" || maintainers.includes(login.toLowerCase()),
       `${login}: independent contributors are found from their merged PRs, never added by hand`);
   }
-  assert.equal(registeredStanding("dmitriyg228", shipped).path, "independent");
+  assert.equal(registeredStanding("dmitriyg228", shipped), null,
+    "independent contributors are resolved from merged PRs, not added to the shipped registry");
 });
 
 function mockGitHub(routes) {

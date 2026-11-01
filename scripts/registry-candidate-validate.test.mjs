@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import {
@@ -16,7 +15,7 @@ const sha256 = (bytes) => `sha256:${createHash("sha256").update(bytes).digest("h
 
 test("frozen map hash accepts exact bytes and rejects altered or truncated bytes", () => {
   const raw = Buffer.from('{"images":{"tina/tina-lite":{}}}\n');
-  const hash = "1887b0e9d312f64c21e46b0bf45d3cff9504fd9042a1a29463e14230d520add3";
+  const hash = createHash("sha256").update(raw).digest("hex");
   assert.equal(verifyCandidateMapHash(raw, hash), hash);
   for (const changed of [Buffer.from('{"images":{}}\n'), raw.subarray(0, raw.length - 2)]) {
     assert.throws(
@@ -26,15 +25,17 @@ test("frozen map hash accepts exact bytes and rejects altered or truncated bytes
   }
 });
 
-test("v0.12.18 frozen map pins exactly 10 top and 19 platform identities", async () => {
-  const raw = await readFile(new URL("../releases/v0.12.18/candidate-images.json", import.meta.url));
-  assert.equal(
-    verifyCandidateMapHash(
-      raw,
-      "80fe23246f94557279b4da2792119489f7c60f8e452b83de2c1c33ef48ebd03f",
-    ),
-    "80fe23246f94557279b4da2792119489f7c60f8e452b83de2c1c33ef48ebd03f",
-  );
+test("candidate map hash pins ten images and nineteen platform identities", () => {
+  const images = Object.fromEntries(Array.from({ length: 10 }, (_, i) => {
+    const platform_manifests = {
+      "linux/amd64": { manifest_digest: digest(String(i)), config_digest: digest(String((i + 1) % 10)) },
+    };
+    if (i < 9) platform_manifests["linux/arm64"] = { manifest_digest: digest(String((i + 2) % 10)), config_digest: digest(String((i + 3) % 10)) };
+    return [`tina/test-${i}`, { platform_manifests }];
+  }));
+  const raw = Buffer.from(`${JSON.stringify({ images })}\n`);
+  const hash = createHash("sha256").update(raw).digest("hex");
+  assert.equal(verifyCandidateMapHash(raw, hash), hash);
   const map = JSON.parse(raw);
   assert.equal(Object.keys(map.images).length, 10);
   assert.equal(

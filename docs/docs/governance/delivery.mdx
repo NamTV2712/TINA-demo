@@ -3,8 +3,8 @@ title: "Local change workflow"
 description: "A small delivery process for making and reviewing changes in the self-hosted TINA checkout."
 ---
 
-TINA currently has no public Git remote, issue tracker, or release registry. Use this page for local
-development; update it when those services are configured.
+TINA-KT uses GitHub for source control and CI. This page records the local development path and the
+merge requirements enforced by the repository workflows.
 
 ## Before changing code
 
@@ -28,8 +28,13 @@ Run the focused checks needed for the change when requested or required by the t
 commands, results, and anything left unverified. A passing source test does not establish that a
 TINA deployment worked; label runtime behavior as unverified until exercised on the target setup.
 
+## Integration — the merge bar
+
+| Required check | Acceptance |
+|---|---|
+| Merge bar — value + diff accepted | Runtime PRs need a green `value-fsm` run and `state: value-signed`. Diff is accepted when the author holds the commit bit or a non-author approves the current head. Architecture/security passes and linked-issue acceptance must also pass. |
+
 ## Git and release boundaries
 
-The TINA repository currently has no remote or release destination. Do not push, publish images, or
-create a public release until the owner provides those destinations and the contribution-rights
-process is configured. Preserve the independent `.git` directory and the inherited source history.
+Preserve the independent `.git` directory and inherited source history. Keep release receipts and
+working artifacts local unless a release owner explicitly selects the artifacts for publication.

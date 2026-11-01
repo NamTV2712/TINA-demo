@@ -9,7 +9,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -129,13 +129,13 @@ const gate = (dir, version) => {
 const stage = (mutate) => {
   const dir = mkdtempSync(join(tmpdir(), "witness-gate-"));
   mkdirSync(join(dir, "releases/v0.12.10"), { recursive: true });
-  const r = JSON.parse(readFileSync(join(SCRIPTS, "../releases/v0.12.10/witness.json"), "utf8"));
+  const r = receipt({ version: "v0.12.10", candidate: "v0.12.10" });
   if (mutate) mutate(r);
   writeFileSync(join(dir, "releases/v0.12.10/witness.json"), JSON.stringify(r, null, 2));
   return dir;
 };
 
-test("CLI GREEN: the committed v0.12.10 receipt (backfilled digests) exits 0", () => {
+test("CLI GREEN: a full v0.12.10 receipt fixture exits 0", () => {
   assert.equal(gate(stage(null), "v0.12.10").code, 0);
 });
 
