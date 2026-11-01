@@ -13,19 +13,25 @@
 # Build stage
 FROM node:20-alpine AS builder
 
-WORKDIR /workspace/services/dashboard
+# Build the shared package from tracked source; dist/ is generated and ignored on the host.
+WORKDIR /workspace/packages/transcript-rendering
+COPY packages/transcript-rendering/package.json packages/transcript-rendering/package-lock.json ./
+RUN npm ci
+COPY packages/transcript-rendering/src ./src
+COPY packages/transcript-rendering/tsconfig.json packages/transcript-rendering/tsup.config.ts ./
+RUN npm run build
 
-# Copy transcript-rendering built package
-COPY packages/transcript-rendering/package.json /workspace/packages/transcript-rendering/package.json
-COPY packages/transcript-rendering/dist/ /workspace/packages/transcript-rendering/dist/
+WORKDIR /workspace/services/dashboard
 
 # Install the exact dependency graph committed with the dashboard. The package
 # is copied to the same relative location expected by the manifests.
 COPY services/dashboard/package.json services/dashboard/package-lock.json ./
 RUN npm ci --ignore-scripts
-# Ensure transcript-rendering is physically copied (not symlinked)
+# Ensure transcript-rendering is physically copied (not symlinked).
 RUN rm -rf node_modules/@tina/transcript-rendering && \
-    cp -r /workspace/packages/transcript-rendering node_modules/@tina/transcript-rendering
+    mkdir -p node_modules/@tina/transcript-rendering && \
+    cp /workspace/packages/transcript-rendering/package.json node_modules/@tina/transcript-rendering/package.json && \
+    cp -r /workspace/packages/transcript-rendering/dist node_modules/@tina/transcript-rendering/dist
 
 # Copy source code
 COPY services/dashboard/src ./src

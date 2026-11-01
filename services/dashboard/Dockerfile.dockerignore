@@ -3,8 +3,14 @@
 # dashboard build gets exactly what its Dockerfile copies and nothing else.
 *
 !deploy/helm/charts/tina/Chart.yaml
+!packages/
+!packages/transcript-rendering/
 !packages/transcript-rendering/package.json
-!packages/transcript-rendering/dist
+!packages/transcript-rendering/package-lock.json
+!packages/transcript-rendering/tsconfig.json
+!packages/transcript-rendering/tsup.config.ts
+!packages/transcript-rendering/src/
+!packages/transcript-rendering/src/**
 !branding/
 !branding/tokens.css
 !services/dashboard
