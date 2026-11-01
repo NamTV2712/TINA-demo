@@ -59,6 +59,8 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 22, cache: pnpm }
       - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.13"
       - run: pnpm install --frozen-lockfile
         env: { ONNXRUNTIME_NODE_INSTALL: skip }
       # the runtime docker-backend lifecycle test creates containers via the docker socket API,
