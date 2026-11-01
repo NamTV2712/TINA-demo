@@ -28,6 +28,7 @@ from gateway import routes_manifest
 from conftest import AGENT_CARRIED, VALID_KEY, FakeAuthorizer, FakeDownstream, FakeRedis, needs_agent
 
 AUTH = {"x-api-key": VALID_KEY}
+MEETING_UID = "a" * 64
 
 # One concrete request per protected route template. Path params are filled with fixtures the
 # downstream fake never looks at — the assertion is on the EDGE's verdict, which is reached before
@@ -69,6 +70,9 @@ CASES = [
      "/meetings/{platform}/{native_meeting_id}/participants"),
 
     ("GET", "/transcripts/by-id/42/canonical", "/transcripts/by-id/{meeting_id}/canonical"),
+    ("GET", "/transcripts/by-id/42/foundation", "/transcripts/by-id/{meeting_id}/foundation"),
+    ("GET", f"/transcripts/by-id/42/replicas/{MEETING_UID}", "/transcripts/by-id/{meeting_id}/replicas/{meeting_uid}"),
+    ("PUT", f"/transcripts/by-id/42/replicas/{MEETING_UID}", "/transcripts/by-id/{meeting_id}/replicas/{meeting_uid}"),
     ("GET", "/transcripts/by-id/42/memory", "/transcripts/by-id/{meeting_id}/memory"),
     ("GET", "/transcripts/by-id/42", "/transcripts/by-id/{meeting_id}"),
     ("GET", "/transcripts/by-id/42/speakers", "/transcripts/by-id/{meeting_id}/speakers"),
