@@ -14,7 +14,7 @@ import pytest
     ("S3_ENDPOINT=\nS3_ENDPOINT=https://s3.example.com\n", "https://s3.example.com"),
     ("S3_ENDPOINT=https://s3.example.com\nS3_ENDPOINT=\n", None),
     ("S3_ENDPOINT=http://tina-lite-storage:9000\n", None),
-    ("S3_ENDPOINT=http://unknown-lite-storage:9000\n", None),
+    ("S3_ENDPOINT=http://unknown-lite-storage:9000\n", "http://unknown-lite-storage:9000"),
     ("S3_ENDPOINT=https://s3.example.com\r\n", "https://s3.example.com"),
 ])
 @pytest.mark.parametrize("use_makefile_flag", [False, True])
