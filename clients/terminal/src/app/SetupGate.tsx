@@ -11,6 +11,7 @@
  *  Every step is skippable (the terminal must never hold the UI hostage); skipped steps are
  *  recorded so Settings can nudge later. */
 import { useEffect, useState, type CSSProperties } from "react";
+import styles from "./SetupGate.module.css";
 import {
   getGlobalSetting, setGlobalSetting, testModels, testTranscription,
   type ConfigTestResult, type GlobalSetting,
@@ -26,39 +27,30 @@ export function shouldShowSetup(setup: GlobalSetting | null): boolean {
 type Phase = "checking" | "hidden" | "wizard";
 type StepState = "done" | "skipped";
 
-const card: CSSProperties = {
-  position: "relative",
-  border: "1px solid var(--line2)", borderRadius: 10, padding: "13px 15px",
-  display: "flex", flexDirection: "column", gap: 6, cursor: "pointer",
-};
 /** Visually hidden but still focusable — the real radio behind each provider card. */
 const srOnly: CSSProperties = {
   position: "absolute", width: 1, height: 1, padding: 0, margin: -1,
   overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap", border: 0,
 };
-const cardSel: CSSProperties = { ...card, border: "1px solid var(--accent)", background: "var(--panel2)" };
 const field: CSSProperties = {
-  width: "100%", boxSizing: "border-box", fontSize: 12.5, padding: "8px 10px", borderRadius: 7,
+  width: "100%", boxSizing: "border-box", fontSize: 14, padding: "10px 12px", borderRadius: 8,
   border: "1px solid var(--line2)", background: "var(--panel2)", color: "var(--t1)",
 };
 const primaryBtn: CSSProperties = {
-  background: "var(--accent)", color: "var(--on-accent)", border: "none", borderRadius: 7,
-  padding: "9px 18px", fontSize: 13, fontWeight: 600, cursor: "pointer",
+  background: "var(--accent)", color: "var(--on-accent)", border: "none", borderRadius: 8,
+  padding: "10px 18px", fontSize: 14, fontWeight: 600, cursor: "pointer",
 };
 const quietBtn: CSSProperties = {
-  background: "transparent", color: "var(--t2)", border: "1px solid var(--line2)", borderRadius: 7,
-  padding: "8px 14px", fontSize: 12.5, cursor: "pointer",
-};
-const label: CSSProperties = {
-  fontSize: 10.5, letterSpacing: ".08em", textTransform: "uppercase", color: "var(--t3)", fontWeight: 600,
+  background: "transparent", color: "var(--t2)", border: "1px solid var(--line2)", borderRadius: 8,
+  padding: "8px 14px", fontSize: 13.5, cursor: "pointer",
 };
 
 function TestLine({ res, err, busy }: { res: ConfigTestResult | null; err: string | null; busy: boolean }) {
-  if (busy) return <span style={{ fontSize: 11.5, color: "var(--t3)" }}>Testing…</span>;
-  if (err) return <span role="alert" style={{ fontSize: 11.5, color: "var(--danger)" }}>⚠ {err}</span>;
+  if (busy) return <span className={styles.testStatus}>Testing…</span>;
+  if (err) return <span role="alert" className={styles.testError}>⚠ {err}</span>;
   if (!res) return null;
   return (
-    <span style={{ fontSize: 11.5, color: res.ok ? "var(--green)" : "var(--danger)", lineHeight: 1.5 }}>
+    <span role="status" className={res.ok ? styles.testOk : styles.testError}>
       {res.ok ? "✓" : "✗"} {res.summary}
     </span>
   );
@@ -68,6 +60,14 @@ function TestLine({ res, err, busy }: { res: ConfigTestResult | null; err: strin
  *  custom OpenRouter/OpenAI-compatible endpoint. */
 function ModelsStep({ onNext }: { onNext: (state: StepState) => void }) {
   type Choice = "subscription" | "openai-subscription" | "openai-api" | "antigravity" | "bedrock" | "custom";
+  const providers: Array<{ value: Choice; label: string; description: string; logo: string }> = [
+    { value: "subscription", label: "Claude subscription on this machine", description: "Uses the Claude Code credentials already on this computer. No API key needed.", logo: "anthropic.svg" },
+    { value: "openai-subscription", label: "ChatGPT plan (Codex app-server)", description: "Connect your ChatGPT account and allow TINA to use eligible plan usage. Requests count toward that account’s usage.", logo: "openai.svg" },
+    { value: "openai-api", label: "OpenAI API key", description: "API usage is billed through your OpenAI API account, separately from your ChatGPT plan.", logo: "openai.svg" },
+    { value: "antigravity", label: "Google Antigravity CLI (agy)", description: "Use a Gemini API key or Gemini Enterprise credential. This choice affects agent turns; meeting summaries keep using the deployment completion provider. Access is checked on the first agent turn.", logo: "antigravity.svg" },
+    { value: "bedrock", label: "AWS Bedrock", description: "Use a Bedrock API key with a Claude model enabled in your AWS account. Short-term keys expire and may need renewal.", logo: "aws.svg" },
+    { value: "custom", label: "OpenRouter or custom endpoint", description: "Any Anthropic/OpenAI-compatible endpoint. Bring your own key.", logo: "openrouter.svg" },
+  ];
   const [choice, setChoice] = useState<Choice>("subscription");
   const [detect, setDetect] = useState<ConfigTestResult | null>(null);
   const [detecting, setDetecting] = useState(true);
@@ -175,170 +175,127 @@ function ModelsStep({ onNext }: { onNext: (state: StepState) => void }) {
 
   const canContinue = (choice === "subscription" && detected) || res?.ok === true
     || (choice === "antigravity" && antigravityAcknowledged && antigravitySaved);
+  const selectedProvider = providers.find((provider) => provider.value === choice)!;
 
   return (
     <>
-      <div style={{ fontSize: 19, fontWeight: 650, color: "var(--t1)" }}>How should the agent think?</div>
-      <div style={{ fontSize: 12, color: "var(--t3)", lineHeight: 1.5 }}>
-        Pick the model provider for chat, briefs, and meeting notes. You can change this anytime in
-        Settings → Models.
-      </div>
-
-      <div className="choice-card" style={choice === "subscription" ? cardSel : card} onClick={() => setChoice("subscription")}>
-        <input type="radio" name="model-provider" id="mp-subscription" style={srOnly}
-          checked={choice === "subscription"} onChange={() => setChoice("subscription")} />
-        <label htmlFor="mp-subscription" style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 600, color: "var(--t1)", cursor: "pointer" }}>
-          <Radio on={choice === "subscription"} /> Claude subscription on this machine
-          {detecting
-            ? <Badge tone="muted">checking…</Badge>
-            : detected ? <Badge tone="ok">detected</Badge> : <Badge tone="warn">not detected</Badge>}
-        </label>
-        <div style={{ fontSize: 11.5, color: "var(--t3)", lineHeight: 1.5, marginLeft: 22 }}>
-          Uses the Claude Code credentials already on this computer. No API key needed.
+      <div className={styles.stepContent}>
+        <div className={styles.stepIntro}>
+          <span className={styles.stepIndex}>01 / AGENT MODEL</span>
+          <h1 className={styles.stepTitle}>How should the agent think?</h1>
+          <p className={styles.stepDescription}>Pick the model provider for chat, briefs, and meeting notes. You can change this anytime in Settings → Models.</p>
         </div>
-        {!detecting && !detected && (
-          <div style={{ marginLeft: 22, display: "flex", flexDirection: "column", gap: 7 }}>
-            <div style={{ fontSize: 11.5, color: "var(--t2)", lineHeight: 1.5 }}>
-              No Claude credentials detected in the deployment environment. Set up a model
-              provider via <code style={{ fontSize: 11, fontFamily: "var(--mono)", background: "var(--panel2)", padding: "1px 4px", borderRadius: 3 }}>HOST_CLAUDE_CREDENTIALS</code>{" "}
-              in deployment settings or select the "OpenRouter or custom endpoint" option above.
-              You can change this later in Settings → Models.
-            </div>
-            {detect && !detect.ok && <TestLine res={detect} err={null} busy={false} />}
-            <button style={{ ...quietBtn, alignSelf: "flex-start" }} onClick={(e) => { e.stopPropagation(); recheck(); }}>
-              Re-check
-            </button>
-          </div>
-        )}
-        {detected && choice === "subscription" && (
-          <div style={{ marginLeft: 22 }}><TestLine res={detect} err={null} busy={false} /></div>
-        )}
-      </div>
 
-      <div className="choice-card" style={choice === "openai-subscription" ? cardSel : card} onClick={() => setChoice("openai-subscription")}>
-        <input type="radio" name="model-provider" id="mp-openai-subscription" style={srOnly}
-          checked={choice === "openai-subscription"} onChange={() => setChoice("openai-subscription")} />
-        <label htmlFor="mp-openai-subscription" style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 600, color: "var(--t1)", cursor: "pointer" }}>
-          <Radio on={choice === "openai-subscription"} /> ChatGPT plan (Codex app-server)
-          {chatgptConnected && <Badge tone="ok">connected</Badge>}
-        </label>
-        <div style={{ fontSize: 11.5, color: "var(--t3)", lineHeight: 1.5, marginLeft: 22 }}>
-          Connect your ChatGPT account and allow TINA to use eligible plan usage. Requests count toward that account&rsquo;s usage.
-        </div>
-        {choice === "openai-subscription" && (
-          <div style={{ marginLeft: 22, display: "flex", flexDirection: "column", gap: 7 }}>
-            <ChatGPTModelInput value={model} onChange={setModel} style={field} />
-            <button style={{ ...quietBtn, alignSelf: "flex-start", opacity: busy ? 0.5 : 1 }} disabled={busy}
-              onClick={(e) => { e.stopPropagation(); void connectChatGPT(); }}>
-              {busy ? "Connecting…" : chatgptConnected ? "Reconnect with ChatGPT" : "Continue with ChatGPT"}
-            </button>
-            {chatgptConnected && <button style={{ ...quietBtn, alignSelf: "flex-start", opacity: busy ? 0.5 : 1 }} disabled={busy}
-              onClick={(e) => { e.stopPropagation(); void saveAndTest("openai-subscription"); }}>
-              {busy ? "Testing…" : "Save & test"}
-            </button>}
-          </div>
-        )}
-      </div>
-
-      <div className="choice-card" style={choice === "openai-api" ? cardSel : card} onClick={() => setChoice("openai-api")}>
-        <input type="radio" name="model-provider" id="mp-openai-api" style={srOnly}
-          checked={choice === "openai-api"} onChange={() => setChoice("openai-api")} />
-        <label htmlFor="mp-openai-api" style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 600, color: "var(--t1)", cursor: "pointer" }}>
-          <Radio on={choice === "openai-api"} /> OpenAI API key
-        </label>
-        <div style={{ fontSize: 11.5, color: "var(--t3)", lineHeight: 1.5, marginLeft: 22 }}>
-          API usage is billed through your OpenAI API account, separately from your ChatGPT plan.
-        </div>
-        {choice === "openai-api" && (
-          <div style={{ marginLeft: 22, display: "flex", flexDirection: "column", gap: 7 }}>
-            <input style={field} placeholder="OpenAI API key" value={apiKey} type="password" onChange={(e) => setApiKey(e.target.value)} />
-            <input style={field} placeholder="OpenAI API model ID" value={model} onChange={(e) => setModel(e.target.value)} />
-          </div>
-        )}
-      </div>
-
-      <div className="choice-card" style={choice === "antigravity" ? cardSel : card} onClick={() => setChoice("antigravity")}>
-        <input type="radio" name="model-provider" id="mp-antigravity" style={srOnly}
-          checked={choice === "antigravity"} onChange={() => setChoice("antigravity")} />
-        <label htmlFor="mp-antigravity" style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 600, color: "var(--t1)", cursor: "pointer" }}>
-          <Radio on={choice === "antigravity"} /> Google Antigravity CLI (agy)
-        </label>
-        <div style={{ fontSize: 11.5, color: "var(--t3)", lineHeight: 1.5, marginLeft: 22 }}>
-          Use a Gemini API key or Gemini Enterprise credential. This choice affects agent turns; meeting summaries keep using the deployment completion provider. Access is checked on the first agent turn.
-        </div>
-        {choice === "antigravity" && (
-          <div style={{ marginLeft: 22, display: "flex", flexDirection: "column", gap: 8 }}>
-            <div role="alert" style={{ border: "1px solid var(--danger)", borderRadius: 8, padding: "10px 12px", background: "color-mix(in srgb, var(--danger) 8%, transparent)", color: "var(--t2)", fontSize: 12, lineHeight: 1.5 }}>
-              Google says third-party access to Antigravity violates its Terms of Service. Using a consumer-plan login with <code>agy</code> inside TINA is unsupported and may lead to account suspension or termination. Acknowledgment does not make it permitted. Use a Gemini API key or Gemini Enterprise for TINA.
-            </div>
-            <input style={field} placeholder="Gemini API key (optional)" value={apiKey} type="password" onChange={(e) => { setApiKey(e.target.value); setAntigravitySaved(false); }} />
-            <input style={field} placeholder="Antigravity model ID (optional)" value={model} onChange={(e) => { setModel(e.target.value); setAntigravitySaved(false); }} />
-            <label style={{ display: "flex", alignItems: "flex-start", gap: 8, fontSize: 11.5, color: "var(--t2)", lineHeight: 1.5 }}>
-              <input type="checkbox" checked={antigravityAcknowledged} onChange={(e) => { setAntigravityAcknowledged(e.target.checked); setAntigravitySaved(false); }} />
-              I have read this warning and acknowledge the account risk.
+        <div className={styles.providerGallery} role="radiogroup" aria-label="Agent model provider">
+          {providers.map((provider) => (
+            <label key={provider.value} className={`${styles.providerChoice} ${choice === provider.value ? styles.providerChoiceSelected : ""}`}>
+              <input type="radio" name="model-provider" id={`mp-${provider.value}`} style={srOnly}
+                checked={choice === provider.value} onChange={() => setChoice(provider.value)} />
+              <img className={styles.providerLogo} src={`/provider-logos/${provider.logo}`} alt="" aria-hidden="true" />
+              <span className={styles.providerOptionName}>{provider.label}</span>
+              {provider.value === "subscription" && (
+                <Badge tone={detecting ? "muted" : detected ? "ok" : "warn"}>
+                  {detecting ? "checking…" : detected ? "detected" : "not detected"}
+                </Badge>
+              )}
+              {provider.value === "openai-subscription" && chatgptConnected && <Badge tone="ok">connected</Badge>}
             </label>
-            <button style={{ ...quietBtn, alignSelf: "flex-start", opacity: busy || !antigravityAcknowledged ? 0.5 : 1 }}
-              disabled={busy || !antigravityAcknowledged}
-              onClick={(e) => { e.stopPropagation(); void saveAndTest("antigravity"); }}>
-              {busy ? "Saving…" : antigravitySaved ? "Saved" : "Save provider"}
-            </button>
-            {antigravitySaved && <span role="status" style={{ fontSize: 11.5, color: "var(--t3)" }}>Authentication and model access will be checked on the first agent turn.</span>}
-          </div>
-        )}
-      </div>
-
-      <div className="choice-card" style={choice === "bedrock" ? cardSel : card} onClick={() => setChoice("bedrock")}>
-        <input type="radio" name="model-provider" id="mp-bedrock" style={srOnly}
-          checked={choice === "bedrock"} onChange={() => setChoice("bedrock")} />
-        <label htmlFor="mp-bedrock" style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 600, color: "var(--t1)", cursor: "pointer" }}>
-          <Radio on={choice === "bedrock"} /> AWS Bedrock
-        </label>
-        <div style={{ fontSize: 11.5, color: "var(--t3)", lineHeight: 1.5, marginLeft: 22 }}>
-          Use a Bedrock API key with a Claude model enabled in your AWS account. Short-term keys expire and may need renewal.
+          ))}
         </div>
-        {choice === "bedrock" && (
-          <div style={{ marginLeft: 22, display: "flex", flexDirection: "column", gap: 7 }}>
-            <input style={field} placeholder="AWS region (e.g. us-east-1)" value={region} onChange={(e) => setRegion(e.target.value)} />
-            <input style={field} placeholder="Bedrock API key" value={apiKey} type="password" onChange={(e) => setApiKey(e.target.value)} />
-            <input style={field} placeholder="Claude model ID enabled in your AWS region" value={model} onChange={(e) => setModel(e.target.value)} />
-          </div>
-        )}
-      </div>
 
-      <div className="choice-card" style={choice === "custom" ? cardSel : card} onClick={() => setChoice("custom")}>
-        <input type="radio" name="model-provider" id="mp-custom" style={srOnly}
-          checked={choice === "custom"} onChange={() => setChoice("custom")} />
-        <label htmlFor="mp-custom" style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 600, color: "var(--t1)", cursor: "pointer" }}>
-          <Radio on={choice === "custom"} /> OpenRouter or custom endpoint
-        </label>
-        <div style={{ fontSize: 11.5, color: "var(--t3)", lineHeight: 1.5, marginLeft: 22 }}>
-          Any Anthropic/OpenAI-compatible endpoint. Bring your own key.
-        </div>
-        {choice === "custom" && (
-          <div style={{ marginLeft: 22, display: "flex", flexDirection: "column", gap: 7 }}>
-            <input style={field} placeholder="https://openrouter.ai/api/v1" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
-            <input style={field} placeholder="API key" type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
-            <input style={field} placeholder="Model — e.g. anthropic/claude-sonnet-4.5" value={model} onChange={(e) => setModel(e.target.value)} />
+        <section className={styles.selectedProvider} aria-live="polite">
+          <div className={styles.selectedHeader}>
+            <div>
+              <div className={styles.selectedEyebrow}>Selected provider</div>
+              <h2>{selectedProvider.label}</h2>
+            </div>
           </div>
-        )}
-      </div>
+          <p className={styles.selectedDescription}>{selectedProvider.description}</p>
 
-      <div style={{ display: "flex", alignItems: "center", gap: 10, minHeight: 24 }}>
-        {choice === "custom" && (
-          <button style={{ ...quietBtn, opacity: busy || !baseUrl.trim() ? 0.5 : 1 }} disabled={busy || !baseUrl.trim()}
-            onClick={() => void saveAndTest("custom")}>
-            {busy ? "Testing…" : "Save & test"}
-          </button>
-        )}
-        {choice === "openai-api" && (
-          <button style={{ ...quietBtn, opacity: busy || !apiKey.trim() || !model.trim() ? 0.5 : 1 }} disabled={busy || !apiKey.trim() || !model.trim()}
-            onClick={() => void saveAndTest("openai-api")}>{busy ? "Testing…" : "Save & test"}</button>
-        )}
-        {choice === "bedrock" && (
-          <button style={{ ...quietBtn, opacity: busy || !apiKey.trim() || !region.trim() || !model.trim() ? 0.5 : 1 }} disabled={busy || !apiKey.trim() || !region.trim() || !model.trim()}
-            onClick={() => void saveAndTest("bedrock")}>{busy ? "Testing…" : "Save & test"}</button>
-        )}
-        <TestLine res={res} err={err} busy={false} />
+          {choice === "subscription" && !detecting && !detected && (
+            <div className={styles.helperBox}>
+              <p>No Claude credentials detected in the deployment environment. Set up a model provider via <code>HOST_CLAUDE_CREDENTIALS</code> in deployment settings or select the “OpenRouter or custom endpoint” option above. You can change this later in Settings → Models.</p>
+              {detect && !detect.ok && <TestLine res={detect} err={null} busy={false} />}
+              <button style={quietBtn} onClick={recheck}>Re-check</button>
+            </div>
+          )}
+          {choice === "subscription" && detecting && <div className={styles.detailStatus}><TestLine res={null} err={null} busy /></div>}
+          {choice === "subscription" && detected && <div className={styles.detailStatus}><TestLine res={detect} err={null} busy={false} /></div>}
+
+          {choice === "openai-subscription" && (
+            <div className={styles.formFields}>
+              <ChatGPTModelInput value={model} onChange={setModel} style={field} />
+              <div className={styles.actions}>
+                <button style={{ ...quietBtn, opacity: busy ? 0.5 : 1 }} disabled={busy} onClick={() => void connectChatGPT()}>
+                  {busy ? "Connecting…" : chatgptConnected ? "Reconnect with ChatGPT" : "Continue with ChatGPT"}
+                </button>
+                {chatgptConnected && <button style={{ ...quietBtn, opacity: busy ? 0.5 : 1 }} disabled={busy} onClick={() => void saveAndTest("openai-subscription")}>
+                  {busy ? "Testing…" : "Save & test"}
+                </button>}
+              </div>
+              <TestLine res={res} err={err} busy={false} />
+            </div>
+          )}
+
+          {choice === "openai-api" && (
+            <div className={styles.formFields}>
+              <input style={field} placeholder="OpenAI API key" value={apiKey} type="password" onChange={(e) => setApiKey(e.target.value)} />
+              <input style={field} placeholder="OpenAI API model ID" value={model} onChange={(e) => setModel(e.target.value)} />
+              <div className={styles.actions}>
+                <button style={{ ...quietBtn, opacity: busy || !apiKey.trim() || !model.trim() ? 0.5 : 1 }} disabled={busy || !apiKey.trim() || !model.trim()}
+                  onClick={() => void saveAndTest("openai-api")}>{busy ? "Testing…" : "Save & test"}</button>
+                <TestLine res={res} err={err} busy={false} />
+              </div>
+            </div>
+          )}
+
+          {choice === "antigravity" && (
+            <div className={styles.formFields}>
+              <div role="alert" className={styles.warningBox}>
+                Google says third-party access to Antigravity violates its Terms of Service. Using a consumer-plan login with <code>agy</code> inside TINA is unsupported and may lead to account suspension or termination. Acknowledgment does not make it permitted. Use a Gemini API key or Gemini Enterprise for TINA.
+              </div>
+              <input style={field} placeholder="Gemini API key (optional)" value={apiKey} type="password" onChange={(e) => { setApiKey(e.target.value); setAntigravitySaved(false); }} />
+              <input style={field} placeholder="Antigravity model ID (optional)" value={model} onChange={(e) => { setModel(e.target.value); setAntigravitySaved(false); }} />
+              <label className={styles.checkRow}>
+                <input type="checkbox" checked={antigravityAcknowledged} onChange={(e) => { setAntigravityAcknowledged(e.target.checked); setAntigravitySaved(false); }} />
+                I have read this warning and acknowledge the account risk.
+              </label>
+              <div className={styles.actions}>
+                <button style={{ ...quietBtn, opacity: busy || !antigravityAcknowledged ? 0.5 : 1 }} disabled={busy || !antigravityAcknowledged}
+                  onClick={() => void saveAndTest("antigravity")}>
+                  {busy ? "Saving…" : antigravitySaved ? "Saved" : "Save provider"}
+                </button>
+                {antigravitySaved && <span className={styles.detailStatus} role="status">Authentication and model access will be checked on the first agent turn.</span>}
+              </div>
+            </div>
+          )}
+
+          {choice === "bedrock" && (
+            <div className={styles.formFields}>
+              <input style={field} placeholder="AWS region (e.g. us-east-1)" value={region} onChange={(e) => setRegion(e.target.value)} />
+              <input style={field} placeholder="Bedrock API key" value={apiKey} type="password" onChange={(e) => setApiKey(e.target.value)} />
+              <input style={field} placeholder="Claude model ID enabled in your AWS region" value={model} onChange={(e) => setModel(e.target.value)} />
+              <div className={styles.actions}>
+                <button style={{ ...quietBtn, opacity: busy || !apiKey.trim() || !region.trim() || !model.trim() ? 0.5 : 1 }} disabled={busy || !apiKey.trim() || !region.trim() || !model.trim()}
+                  onClick={() => void saveAndTest("bedrock")}>{busy ? "Testing…" : "Save & test"}</button>
+                <TestLine res={res} err={err} busy={false} />
+              </div>
+            </div>
+          )}
+
+          {choice === "custom" && (
+            <div className={styles.formFields}>
+              <input style={field} placeholder="https://openrouter.ai/api/v1" value={baseUrl} onChange={(e) => setBaseUrl(e.target.value)} />
+              <input style={field} placeholder="API key" type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
+              <input style={field} placeholder="Model — e.g. anthropic/claude-sonnet-4.5" value={model} onChange={(e) => setModel(e.target.value)} />
+              <div className={styles.actions}>
+                <button style={{ ...quietBtn, opacity: busy || !baseUrl.trim() ? 0.5 : 1 }} disabled={busy || !baseUrl.trim()}
+                  onClick={() => void saveAndTest("custom")}>{busy ? "Testing…" : "Save & test"}</button>
+                <TestLine res={res} err={err} busy={false} />
+              </div>
+            </div>
+          )}
+        </section>
       </div>
 
       <Foot
@@ -390,30 +347,39 @@ function TranscriptionStep({ onNext }: { onNext: (state: StepState) => void }) {
 
   return (
     <>
-      <div style={{ fontSize: 19, fontWeight: 650, color: "var(--t1)" }}>Self-hosted transcription</div>
-      <div style={{ fontSize: 12, color: "var(--t3)", lineHeight: 1.5 }}>
-        Point meeting bots at an OpenAI-compatible transcription endpoint you control.
-      </div>
+      <div className={styles.stepContent}>
+        <div className={styles.stepIntro}>
+          <span className={styles.stepIndex}>02 / TRANSCRIPTION</span>
+          <h1 className={styles.stepTitle}>Self-hosted transcription</h1>
+          <p className={styles.stepDescription}>Point meeting bots at an OpenAI-compatible transcription endpoint you control.</p>
+        </div>
 
-      <div style={cardSel}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 600, color: "var(--t1)" }}>
-          <Radio on /> OpenAI-compatible endpoint
-        </div>
-        <div style={{ fontSize: 11.5, color: "var(--t3)", lineHeight: 1.5, marginLeft: 22 }}>
-          Use a local or private STT service. The URL must be reachable from the TINA meeting service.
-        </div>
-        <div style={{ marginLeft: 22, display: "flex", flexDirection: "column", gap: 7 }}>
-          <input style={field} placeholder="http://transcription:8083" value={url} onChange={(e) => setUrl(e.target.value)} />
-          <input style={field} placeholder="API key (optional)" type="password" value={token} onChange={(e) => setToken(e.target.value)} />
-        </div>
-      </div>
-
-      <div style={{ display: "flex", alignItems: "center", gap: 10, minHeight: 24 }}>
-        <button style={{ ...quietBtn, opacity: busy || !dirty ? 0.5 : 1 }} disabled={busy || !dirty}
-          onClick={() => void saveAndTest()}>
-          {busy ? "Testing…" : "Save & test"}
-        </button>
-        <TestLine res={res} err={err} busy={busy} />
+        <section className={styles.transcriptionPanel}>
+          <div className={styles.selectedHeader}>
+            <div className={styles.providerHeading}>
+              <Radio on />
+              <h2>OpenAI-compatible endpoint</h2>
+            </div>
+          </div>
+          <p className={styles.selectedDescription}>Use a local or private STT service. The URL must be reachable from the TINA meeting service.</p>
+          <div className={styles.formFields}>
+            <label className={styles.fieldLabel}>
+              Service URL
+              <input style={field} placeholder="http://transcription:8083" value={url} onChange={(e) => setUrl(e.target.value)} />
+            </label>
+            <label className={styles.fieldLabel}>
+              API key (optional)
+              <input style={field} placeholder="API key (optional)" type="password" value={token} onChange={(e) => setToken(e.target.value)} />
+            </label>
+            <div className={styles.actions}>
+              <button style={{ ...quietBtn, opacity: busy || !dirty ? 0.5 : 1 }} disabled={busy || !dirty}
+                onClick={() => void saveAndTest()}>
+                {busy ? "Testing…" : "Save & test"}
+              </button>
+              <TestLine res={res} err={err} busy={busy} />
+            </div>
+          </div>
+        </section>
       </div>
 
       <Foot
@@ -429,30 +395,18 @@ function TranscriptionStep({ onNext }: { onNext: (state: StepState) => void }) {
 }
 
 function Radio({ on }: { on: boolean }) {
-  return (
-    <span aria-hidden="true" style={{
-      width: 13, height: 13, borderRadius: "50%", flex: "none", boxSizing: "border-box",
-      border: on ? "4px solid var(--accent)" : "1.5px solid var(--t3)",
-    }} />
-  );
+  return <span aria-hidden="true" className={`${styles.radio} ${on ? styles.radioSelected : ""}`} />;
 }
 
 function Badge({ tone, children }: { tone: "ok" | "warn" | "muted"; children: React.ReactNode }) {
-  const color = tone === "ok" ? "var(--green)" : tone === "warn" ? "var(--warn, #d3ab5f)" : "var(--t3)";
-  return (
-    <span style={{ fontSize: 9.5, letterSpacing: ".06em", textTransform: "uppercase", fontWeight: 650,
-      color, border: `1px solid ${color}`, borderRadius: 4, padding: "1px 6px", opacity: 0.9 }}>
-      {children}
-    </span>
-  );
+  const toneClass = tone === "ok" ? styles.badgeOk : tone === "warn" ? styles.badgeWarn : styles.badgeMuted;
+  return <span className={`${styles.badge} ${toneClass}`}>{children}</span>;
 }
 
 function Foot({ onSkip, next }: { onSkip: () => void; next: React.ReactNode }) {
   return (
-    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
-      marginTop: 10, paddingTop: 14, borderTop: "1px dashed var(--line2)" }}>
-      <button onClick={onSkip}
-        style={{ background: "none", border: "none", color: "var(--t3)", fontSize: 12, cursor: "pointer", textDecoration: "underline", padding: 0 }}>
+    <div className={styles.footer}>
+      <button className={styles.skipButton} onClick={onSkip}>
         Skip for now
       </button>
       {next}
@@ -464,21 +418,16 @@ function Steps({ at }: { at: 1 | 2 }) {
   const dot = (n: number, label: string) => {
     const on = at === n, done = at > n;
     return (
-      <span key={n} style={{ display: "flex", alignItems: "center", gap: 6, color: on ? "var(--t1)" : "var(--t3)", fontSize: 11.5 }}>
-        <span style={{
-          width: 18, height: 18, borderRadius: "50%", display: "grid", placeItems: "center", fontSize: 10, fontWeight: 700,
-          background: on ? "var(--accent)" : done ? "var(--panel2)" : "transparent",
-          color: on ? "var(--on-accent)" : done ? "var(--green)" : "var(--t3)",
-          border: on ? "none" : "1px solid var(--line2)",
-        }}>{done ? "✓" : n}</span>
+      <span key={n} className={`${styles.step} ${on ? styles.stepActive : ""} ${done ? styles.stepDone : ""}`}>
+        <span className={styles.stepDot}>{done ? "✓" : n}</span>
         {label}
       </span>
     );
   };
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+    <div className={styles.steps}>
       {dot(1, "Agent model")}
-      <span style={{ width: 24, height: 1, background: "var(--line2)" }} />
+      <span className={styles.stepRule} aria-hidden="true" />
       {dot(2, "Transcription")}
     </div>
   );
@@ -497,7 +446,7 @@ export function SetupGate({ children }: { children: React.ReactNode }) {
     return () => { on = false; };
   }, []);
 
-  if (phase === "checking") return <div style={{ height: "100vh", background: "var(--bg)" }} />;
+  if (phase === "checking") return <div style={{ height: "100dvh", background: "var(--bg)" }} />;
   if (phase === "hidden") return <>{children}</>;
 
   const advance = (key: "models" | "transcription", state: StepState) => {
@@ -520,36 +469,43 @@ export function SetupGate({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <div style={{ height: "100vh", background: "var(--bg)", display: "flex", alignItems: "center", justifyContent: "center", overflowY: "auto" }}>
-      <div style={{ width: 520, maxWidth: "94vw", background: "var(--panel)", border: "1px solid var(--line2)",
-        borderRadius: 12, padding: 26, display: "flex", flexDirection: "column", gap: 14, boxShadow: "0 8px 32px rgba(0,0,0,.3)" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span style={label}>Set up your instance</span>
+    <div className={styles.setupStage}>
+      <section className={styles.setupModal} role="dialog" aria-modal="true" aria-label="Set up your TINA instance">
+        <header className={styles.setupHeader}>
+          <div className={styles.setupBrand}>
+            <img className={styles.setupBrandMark} src="/provider-logos/tina-mark-inverse.svg" alt="" aria-hidden="true" />
+            <div>
+              <div className={styles.setupBrandName}>TINA</div>
+              <div className={styles.setupEyebrow}>Set up your instance</div>
+            </div>
+          </div>
           {step < 3 && <Steps at={step as 1 | 2} />}
-        </div>
+        </header>
         {step === 1 && <ModelsStep onNext={(s) => advance("models", s)} />}
         {step === 2 && <TranscriptionStep onNext={(s) => advance("transcription", s)} />}
         {step === 3 && (
-          <>
-            <div style={{ fontSize: 19, fontWeight: 650, color: "var(--t1)" }}>You&rsquo;re set ✓</div>
-            <div style={{ fontSize: 12.5, color: "var(--t2)", lineHeight: 1.8 }}>
-              <div style={{ color: states.models === "done" ? "var(--green)" : "var(--t3)" }}>
-                {states.models === "done" ? "✓ Agent model configured and tested" : "○ Agent model skipped — finish it in Settings → Models"}
+          <div className={styles.stepContent}>
+            <div className={styles.successContent}>
+              <h1 className={styles.successTitle}>You&rsquo;re set ✓</h1>
+              <div className={styles.successSummary}>
+                <div style={{ color: states.models === "done" ? "var(--green)" : "var(--t3)" }}>
+                  {states.models === "done" ? "✓ Agent model configured and tested" : "○ Agent model skipped — finish it in Settings → Models"}
+                </div>
+                <div style={{ color: states.transcription === "done" ? "var(--green)" : "var(--t3)" }}>
+                  {states.transcription === "done" ? "✓ Transcription configured and tested" : "○ Transcription skipped — finish it in Settings → Models"}
+                </div>
               </div>
-              <div style={{ color: states.transcription === "done" ? "var(--green)" : "var(--t3)" }}>
-                {states.transcription === "done" ? "✓ Transcription configured and tested" : "○ Transcription skipped — finish it in Settings → Models"}
+              <p className={styles.successCopy}>
+                Everything a meeting needs is wired up. Next: get a meeting in front of a bot — connect
+                your calendar, plan a meeting, or drop a bot on a running Meet.
+              </p>
+              <div>
+                <button style={primaryBtn} onClick={finish}>Go to Meetings</button>
               </div>
             </div>
-            <div style={{ fontSize: 12, color: "var(--t3)", lineHeight: 1.5 }}>
-              Everything a meeting needs is wired up. Next: get a meeting in front of a bot — connect
-              your calendar, plan a meeting, or drop a bot on a running Meet.
-            </div>
-            <div>
-              <button style={primaryBtn} onClick={finish}>Go to Meetings</button>
-            </div>
-          </>
+          </div>
         )}
-      </div>
+      </section>
     </div>
   );
 }
