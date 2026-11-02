@@ -14,6 +14,9 @@ import json
 import html
 import logging
 import re
+import hashlib
+import os
+import tempfile
 from pathlib import Path
 from typing import Callable, Iterator
 
@@ -32,6 +35,7 @@ from shared.agent_config import (
     DEFAULT_POLISH_RULES,
     DEFAULT_TAG_RULES,
 )
+from shared.adapters import workspace_write_lock
 from worker.engine import _Stream, _ensure_repo, _principal_author
 
 log = logging.getLogger("agent_api.worker")
@@ -669,6 +673,13 @@ def meeting_doc_turn(
     """Write one schema-validated meeting entity; the model supplies summary text, never file edits."""
     try:
         document_id = safe_meeting_document_id(native)
+        workspace = Path(work).resolve()
+        target = _workspace_meeting_target(workspace, workspace / 'kg/entities/meeting' / f'{document_id}.md')
+        stamp = _workspace_meeting_target(workspace, workspace / '.meeting-generated' / f'{document_id}.sha256')
+        with workspace_write_lock(workspace):
+            expected = target.read_bytes() if target.exists() else None
+            if expected is not None and (not stamp.is_file() or stamp.read_text() != hashlib.sha256(expected).hexdigest()):
+                raise FileExistsError('Meeting document contains user edits. Existing content was kept.')
         if completion is None:
             import worker.worker as _w
             completion = getattr(_w, "completion_factory", completion_from_env)()
@@ -676,6 +687,9 @@ def meeting_doc_turn(
             MEETING_SUMMARY_PROMPT.format(cards=json.dumps(cards, ensure_ascii=False)),
             model=model,
         )
+    except FileExistsError as exc:
+        yield {'type': 'done', 'ok': False, 'reply': str(exc)}
+        return
     except LLMAuthError as exc:
         yield auth_error_event(exc, model=model, stage="meeting-doc")
         return
@@ -723,15 +737,27 @@ def meeting_doc_turn(
         target = _workspace_meeting_target(
             workspace, workspace / "kg" / "entities" / "meeting" / f"{document_id}.md",
         )
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content, encoding="utf-8")
-        relative = target.relative_to(workspace).as_posix()
-        sha = commit_workspace_paths(
-            workspace,
-            [relative],
-            message=f"meeting summary: {document_id}",
-            author=_principal_author(),
-        )
+        with workspace_write_lock(workspace):
+            if (target.read_bytes() if target.exists() else None) != expected:
+                raise FileExistsError('Meeting document changed during generation. Existing content was kept.')
+            stamp = _workspace_meeting_target(workspace, stamp)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(dir=target.parent, delete=False) as out:
+                temporary = Path(out.name)
+                out.write(content.encode('utf-8'))
+            try:
+                os.replace(temporary, target)
+            finally:
+                temporary.unlink(missing_ok=True)
+            stamp.parent.mkdir(parents=True, exist_ok=True)
+            stamp.write_text(hashlib.sha256(content.encode('utf-8')).hexdigest())
+            relative = target.relative_to(workspace).as_posix()
+            sha = commit_workspace_paths(
+                workspace, [relative], message=f"meeting summary: {document_id}", author=_principal_author(),
+            )
+    except FileExistsError as exc:
+        yield {'type': 'done', 'ok': False, 'reply': str(exc)}
+        return
     except Exception as exc:
         log.warning("meeting document write failed for %s", document_id, exc_info=True)
         yield model_error_event(exc, model=model, stage="meeting-doc")

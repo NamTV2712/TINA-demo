@@ -36,7 +36,8 @@ def args(command, **kwargs):
 class CliTest(unittest.TestCase):
     def setUp(self):
         self.docker = fixtures.Docker()
-        for item in [patch.object(cli.stack, "run", self.docker), patch.dict(os.environ, {}, clear=True)]:
+        for item in [patch.object(cli.stack, "run", self.docker),
+                     patch.dict(os.environ, {"ENV_FILE": str(fixtures.ROOT / "deploy/compose/.env.example")}, clear=True)]:
             item.start()
             self.addCleanup(item.stop)
         self.selected = cli.stack.Stack("doctor")

@@ -1,8 +1,9 @@
 /** briefNote.ts — locate a meeting's brief note in the user's OWN workspace (frame-6 flow).
  *
  *  The own-workspace brief lives as this meeting's note under `kg/entities/meeting/` (owner-ruled:
- *  no shared workspace needed for a brief). The agent names the file; the prep page has to FIND it
+ *  no shared workspace needed for a brief). New briefs use a stable ID path; legacy files are found
  *  to render the brief live while the chat writes it. Matching, strongest first:
+ *    0. the stable native/row-ID filename supplied by the prep action;
  *    1. filename carries the meeting's native id (the chat prompt asks the agent to include it);
  *    2. filename↔title token overlap (prefix-tolerant: "tech" matches "technologies").
  *  Ties go to the lexically LATEST filename — date-prefixed series notes resolve to the newest
@@ -10,10 +11,17 @@
  *  shows the honest "No brief yet" state). */
 
 const MEETING_DIR = "kg/entities/meeting/";
+type BriefMeeting = { title?: string | null; nativeId?: string | null; meetingId?: string | null };
+
+export function briefNotePath(meeting: BriefMeeting): string {
+  const native = meeting.nativeId?.trim();
+  return `${MEETING_DIR}brief-${native ? encodeURIComponent(native) : 'row-' + encodeURIComponent(meeting.meetingId || '')}.md`;
+}
 
 const tokenize = (s: string): string[] =>
   s
     .toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd')
     .split(/[^a-z0-9]+/)
     .filter((t) => t.length >= 3 && !/^\d+$/.test(t));
 
@@ -22,13 +30,18 @@ const tokensMatch = (a: string, b: string): boolean =>
 
 export function findBriefNote(
   files: string[],
-  meeting: { title?: string | null; nativeId?: string | null },
+  meeting: BriefMeeting,
 ): string | null {
   const notes = files
     .filter((f) => f.startsWith(MEETING_DIR) && f.endsWith(".md") && !f.endsWith("/index.md"))
     .sort()
     .reverse(); // lexically latest first — date-prefixed names put the newest occurrence on top
   if (notes.length === 0) return null;
+  const canonical = [
+    ...(meeting.meetingId ? [briefNotePath({ meetingId: meeting.meetingId })] : []),
+    ...((meeting.meetingId || meeting.nativeId) ? [briefNotePath(meeting)] : []),
+  ].find(path => notes.includes(path));
+  if (canonical) return canonical;
 
   const native = (meeting.nativeId ?? "").trim();
   if (native) {

@@ -23,7 +23,7 @@ import { groupMeetings, type MeetingGroup } from "./meetingGroups";
 import { meetingTab } from "./meeting";
 import { MeetingsOnboarding } from "./meetingsOnboarding";
 import { findBriefNote } from "./briefNote";
-import { listWorkspaceTree } from "./workspaceApi";
+import { listWorkspaceTree, readActiveSet } from "./workspaceApi";
 import { meetingFocusFor } from "./chatContext";
 import { ASK_CHAT_EVENT } from "../canvas/actions";
 
@@ -130,8 +130,10 @@ function useOwnWorkspaceTree(): string[] | null {
   const [files, setFiles] = useState<string[] | null>(null);
   useEffect(() => {
     let alive = true;
-    const look = () => void listWorkspaceTree()
-      .then((f) => { if (alive) setFiles(f); })
+    const look = () => void readActiveSet()
+      .then(async set => Promise.all(set.active.filter(mount => mount.role === 'private' && mount.write)
+        .map(mount => listWorkspaceTree({ slug: mount.slug }))))
+      .then((trees) => { if (alive) setFiles(trees.flat()); })
       .catch(() => { /* keep last good — a blip must not flip rows back to "no brief yet" */ });
     look();
     const t = setInterval(() => { if (document.visibilityState === "visible") look(); }, OWN_TREE_POLL_MS);
@@ -180,7 +182,7 @@ function EventRow({ g, ownTree }: { g: MeetingGroup; ownTree: string[] | null })
   const m = g.current;
   const nav = usePreviewPinTab<HTMLDivElement>(meetingTab(m));
   const hasOwnBrief = !m.workspace_id && !!ownTree
-    && !!findBriefNote(ownTree, { title: label(m), nativeId: m.native_id });
+    && !!findBriefNote(ownTree, { title: label(m), nativeId: m.native_id, meetingId: m.id });
   const dev = deviationPhrase(g, hasOwnBrief);
   return (
     <div onClick={nav.onClick} onDoubleClick={nav.onDoubleClick}

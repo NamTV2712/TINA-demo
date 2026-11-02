@@ -21,13 +21,14 @@ import type { MeetingMock } from "./meetingModel";
 import { presentError, readApiFailure } from "./apiClient";
 import { resolveJoinError, type ServiceDenialPresentation } from "./serviceDenial";
 import { ServiceDenialPanel } from "./ServiceDenialPanel";
-import { createPlannedMeeting, updatePlannedMeeting, deletePlannedMeeting } from "./plannedApi";
-import { createSharedWorkspace, listSharedMemberships, listWorkspaceTree, mintInvite, readWorkspaceFile, type Membership } from "./workspaceApi";
-import { findBriefNote, isExampleNote } from "./briefNote";
+import { createPlannedMeeting, updatePlannedMeeting, deletePlannedMeeting, type PlannedMeetingRow } from "./plannedApi";
+import { createSharedWorkspace, listSharedMemberships, listWorkspaceTree, mintInvite, readWorkspaceFile, readActiveSet, type Membership } from "./workspaceApi";
+import { briefNotePath, findBriefNote, isExampleNote } from "./briefNote";
+import { meetingFocusFor } from './chatContext';
 import { manageTabDescriptor } from "./workspaceManage";
 import { defaultBotName } from "./defaultBotName";
 import { meetingUrlFor } from "./meetingId";
-import { ASK_CHAT_EVENT } from "../canvas/actions";
+import { requestChat } from "../canvas/actions";
 
 const field = {
   fontSize: 12.5, padding: "6px 8px", background: "var(--panel)", border: "1px solid var(--line)",
@@ -45,30 +46,44 @@ const wsDocTab = (slug: string, path: string, title?: string) =>
 
 const SEED_README_MARK = "This is your **Personal workspace**";
 
-function Brief({ slug, title }: { slug: string; title: string }) {
+function Brief({ slug, title, meeting }: { slug: string; title: string; meeting: MeetingMock }) {
   const layout = useService(LayoutServiceId);
   const [text, setText] = useState<string | null>(null);
   const [state, setState] = useState<"readme" | "none" | "loading">("loading");
+  const [error, setError] = useState('');
   useEffect(() => {
     let alive = true;
-    setState("loading");
-    void readWorkspaceFile("README.md", { slug })
+    let serial = 0;
+    setState("loading"); setText(null); setError('');
+    const load = () => {
+      const ticket = ++serial;
+      return readWorkspaceFile("README.md", { slug })
       .then((t) => {
-        if (!alive) return;
+        if (!alive || ticket !== serial) return;
+        setError('');
         // a fresh workspace's seeded README is system exhaust, not a brief
         if (!t || !t.trim() || t.slice(0, 400).includes(SEED_README_MARK)) setState("none");
         else { setText(t); setState("readme"); }
       })
-      .catch(() => { if (alive) setState("none"); });
-    return () => { alive = false; };
+      .catch(() => { if (alive && ticket === serial) setError('Could not read the shared brief. Retry by returning to this window.'); });
+    };
+    void load();
+    const refresh = () => { if (document.visibilityState === 'visible') void load(); };
+    const interval = window.setInterval(refresh, OWN_BRIEF_POLL_MS);
+    window.addEventListener('focus', refresh);
+    return () => { alive = false; window.clearInterval(interval); window.removeEventListener('focus', refresh); };
   }, [slug]);
-  const askForBrief = () => window.dispatchEvent(new CustomEvent(ASK_CHAT_EVENT, {
-    detail: { prompt: `Prepare the brief for "${title}" in the ${slug} workspace README — who's attending (research them in our records), what happened last time, open follow-ups, and a suggested agenda. Ask me what you can't know from records.` },
-  }));
-  if (state === "loading") return null;
+  const askForBrief = () => {
+    try {
+      requestChat({ focus: { ...meetingFocusFor(meeting), workspace_id: slug }, prompt: `Prepare the brief for "${title}" in the ${slug} workspace README — who's attending (research them in our records), what happened last time, open follow-ups, and a suggested agenda. Read and update the existing README, preserving user edits. Ask me what you can't know from records.` });
+      setError('');
+    } catch (e) { setError((e as Error).message); }
+  };
+  if (state === "loading") return error ? <p role="alert">{error}</p> : null;
   if (state === "none" || !text) {
     return (
       <div style={{ margin: "18px 0 0", padding: "16px 18px", border: "1px solid var(--line)", borderRadius: 6, background: "var(--subtle)", fontSize: 12.5, color: "var(--t3)", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+        {error && <p role="alert">{error}</p>}
         <span style={{ flex: 1, minWidth: 200, color: "var(--t2)" }}>No brief yet.</span>
         <button onClick={askForBrief} style={{ background: "var(--accent)", color: "var(--on-accent)", border: "none", borderRadius: 6, padding: "6px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer", flex: "none", boxShadow: "0 2px 8px rgba(67, 210, 121, 0.25)" }}>
           Draft the brief — attendees, last time, open items, agenda
@@ -78,6 +93,7 @@ function Brief({ slug, title }: { slug: string; title: string }) {
   }
   return (
     <div style={{ margin: "18px 0 0", border: "1px solid var(--line)", borderRadius: 6, background: "var(--panel)" }}>
+      {error && <p role="alert">{error}</p>}
       <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 14px 0" }}>
         <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--green)", flex: "none" }} />
         <span style={{ fontSize: 10, color: "var(--t3)", letterSpacing: ".08em", fontFamily: "var(--mono)" }}>
@@ -105,31 +121,45 @@ function Brief({ slug, title }: { slug: string; title: string }) {
  *  brief chat writes it, instead of sitting on the "No brief yet" state. Polls the own-workspace
  *  tree (short interval while the tab is up — agents write mid-chat) and re-reads the note. */
 const OWN_BRIEF_POLL_MS = 12_000;
+interface OwnBriefNote { path: string; text: string; slug: string; workspacePath: string }
 
-function useOwnBriefNote(enabled: boolean, title: string, nativeId?: string | null) {
-  const [note, setNote] = useState<{ path: string; text: string } | null>(null);
+function useOwnBriefNote(enabled: boolean, title: string, nativeId?: string | null, meetingId?: string) {
+  const [note, setNote] = useState<OwnBriefNote | null>(null);
+  const [error, setError] = useState('');
   useEffect(() => {
-    if (!enabled) { setNote(null); return; }
+    setNote(null); setError('');
+    if (!enabled) return;
     let alive = true;
+    let serial = 0;
     const look = async () => {
+      const ticket = ++serial;
       try {
-        const files = await listWorkspaceTree();
-        const path = findBriefNote(files, { title, nativeId });
-        if (!path) { if (alive) setNote(null); return; }
-        const text = await readWorkspaceFile(path);
-        if (!alive) return;
-        if (!text || !text.trim() || isExampleNote(text)) setNote(null);
-        else setNote({ path, text });
-      } catch { /* keep the last good render — a poll blip must not blank the brief */ }
+        const mounts = (await readActiveSet()).active.filter(mount => mount.role === 'private' && mount.write);
+        const trees = await Promise.all(mounts.map(async mount => ({ mount, files: await listWorkspaceTree({ slug: mount.slug }) })));
+        const canonical = [briefNotePath({ meetingId }), briefNotePath({ meetingId, nativeId })];
+        const rank = (files: string[]) => { const position = canonical.findIndex(path => files.includes(path)); return position < 0 ? 2 : position; };
+        const ordered = trees.sort((a, b) => rank(a.files) - rank(b.files));
+        for (const { mount, files } of ordered) {
+          const path = findBriefNote(files, { title, nativeId, meetingId });
+          if (!path) continue;
+          const text = await readWorkspaceFile(path, { slug: mount.slug });
+          if (!text?.trim() || isExampleNote(text)) continue;
+          if (alive && ticket === serial) { setNote({ path, text, slug: mount.slug, workspacePath: mount.path }); setError(''); }
+          return;
+        }
+        if (alive && ticket === serial) { setNote(null); setError(''); }
+      } catch { if (alive && ticket === serial) setError('Could not check your brief. Retry by returning to this window.'); }
     };
     void look();
-    const t = setInterval(() => { if (document.visibilityState === "visible") void look(); }, OWN_BRIEF_POLL_MS);
-    return () => { alive = false; clearInterval(t); };
-  }, [enabled, title, nativeId]);
-  return note;
+    const refresh = () => { if (document.visibilityState === 'visible') void look(); };
+    const t = setInterval(refresh, OWN_BRIEF_POLL_MS);
+    window.addEventListener('focus', refresh);
+    return () => { alive = false; clearInterval(t); window.removeEventListener('focus', refresh); };
+  }, [enabled, title, nativeId, meetingId]);
+  return { note, error };
 }
 
-function OwnBrief({ note, onSteer }: { note: { path: string; text: string }; onSteer: () => void }) {
+function OwnBrief({ note, onSteer }: { note: OwnBriefNote; onSteer: () => void }) {
   const layout = useService(LayoutServiceId);
   return (
     <div style={{ margin: "18px 0 0", border: "1px solid var(--line)", borderRadius: 6, background: "var(--panel)" }}>
@@ -139,7 +169,7 @@ function OwnBrief({ note, onSteer }: { note: { path: string; text: string }; onS
           your brief · this meeting&rsquo;s note
         </span>
         <span style={{ flex: 1 }} />
-        <button onClick={() => layout.openTab({ id: `doc:${note.path}`, title: note.path.split("/").pop() ?? note.path, kind: "doc", params: { path: note.path } })}
+        <button onClick={() => layout.openTab(wsDocTab(note.slug, note.path))}
           title="Open as a document" style={{ background: "none", border: "none", color: "var(--t3)", fontSize: 11, cursor: "pointer", padding: 0 }}>
           open
         </button>
@@ -180,22 +210,26 @@ function MeetingPrepTab({ params }: TabProps) {
   // user has typed, then hands the tab off to prep:<id>. `creating` guards against a double-create
   // from two near-simultaneous inputs; `mounted` guards setState after the handoff unmounts us.
   const creating = useRef(false);
+  const createdRow = useRef<PlannedMeetingRow | null>(null);
   const mounted = useRef(true);
   useEffect(() => () => { mounted.current = false; }, []);
   const ensureRow = async (): Promise<string | null> => {
     if (meetingId) return meetingId;               // already a real row
     if (creating.current) return null;             // a create is already in flight
     creating.current = true;
-    const row = await createPlannedMeeting({
-      title: title.trim() || undefined,
-      meeting_url: link.trim() || undefined,
-    });
-    const id = String(row.id);
-    refreshMeetings();
-    // hand off: the canonical prep tab owns the created meeting; the draft tab closes.
-    layout.openTab(prepTabDescriptor({ id, title: title.trim() || "New meeting" }));
-    layout.closeTab(PREP_DRAFT_TAB_ID);
-    return id;
+    try {
+      const row = await createPlannedMeeting({
+        title: title.trim() || undefined,
+        meeting_url: link.trim() || undefined,
+      });
+      createdRow.current = row;
+      const id = String(row.id);
+      refreshMeetings();
+      // hand off: the canonical prep tab owns the created meeting; the draft tab closes.
+      layout.openTab(prepTabDescriptor({ id, title: title.trim() || "New meeting" }));
+      layout.closeTab(PREP_DRAFT_TAB_ID);
+      return id;
+    } finally { creating.current = false; }
   };
   // seed marker is the MEETING ID, not a boolean: the shared preview panel swaps params to a
   // DIFFERENT meeting without remounting — a boolean kept the previous meeting's title/link on
@@ -210,6 +244,7 @@ function MeetingPrepTab({ params }: TabProps) {
   const [moreOpen, setMoreOpen] = useState(false);       // ⋯ row: link edit / unbind / delete
   const [rebindOpen, setRebindOpen] = useState(false);   // "change" → the bind select
   const [briefChatStarted, setBriefChatStarted] = useState(false); // own-brief interview dispatched
+  useEffect(() => { setBriefChatStarted(false); }, [meetingId]);
 
   // seed the form once PER MEETING (live refreshes must not clobber in-progress edits; a
   // preview swap to another meeting must re-seed)
@@ -285,11 +320,10 @@ function MeetingPrepTab({ params }: TabProps) {
       // participants around this meeting — its README is the team brief. Any brief already built
       // in the user's own workspace is the starting point, not discarded.
       const carry = ownBrief
-        ? ` I already have a brief for this meeting in my own workspace at ${ownBrief.path} — carry its content over as the starting brief, then keep improving it.`
+        ? ` I already have a brief for this meeting in my own workspace at ${ownBrief.workspacePath}/${ownBrief.path} — carry its content over as the starting brief, then keep improving it.`
         : "";
-      window.dispatchEvent(new CustomEvent(ASK_CHAT_EVENT, {
-        detail: { prompt: `I just created the shared workspace "${ws.workspace_id}" for the meeting "${m.title_custom || title || headline}" — it is brand-new (empty) and exists so the other participants and I can collaborate on this meeting and its series. Scaffold it now: write its README as the team brief (audience = everyone in the room, so keep my private context out unless I confirm it), set up whatever structure the series needs, and interview me for what you can't know from my records.${carry} Write early and keep updating as we talk — the README renders live on the meeting page.` },
-      }));
+      requestChat({ focus: { ...meetingFocusFor({ ...m, id, live_status: 'idle' }), workspace_id: ws.workspace_id },
+        prompt: `I just created the shared workspace "${ws.workspace_id}" for the meeting "${m.title_custom || title || headline}" — it is brand-new (empty) and exists so the other participants and I can collaborate on this meeting and its series. Scaffold it now: write its README as the team brief (audience = everyone in the room, so keep my private context out unless I confirm it), set up whatever structure the series needs, and interview me for what you can't know from my records.${carry} Write early and keep updating as we talk — the README renders live on the meeting page.` });
     } catch (e) { if (mounted.current) setErr(presentError(e).headline); }
     finally { if (mounted.current) setBusy(false); }
   };
@@ -305,13 +339,16 @@ function MeetingPrepTab({ params }: TabProps) {
       if (!id) return;
       // re-read the row so the note filename can key to its native id if a link was set
       const row = all.find((x) => x.id === id);
-      const name = row?.title_custom || title || "this meeting";
-      const nid = row?.native_id;
-      const key = nid ? ` Name the note's file so it includes the meeting id ${nid} (kg/entities/meeting/…${nid}….md) — the meeting page finds and renders it by that id.` : "";
-      setBriefChatStarted(true);
-      window.dispatchEvent(new CustomEvent(ASK_CHAT_EVENT, {
-        detail: { prompt: `Interview me to build the brief for "${name}" — ask what you can't know from my records (who's in the room, what I want out of it, what the notetaker should listen for), research the attendees in my knowledge and public sources, then write the brief as this meeting's note in my own workspace (no shared workspace) so it can be reused across this meeting's series.${key} Write the note EARLY and keep updating it as we talk — it renders live on the meeting page.` },
-      }));
+      const name = row?.title_custom || title || row?.title || 'this meeting';
+      const created = createdRow.current?.id === Number(id) ? createdRow.current : null;
+      const nid = row?.native_id || created?.native_meeting_id;
+      const mounts = (await readActiveSet()).active.filter(mount => mount.role === 'private' && mount.write);
+      const mount = ownBrief ? mounts.find(mount => mount.slug === ownBrief.slug) : mounts.find(mount => mount.primary) || mounts[0];
+      if (!mount) throw new Error('Enable a private writable workspace before starting a private brief.');
+      const path = ownBrief?.path || briefNotePath({ meetingId: id, nativeId: nid });
+      requestChat({ focus: { ...meetingFocusFor({ ...(row || m!), id, native_id: nid || undefined, live_status: 'idle' }), scheduled_at: row?.scheduled_at },
+        prompt: `Interview me to build the brief for ${JSON.stringify(name)} — ask what you can't know from my records (who's in the room, what I want out of it, what the notetaker should listen for), research attendees in my knowledge and public sources. Write the brief at EXACTLY ${JSON.stringify(`${mount.path}/${path}`)} in my PRIVATE workspace ${JSON.stringify(mount.slug)}. Do not write this private brief into any shared workspace. For a NEW file use frontmatter type: meeting, id: ${JSON.stringify(path.split('/').pop()!.replace(/\.md$/, ''))}, title: ${JSON.stringify(name)}, and meeting_id: ${id}. Read the existing file first and preserve user edits and frontmatter; continue it rather than replacing it. Write the note EARLY and keep updating it as we talk — this exact file renders live on the meeting page.` });
+      if (mounted.current) setBriefChatStarted(true);
     } catch (e) { if (mounted.current) setErr(presentError(e).headline); }
     finally { if (mounted.current) setBusy(false); }
   };
@@ -331,7 +368,7 @@ function MeetingPrepTab({ params }: TabProps) {
   // own-workspace brief (frame 6): only hunted while the meeting is unbound — a bound workspace's
   // README is the brief and wins.
   // No brief hunt on a draft (no row/title yet) — it would match nothing or the wrong note.
-  const ownBrief = useOwnBriefNote(!isDraft && !!m && !m.workspace_id && !readOnly && isIntent, headline, m?.native_id);
+  const { note: ownBrief, error: briefError } = useOwnBriefNote(!isDraft && !!m && !m.workspace_id && !readOnly && isIntent, headline, m?.native_id, meetingId);
 
   // B2 tab hygiene: a calendar sweep DELETES + recreates rows (new ids) — a tab keyed to the old
   // row would dangle on "Loading meeting…" forever. Once the store has data and the row is gone,
@@ -570,7 +607,7 @@ function MeetingPrepTab({ params }: TabProps) {
 
         {/* ── the brief = the stage (prep-v3 carve) ───────────────── */}
         {m.workspace_id ? (
-          <Brief slug={m.workspace_id} title={headline} />
+          <Brief key={m.workspace_id} slug={m.workspace_id} title={headline} meeting={m} />
         ) : readOnly ? (
           <div style={{ margin: "18px 0 0", fontSize: 12.5, color: "var(--t3)" }}>No workspace bound.</div>
         ) : ownBrief ? (
@@ -579,7 +616,7 @@ function MeetingPrepTab({ params }: TabProps) {
         ) : briefChatStarted ? (
           <div style={{ margin: "18px 0 0", padding: "14px 18px", border: "1px solid var(--line)", borderRadius: 6, background: "var(--subtle)", display: "flex", alignItems: "center", gap: 10, fontSize: 12.5, color: "var(--t2)" }}>
             <span style={{ width: 6, height: 6, borderRadius: "50%", background: "var(--accent)", flex: "none" }} />
-            Brief chat running — the brief renders here as the agent writes it.
+            Brief chat started — the brief renders here once the agent writes it. Follow progress in chat.
           </div>
         ) : (
           /* No-brief state (first-run-onboarding frame 6, owner-ruled): two REAL actions. Brief chat
@@ -632,6 +669,7 @@ function MeetingPrepTab({ params }: TabProps) {
 
         {denial && <ServiceDenialPanel presentation={denial} onRetry={() => void sendNow()} />}
         {err && <div role="alert" style={{ marginTop: 12, fontSize: 12, color: "var(--danger)" }}>⚠ {err}</div>}
+        {briefError && <div role="alert" style={{ marginTop: 12, fontSize: 12, color: "var(--danger)" }}>{briefError}</div>}
       </div>
     </div>
   );

@@ -40,6 +40,11 @@ describe("entitySlug", () => {
 });
 
 describe("resolveDocRef — wikilinks", () => {
+  it('resolves moved document path wikilinks while preserving their display aliases', async () => {
+    trees['dna'] = ['notes/new plan.md'];
+    expect(await resolveDocRef({ wikilink: 'notes/new%20plan.md#decision|Budget' }, { slug: 'dna' }))
+      .toEqual({ path: 'notes/new plan.md', slug: 'dna' });
+  });
   it("resolves inside the doc's OWN (shared) workspace first — the dead-link bug", async () => {
     trees["dna"] = ["kg/entities/person/james-spadafora.md"];
     trees[""] = [];

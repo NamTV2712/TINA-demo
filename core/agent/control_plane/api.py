@@ -1599,7 +1599,23 @@ def create_app(
         except Exception:  # noqa: BLE001
             logger.warning("private mount resolution for history failed subject=%s — searching anchored roots only", subject)
         try:
-            turns = wsr.history(subject, session, extra_roots=extra)
+            provider_sessions = []
+            try:
+                if sess._redis is not None:
+                    created = sess._redis.hget(sess._meta_key(subject, session), 'created')
+                    if created:
+                        start = f'{int(float(created) * 1000)}-0'
+                        rows = sess._redis.xrange(units.output_topic(units.chat_unit_id(subject, session)), min=start)
+                        for _, fields in rows:
+                            try:
+                                event = json.loads(fields.get('event', '{}'))
+                            except (ValueError, TypeError):
+                                continue
+                            if isinstance(event, dict) and event.get('type') == 'done' and isinstance(event.get('sessionId'), str):
+                                provider_sessions.append(event['sessionId'])
+            except Exception:
+                logger.warning('Could not recover provider thread metadata subject=%s session=%s', subject, session)
+            turns = wsr.history(subject, session, extra_roots=extra, provider_sessions=provider_sessions)
         except Exception:  # noqa: BLE001 — history is best-effort; a bad path → empty, never an error
             logger.exception("loading session history failed subject=%s session=%s", subject, session)
             turns = []

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { findBriefNote, isExampleNote } from "../briefNote";
+import { briefNotePath, findBriefNote, isExampleNote } from "../briefNote";
 
 const TREE = [
   "README.md",
@@ -10,6 +10,20 @@ const TREE = [
 ];
 
 describe("findBriefNote", () => {
+  it('uses the stable row-based path before guessing from titles', () => {
+    const path = briefNotePath({ meetingId: '77' });
+    expect(path).toBe('kg/entities/meeting/brief-row-77.md');
+    expect(findBriefNote([...TREE, path], { meetingId: '77', title: 'Họp kế hoạch' })).toBe(path);
+  });
+  it('normalizes Vietnamese titles when locating legacy briefs', () => {
+    expect(findBriefNote(['kg/entities/meeting/hop-ke-hoach.md'], { title: 'Họp kế hoạch' }))
+      .toBe('kg/entities/meeting/hop-ke-hoach.md');
+  });
+  it('retains a row brief when a meeting link is added later', () => {
+    expect(findBriefNote(['kg/entities/meeting/brief-row-77.md', 'kg/entities/meeting/brief-abc-defg-hij.md'],
+      { meetingId: '77', nativeId: 'abc-defg-hij', title: 'Họp kế hoạch' }))
+      .toBe('kg/entities/meeting/brief-row-77.md');
+  });
   it("matches by native id in the filename first (strongest key)", () => {
     const files = [...TREE, "kg/entities/meeting/zenith-sig-91492872876.md"];
     expect(findBriefNote(files, { title: "Something else entirely", nativeId: "91492872876" }))
