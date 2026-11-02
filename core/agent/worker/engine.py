@@ -26,6 +26,7 @@ import re
 import shutil
 import time
 import uuid
+import tempfile
 from collections import deque
 from pathlib import Path
 from typing import Callable, Iterable, Iterator, Protocol
@@ -153,6 +154,9 @@ def _adopt_legacy_continuity(chat_root: Path, work: Path, session: str) -> None:
             sid = src.read_text().strip()
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(sid + "\n" if sid else "")
+            history = src.with_suffix('.history.json').resolve()
+            if root in history.parents and history.is_file():
+                shutil.copyfile(history, target.with_suffix('.history.json'))
             # the transcript must move WITH the pointer — a resumed sid whose jsonl is missing under
             # the new projects link is an alien id (the stale-resume retry silently starts fresh)
             if sid:
@@ -533,6 +537,7 @@ def run_turn_over_workspace(
     if session and session_continuity:
         _adopt_legacy_continuity(chat_root, work, session)  # migrate-on-read: pre-anchoring threads
     sess_file = _session_file(chat_root, session) if session_continuity else None
+    previous_session = sess_file.read_text().strip() if sess_file is not None and sess_file.exists() else None
     # session_continuity=False (the meeting copilot): never read/write the shared chat session — its
     # card-extraction beats must NOT pollute the user's chat conversation memory.
     resume = _resume_id(chat_root, sess_file, harness) if sess_file is not None else None
@@ -597,7 +602,22 @@ def run_turn_over_workspace(
         yield ev
     if captured and sess_file is not None:
         sess_file.parent.mkdir(parents=True, exist_ok=True)
-        sess_file.write_text(captured)
+        history_file = sess_file.with_suffix('.history.json')
+        try:
+            previous = json.loads(history_file.read_text()) if history_file.is_file() else []
+        except (ValueError, OSError):
+            previous = []
+        if not isinstance(previous, list):
+            previous = []
+        sessions = list(dict.fromkeys(item for item in [*previous, previous_session, captured] if isinstance(item, str) and item))
+        for target, content in [(history_file, json.dumps(sessions)), (sess_file, captured)]:
+            with tempfile.NamedTemporaryFile(dir=target.parent, mode='w', delete=False) as out:
+                temporary = Path(out.name)
+                out.write(content)
+            try:
+                os.replace(temporary, target)
+            finally:
+                temporary.unlink(missing_ok=True)
 
 
 def start_prompt(start: dict) -> str | None:

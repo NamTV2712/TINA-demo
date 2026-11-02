@@ -14,6 +14,7 @@ import { ENTITY_CHIP, DEFAULT_ENTITY_CHIP, DocMetaContext, DocNavContext, resolv
 import { ContextMenu, copyText } from "../ui-kit/ContextMenu";
 import { MdxDoc } from "../ui-kit/MdxDoc";
 import { MeetingWikiSourceStatus } from './MeetingKnowledge';
+import { WorkspaceContentSearch } from './WorkspaceContentSearch';
 // Data-access lives in its own SoC module (scoped to the authed user — no client subject, P20),
 // proven in isolation by workspaceApi.test.ts.
 import { readWorkspaceFile, listWorkspaceTree, readWorkspaceGit, readWorkspaceGitDiff, readAttachedWorkspaces, renameWorkspace, publishWorkspace, readActiveSet, activateWorkspace, deactivateWorkspace, createWorkspace, mintInvite, listSharedMemberships, setSharedActive, shareEnableWorkspace, unshareWorkspace, archiveWorkspace, deleteWorkspace, type GitState, type GitCommit, type AttachedWorkspaces, type PublishResult, type ActiveMount, type Membership } from "./workspaceApi";
@@ -426,6 +427,7 @@ export function FilesList() {  // exported for the surface test
           style={{ width: "100%", boxSizing: "border-box", fontSize: 12.5, padding: "5px 8px 5px 26px", background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 7, color: "var(--t1)", outline: "none" }}
         />
       </div>
+      <WorkspaceContentSearch mounts={[...(homeMount ? [homeMount] : []), ...extraMounts]} onOpen={(path, slug) => layout.openPreview(docTab(path, slug))} />
       {error && <div role="alert" style={{ margin: "0 8px 8px", fontSize: 12, color: "var(--danger)", background: "var(--panel)", border: "1px solid var(--danger)", borderRadius: 8, padding: "8px 10px" }}>⚠ Couldn’t load the workspace — {error}</div>}
       {q ? (<>
         {matches.map((h) => (
@@ -1046,19 +1048,27 @@ function DocTab({ id, params }: TabProps) {
   const [showDiff, setShowDiff] = useState(false);
   const [diff, setDiff] = useState<string | null>(null);
   const prevRef = useRef<string | null>(null);
+  const readSerial = useRef(0);
   const scroller = useRef<HTMLDivElement | null>(null);
   // initial load on doc switch — reset the change/diff affordances
   useEffect(() => {
+    const ticket = ++readSerial.current;
     setContent(null); setUpdated(false); setShowDiff(false); setDiff(null); prevRef.current = null;
     scroller.current?.scrollTo(0, 0);
-    void readFile(path, slug).then((c) => { prevRef.current = c; setContent(c); });
+    void readFile(path, slug).then((c) => {
+      if (ticket !== readSerial.current) return;
+      prevRef.current = c; setContent(c);
+    });
+    return () => { readSerial.current++; };
   }, [path, slug]);
   // LIVE: poll the file while open so an OPEN doc auto-reloads when a member's agent updates it — folks
   // see updates without reopening. A real content change flags the "updated" banner (→ view exact lines).
   useEffect(() => {
     const reload = () => {
       if (document.hidden) return;
+      const ticket = ++readSerial.current;
       void readFile(path, slug).then((c) => {
+        if (ticket !== readSerial.current) return;
         if (prevRef.current !== null && prevRef.current !== c) setUpdated(true);
         prevRef.current = c;
         setContent(c);
@@ -1141,7 +1151,7 @@ function DocTab({ id, params }: TabProps) {
             ? <div style={{ fontSize: 12, color: "var(--t3)", marginBottom: 10 }}>loading changes…</div>
             : <div style={{ marginBottom: 12 }}><DiffView text={diff} /></div>)}
           {fm.length > 0 && <FrontmatterCard fm={fm} />}
-          <MeetingWikiSourceStatus key={`${slug}/${path}`} path={path} slug={slug} />
+          <MeetingWikiSourceStatus key={`${slug}/${path}`} path={path} slug={slug} content={content || undefined} />
           <div style={{ fontSize: 14, color: "var(--t1)", lineHeight: 1.6 }}>{content === null ? "loading…" : <MdxDoc>{body}</MdxDoc>}</div>
         </div>
       </div>

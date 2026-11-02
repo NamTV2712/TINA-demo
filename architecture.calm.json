@@ -875,7 +875,7 @@
    "unique-id": "terminal",
    "node-type": "webclient",
    "name": "terminal",
-   "description": "terminal — client Manual ChatGPT OAuth callback handoff from another browser completes only in the initiating authenticated TINA session; anonymous or mismatched callbacks do not consume pending state. Per-user ChatGPT disconnect keeps TINA/ASR sessions separate. Terminal OAuth state is cancelled locally; authenticated internal Agent API owns profile writes, disconnect and generation checks under the same file lock as token refresh. Credentials stay in the private auth volume; callbacks from a disconnected generation cannot restore an old account. Existing in-flight workers may retain short-lived tokens. /routine authoring includes the browser IANA zone and asks when cadence is missing. Routines Edit has Save/Cancel, source SHA preconditions, stable-ID controls and next-run presentation in the declared timezone.",
+   "description": "terminal — client Manual ChatGPT OAuth callback handoff from another browser completes only in the initiating authenticated TINA session; anonymous or mismatched callbacks do not consume pending state. Per-user ChatGPT disconnect keeps TINA/ASR sessions separate. Terminal OAuth state is cancelled locally; authenticated internal Agent API owns profile writes, disconnect and generation checks under the same file lock as token refresh. Credentials stay in the private auth volume; callbacks from a disconnected generation cannot restore an old account. Existing in-flight workers may retain short-lived tokens. /routine authoring includes the browser IANA zone and asks when cadence is missing. Routines Edit has Save/Cancel, source SHA preconditions, stable-ID controls and next-run presentation in the declared timezone. Start brief actions require synchronous chat delivery acceptance and carry explicit meeting focus; busy or unavailable chat is reported rather than a false running state. Personal brief prompts and readers share stable native/row-ID paths in explicitly selected private writable mounts, reuse legacy files with Vietnamese normalization, and retain workspace slugs on document navigation. Personal brief discovery and shared README rendering refresh on visible polling/focus with errors separate from missing content; Today uses the same active private mount set and row-ID convention.",
    "metadata": [
     {
      "path": "clients/terminal"
@@ -1216,7 +1216,7 @@
    "unique-id": "agent-worker",
    "node-type": "service",
    "name": "agent-worker",
-   "description": "spawned isolated workspace-agent worker; selectable Claude Code, Codex app-server, or Antigravity CLI (agy) harness; every dispatch mounts the ordered [_global, active workspaces, _system] stack, fails closed without _global, and loads its authoritative entry context. Codex maps TINA write grants to app-server sandbox roots while excluding default temporary write roots, loads workspace instructions and skills, maps TINA auto/gate MCP grants to Codex approval modes, streams tool lifecycle events, pauses gate calls for owner-scoped, one-call decisions over chat streams using tool-approval.v1, and participates in the shared transcript-size resume cap. Antigravity maps TINA mount grants to read_file/write_file permissions, sandboxes commands, loads governed skills, exposes only auto-granted non-secret MCP servers in headless mode, and normalizes streamed events and conversation ids. Its model setting requires a persisted Terms warning acknowledgment; consumer OAuth access through third-party software is prohibited by Google's terms. Harness-written kg/entities files are workspace.v1-validated before commit. Post-meeting summary uses a tool-less CompletionPort and a deterministic writer that commits only the meeting entity path. Meeting Q&A uses a private short-lived, tool-less CompletionPort job with read-only mounts and no public chat history.",
+   "description": "spawned isolated workspace-agent worker; selectable Claude Code, Codex app-server, or Antigravity CLI (agy) harness; every dispatch mounts the ordered [_global, active workspaces, _system] stack, fails closed without _global, and loads its authoritative entry context. Codex maps TINA write grants to app-server sandbox roots while excluding default temporary write roots, loads workspace instructions and skills, maps TINA auto/gate MCP grants to Codex approval modes, streams tool lifecycle events, pauses gate calls for owner-scoped, one-call decisions over chat streams using tool-approval.v1, and participates in the shared transcript-size resume cap. A private per-TINA-session provider-thread index preserves display history across provider restarts; reset removes this index, and legacy recovery uses only same-subject, same-session Redis events newer than session creation. Codex user-message events define visible human messages, excluding injected environment and developer context; restored tool names remain descriptive. Antigravity maps TINA mount grants to read_file/write_file permissions, sandboxes commands, loads governed skills, exposes only auto-granted non-secret MCP servers in headless mode, and normalizes streamed events and conversation ids. Its model setting requires a persisted Terms warning acknowledgment; consumer OAuth access through third-party software is prohibited by Google's terms. Harness-written kg/entities files are workspace.v1-validated before commit. Post-meeting summary uses a tool-less CompletionPort and a deterministic writer with a local generated-content fingerprint, inference-time compare-and-swap, workspace locking and atomic publication; user-edited or unmarked existing documents are preserved, and only the meeting entity path is committed. Meeting Q&A uses a private short-lived, tool-less CompletionPort job with read-only mounts and no public chat history.",
    "metadata": [
     {
      "path": "core/agent/worker"
@@ -1776,13 +1776,13 @@
    "unique-id": "meeting-knowledge-pages",
    "node-type": "data-asset",
    "name": "Reviewed meeting answers and Wiki pages",
-   "description": "Private .meeting-knowledge/{meeting_id}/{answer_id}.json snapshots and create-only wiki/meetings/{meeting_id}/{answer_id}.md pages. Source fingerprints are rechecked on answer review, Apply and Wiki opening; this is cross-store freshness checking, not a distributed transaction. Source-bound fact reviews live in reviews/{fact_id}.json with explicit approved/discarded/pending state, edited display text and review CAS; canonical facts and raw audio/text are unchanged."
+   "description": "Private .meeting-knowledge/{meeting_id}/{answer_id}.json snapshots and create-only wiki/meetings/{meeting_id}/{answer_id}.md pages. An answer may include up to four additional individually authorized meetings with namespaced sources and source-meeting audio. Retrieval ranks within each meeting and allocates excerpt/character budgets in rounds across meetings with evidence. Related documents resolve aliased, encoded and relative wikilinks after reviewed moves. When a saved Wiki page moves, frontmatter identity locates it in the same visible workspace; locked Apply reuses that page, preserves edited content and refuses ambiguous copies instead of recreating the old path. Missing or revoked meetings redact stored claims and quotes. Source fingerprints are rechecked after inference, on answer review, Apply and Wiki opening; this is cross-store freshness checking, not a distributed transaction. Source-bound fact reviews live in reviews/{fact_id}.json with explicit approved/discarded/pending state, edited display text and review CAS; canonical facts and raw audio/text are unchanged."
   },
   {
    "unique-id": "workspace-human-documents",
    "node-type": "data-asset",
    "name": "Explicit private Markdown document edits",
-   "description": "Owner-authorized content document PUT with expected SHA-256, existing workspace write lock, entity frontmatter validation and atomic file replacement. Explicit per-path Git commit leaves unrelated staged paths and remotes untouched; shared workspaces remain read-only here. General harness writers retain their existing filesystem behavior."
+   "description": "Owner-authorized content document PUT, no-overwrite move and explicit delete with expected SHA-256, existing workspace write lock, entity frontmatter validation and atomic file replacement. Reviewed moves preview source-preserving static backlinks and outgoing relative links in the same workspace; confirmation rechecks the full plan fingerprint, preserves code and aliases, reports ambiguous/uneditable references, rolls back ordinary write failures and removes the source last. Bounded Unicode Markdown content search excludes hidden paths and symlinks. Dashboard uses source-preserving formatting, a folder tree, wikilinks, history and per-account/workspace/file draft recovery across reloads via browser session storage retaining the original SHA-256; Terminal searches its authorized active mounts. Explicit per-path Git commit leaves unrelated staged paths and remotes untouched; shared workspaces remain read-only here. General harness writers retain their existing filesystem behavior."
   }
  ],
  "relationships": [
@@ -3844,7 +3844,7 @@
     }
    },
    "protocol": "HTTP",
-   "description": "Owner-scoped GET meeting and canonical transcript for bounded evidence-backed Q&A; no transcript writes."
+   "description": "Owner-scoped GET meeting and canonical transcript for bounded evidence-backed Q&A across an anchor meeting and up to four explicitly selected meetings; each source is reauthorized, and there are no transcript writes."
   },
   {
    "unique-id": "agent-api-writes-meeting-knowledge",
@@ -3882,7 +3882,7 @@
      "access": "read"
     }
    ],
-   "description": "Through existing authenticated Gateway workspace proxy: related docs, bounded answers, source quotes/audio and freshness warnings."
+   "description": "Through existing authenticated Gateway workspace proxy: related docs, bounded multi-meeting answers, source-meeting quotes/audio, freshness warnings and revision-guarded fact reviews."
   },
   {
    "unique-id": "agent-api-writes-private-documents",

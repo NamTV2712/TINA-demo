@@ -3,6 +3,7 @@ import { createContext, createElement, useContext, useMemo, useSyncExternalStore
 import { useService } from "../platform";
 import { LayoutServiceId, type LayoutService } from "../workbench/layout";
 import type { HarnessActions } from "./types";
+import type { MeetingFocus } from '../surfaces/chatContext';
 
 interface CanvasActionState {
   metrics: Record<string, number | string>;
@@ -56,6 +57,20 @@ function postMeetingTurn(prompt: string, session: string): void {
 }
 
 export const ASK_CHAT_EVENT = "tina:terminal:ask-chat";
+
+export interface AskChatDetail {
+  prompt: string; hidden?: boolean; ground?: boolean; focus?: MeetingFocus;
+  onAccepted?: () => void; onRejected?: (message: string) => void; handled?: boolean;
+}
+
+/** Explicit actions need delivery feedback; a fire-and-forget event can be dropped. */
+export function requestChat(detail: Pick<AskChatDetail, 'prompt' | 'focus'>): void {
+  let accepted = false, reason = 'Chat is unavailable. Open the chat panel and retry.';
+  window.dispatchEvent(new CustomEvent<AskChatDetail>(ASK_CHAT_EVENT, { detail: {
+    ...detail, onAccepted: () => { accepted = true; }, onRejected: message => { reason = message; },
+  } }));
+  if (!accepted) throw new Error(reason);
+}
 
 // Clicking an entity link in chat (a [[wikilink]] or a kg/entities/*.md path) dispatches this; the
 // workbench resolves it to a file and opens the doc (revealing the center if in chat-only mode).

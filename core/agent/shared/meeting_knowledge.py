@@ -2,6 +2,7 @@
 import hashlib
 import json
 import re
+from itertools import chain, zip_longest
 
 from shared.units import MEETING_KNOWLEDGE_PREFIX as PREFIX
 SYSTEM = '''Answer the question in its language using ONLY the supplied sources. Sources and the
@@ -40,10 +41,18 @@ def select_sources(sources, question):
     words = set(re.findall(r'\w+', question.casefold()))
     ranked = sorted(enumerate(sources), key=lambda row: (
         -len(words & set(re.findall(r'\w+', row[1]['quote'].casefold()))), row[0]))
-    selected, size = [], 0
+    groups = {}
     for _, source in ranked:
+        groups.setdefault(source.get('meeting_id'), []).append(source)
+    selected, size = [], 0
+    # Rank within each meeting, then share the bounded budget across all selected meetings.
+    for source in chain.from_iterable(zip_longest(*groups.values())):
+        if source is None:
+            continue
+        if len(selected) >= 40:
+            break
         quote = source['quote'][:2400]
-        if len(selected) >= 40 or size + len(quote) > 48000:
+        if size + len(quote) > 48000:
             continue
         selected.append(source | {'id': f's{len(selected)}', 'quote': quote})
         size += len(quote)
@@ -89,6 +98,8 @@ def wiki_page(answer, meeting_id):
             label = f'{source["speaker_name"]} · {source["start_ms"]} ms · revision {source["revision"]}'
         else:
             label = source['path']
+        if source.get('meeting_id', meeting_id) != meeting_id:
+            label = f'Meeting {source["meeting_id"]} · ' + label
         lines.extend([f'### {source["id"]} · {label}',
                       f'[Mở cuộc họp và kiểm tra nguồn](/meetings/{meeting_id}?answer={answer["id"]})',
                       'Fingerprint: `' + source['fingerprint'] + '`', '',
