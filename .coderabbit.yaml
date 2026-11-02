@@ -1,0 +1,32 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: "vi-VN"
+early_access: false
+
+reviews:
+  profile: "chill"
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  auto_review:
+    enabled: true
+    drafts: false
+
+  instructions: |
+    Đây là dự án TINA (AI meeting assistant & agentic runtime monorepo gồm TypeScript, Python, Docker Compose).
+    Khi review code, hãy đặc biệt lưu ý các quy chuẩn sau:
+    1. UI / CSS: TUYỆT ĐỐI KHÔNG dùng mã màu hex viết cứng (như #123456) trong component UI. Bắt buộc phải dùng CSS token biến (ví dụ: var(--line), var(--panel), var(--t3)).
+    2. Ranh giới cách ly (Isolation): Code ở thư mục `clients/` (Frontend) không bao giờ được phép import trực tiếp các module nội bộ của Server/Gateway.
+    3. Biến môi trường: Mọi biến môi trường mới thêm vào phải được quản lý tương thích với Dotenvx.
+    4. Python: Dự án sử dụng Python 3.13 với `uv`, hãy chú ý tính an toàn của async và type hinting.
+
+  path_filters:
+    - "!pnpm-lock.yaml"
+    - "!Cargo.lock"
+    - "!uv.lock"
+    - "!releases/**"
+    - "!docs/research/**"
+    - "!output/**"
+    - "!**/*.generated.*"
+
+chat:
+  auto_reply: true
