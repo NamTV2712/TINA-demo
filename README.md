@@ -27,8 +27,8 @@ start OrbStack or Docker Desktop first. You need Docker Engine 26+, Compose with
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/poor-frog/TINA-KT.git
-cd TINA-KT
+git clone https://github.com/poor-frog/TINA.git
+cd TINA
 ```
 
 ### 2. Install Dotenvx

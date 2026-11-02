@@ -42,7 +42,7 @@ are outside this release.
 
 ### First installation (CLI 0.4.0)
 
-Clone `https://github.com/poor-frog/TINA-KT.git` or use an existing checkout. On macOS install and
+Clone `https://github.com/poor-frog/TINA.git` or use an existing checkout. On macOS install and
 start OrbStack or Docker Desktop. On Linux start a local Docker engine.
 You need Python 3.10+, make (for CLI installation), git, bash, openssl and Docker engine >=26 with
 Compose supporting `up --wait` and optional `env_file` entries. Builds download dependencies and
