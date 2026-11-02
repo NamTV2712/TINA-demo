@@ -159,7 +159,8 @@ jobs:
         run: printf 'ADMIN_TOKEN=ci-admin-token\nTRANSCRIPTION_SERVICE_URL=\nTRANSCRIPTION_SERVICE_TOKEN=\n' > .env
       - name: Bring lite up from the PR-built image
         if: steps.scope.outputs.hit == '1'
-        run: make -C deploy/lite up init-db
+        # The image was built and loaded above; up's build prerequisite would rebuild it.
+        run: make -C deploy/lite -o build up init-db
       - name: Probe the front doors (make test exits non-zero on failure)
         if: steps.scope.outputs.hit == '1'
         run: |
