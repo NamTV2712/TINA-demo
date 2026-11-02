@@ -1,23 +1,32 @@
 # yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
-language: "vi-VN"
+language: "en-US"
 early_access: false
 
 reviews:
   profile: "chill"
   request_changes_workflow: false
   high_level_summary: true
+  sequence_diagrams: true
   poem: false
   auto_review:
     enabled: true
     drafts: false
 
   instructions: |
-    Đây là dự án TINA (AI meeting assistant & agentic runtime monorepo gồm TypeScript, Python, Docker Compose).
-    Khi review code, hãy đặc biệt lưu ý các quy chuẩn sau:
-    1. UI / CSS: TUYỆT ĐỐI KHÔNG dùng mã màu hex viết cứng (như #123456) trong component UI. Bắt buộc phải dùng CSS token biến (ví dụ: var(--line), var(--panel), var(--t3)).
-    2. Ranh giới cách ly (Isolation): Code ở thư mục `clients/` (Frontend) không bao giờ được phép import trực tiếp các module nội bộ của Server/Gateway.
-    3. Biến môi trường: Mọi biến môi trường mới thêm vào phải được quản lý tương thích với Dotenvx.
-    4. Python: Dự án sử dụng Python 3.13 với `uv`, hãy chú ý tính an toàn của async và type hinting.
+    This repository is TINA (an AI meeting assistant and agentic runtime monorepo consisting of TypeScript, Python, and Docker Compose).
+    When reviewing code changes, strictly enforce the following rules:
+    1. UI / Design Tokens: NEVER use hardcoded hex color codes (e.g., #123456) in UI components or styles. All colors must use CSS variables/design tokens (e.g., var(--line), var(--panel), var(--t3)).
+    2. Architectural Isolation: Code in `clients/` (Frontend) must NEVER directly import private or internal modules from Server/Gateway packages.
+    3. Environment Variables: Any new configuration or environment variable must be managed consistently with Dotenvx and documented.
+    4. Python Backend: The project targets Python 3.13 with `uv`. Pay close attention to async/await safety, cancellation handling, resource cleanup, and type hints.
+
+  path_instructions:
+    - path: "clients/**"
+      instructions: "Verify proper use of CSS design tokens (var(--...)), accessibility attributes (aria-*), clean React hook cleanup upon unmount, and ensure no console.log statements remain."
+    - path: "core/**"
+      instructions: "Inspect async exception handling, ensure proper teardown of WebSocket and database connections, and verify that Gateway endpoints adhere to the security scope matrix."
+    - path: "deploy/**"
+      instructions: "Ensure Docker Compose syntax correctness, avoid container port mapping conflicts, and check Dockerfile build consistency."
 
   path_filters:
     - "!pnpm-lock.yaml"
@@ -27,6 +36,21 @@ reviews:
     - "!docs/research/**"
     - "!output/**"
     - "!**/*.generated.*"
+    - "!**/*.wav"
+    - "!**/*.mp3"
+    - "!**/*.onnx"
+    - "!**/*.bin"
+    - "!**/*.safetensors"
+    - "!**/*.drawio.bkp"
+    - "!**/.env.keys"
+
+  tools:
+    ruff:
+      enabled: true
+    shellcheck:
+      enabled: true
+    gitleaks:
+      enabled: true
 
 chat:
   auto_reply: true
