@@ -1,5 +1,13 @@
 # Third-party licenses — baked artifacts outside the dependency gate
 
+## Optional local wake-word client
+
+`clients/speech` uses pinned Sherpa-ONNX 2.0.1 (including its core package), SentencePiece
+0.2.2 (Apache-2.0), sounddevice/PortAudio (MIT) and NumPy (BSD). The operator-downloaded
+GigaSpeech 3.3M KWS archive declares Apache-2.0 in its README, retained in the local cache.
+Exact archive/file hashes are in `clients/speech/tina_speech/model-assets.json`.
+Weights and generated SAPI audio fixtures are not committed or baked into TINA images.
+
 ## Optional speech sidecar
 
 `deploy/tts` installs VieNeu 3.8.3 and sea-g2p (Apache-2.0) in a separate, optional image.
