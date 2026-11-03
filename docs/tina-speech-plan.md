@@ -1,7 +1,8 @@
 # Wake-word + TTS implementation plan
 
-Status: proposed implementation checklist; no speech runtime is deployed by this document.
-Branch: `feat/tina-speech`. Source baseline: `6dfbbbf`.
+Status: phase 1 TTS sidecar implemented and locally deployed; remote meeting audibility remains
+unverified. Wake-word and the meeting coordinator are planned, not implemented.
+Branch: `feat/tina-speech`. Planning baseline: `6dfbbbf`; phase 1 started from `ab4a743`.
 
 ## Agreed outcome
 
@@ -20,21 +21,22 @@ document edits, tool execution, personal agents, interruption while speaking, an
 meeting platforms are later work. Wake detection is activation, not authentication or consent
 to execute an action.
 
-### Proposed model baseline (not installed or quality-validated yet)
+### Model baseline
 
 - Wake-word: `sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01`, INT8,
   with the English keyword `HEY TINA` tokenized using that model's BPE files. Run on each
   participant's CPU. Evaluate Vietnamese-accented pronunciation before accepting it.
-- TTS: Piper/VITS `vi_VN-vais1000-medium`, using its Sherpa-ONNX-compatible export
-  `vits-piper-vi_VN-vais1000-medium` in one shared CPU service. The original voice card
-  specifies Vietnamese, one speaker and 22,050 Hz; the service adapter must resample to
-  the bot's 24,000 Hz PCM contract. This is a Vietnamese baseline, not a bilingual-voice claim.
-- Both baselines can be evaluated without a paid cloud speech API. Exact assets, revisions,
-  hashes, model/export terms and dependency versions are fixed during steps 0-2, after checking
-  the chosen artifacts. No voice cloning or model training is part of this baseline.
+- TTS implemented: VieNeu-TTS v3 Turbo, ONNX CPU, SDK 3.8.3, stock default voice
+  (Hải Đăng). The optional service resamples 48 kHz output to the bot's 24 kHz PCM contract.
+  Piper was dropped because eSpeak introduces GPL, conflicting with ADR-0004. The selected
+  SDK, phonemizer and model/codec cards declare Apache-2.0. Vietnamese/English listening
+  quality is still an operator acceptance check, not a validated bilingual claim.
+- No paid cloud speech API is required. TTS revisions and checksums are fixed in
+  [`model-assets.json`](../deploy/tts/model-assets.json), with hash-locked Python dependencies.
+  Wake-word assets will be pinned in phase 2. No voice cloning or model training is enabled.
 - Sources: [Sherpa KWS models](https://k2-fsa.github.io/sherpa/onnx/kws/pretrained_models/index.html),
-  [original Vietnamese voice card](https://huggingface.co/rhasspy/piper-voices/blob/main/vi/vi_VN/vais1000/medium/MODEL_CARD),
-  [Sherpa-compatible voice export](https://huggingface.co/csukuangfj/vits-piper-vi_VN-vais1000-medium).
+  [VieNeu model card](https://huggingface.co/pnnbao-ump/VieNeu-TTS-v3-Turbo),
+  [OpenMOSS codec card](https://huggingface.co/OpenMOSS-Team/MOSS-Audio-Tokenizer-Nano-ONNX).
 
 ## Verified starting points
 
@@ -53,7 +55,9 @@ Operational snapshot when preparing this plan:
 
 - Windows checkout: branch `feat/tina-speech`, revision `6dfbbbf`.
 - WSL checkout used to build the stack: `a4eed12`. Updating Windows does not update WSL or built images.
-- `tina-local` has no configured `TTS_SERVICE_URL`/`TTS_API_TOKEN`.
+- At planning time `tina-local` had no TTS configuration. Phase 1 configured the private
+  endpoint/token and recreated only Meeting API. Build/deployment use the Windows source;
+  the separate WSL checkout remains untouched.
 - Earlier synthetic agent checks succeeded for independent questions but failed two memory-recall
   checks. Use source-grounded questions for this MVP; do not depend on conversational memory.
 - Earlier STT `/health` checks passed; CLI `asr verify` expects `/status`, which this Faster-Whisper
@@ -105,14 +109,14 @@ not change core meeting ownership or imply arbitrary shared-workspace support.
 
 ### 0. Establish one development source and test fixtures
 
-- [ ] Preserve `note.txt`, existing output artifacts, local WSL changes and private env files.
-- [ ] Bring the WSL development checkout to the intended `feat/tina-speech` revision through an
-      explicit Git operation after checking both working trees. Do not blindly mirror directories.
-- [ ] Keep the running `tina-local` stack and the private Terminal development overlay; use a
+- [x] Preserve `note.txt`, existing output artifacts, local WSL changes and private env files.
+- [x] Select the Windows `feat/tina-speech` checkout as phase 1's build source. Build from it
+      directly; leave the older WSL checkout intact rather than blindly mirroring directories.
+- [x] Keep the running `tina-local` stack and the private Terminal development overlay; use a
       dedicated speech test room/config. Do not use `docker compose down -v` or rotate existing keys.
 - [ ] Prepare consented positive and negative audio: several speakers saying "Hey TINA", near-match
       names/phrases, normal conversation, noise, silence, and TINA's own synthesized speech.
-- [ ] Keep model files/audio outside source control. Record model URL, revision, SHA-256, language
+- [x] Keep TTS model files/audio outside source control. Record model URL, revision, SHA-256, language
       coverage and redistribution terms in an asset manifest before deployment.
 
 Exit: one identified source revision, recoverable local config, and reproducible audio fixtures.
@@ -121,13 +125,13 @@ Exit: one identified source revision, recoverable local config, and reproducible
 
 - [ ] Select one self-hosted TTS backend and voice that passes Vietnamese/English listening checks
       on the actual CPU hardware. Do not add several providers or train a voice for the MVP.
-- [ ] Implement an adapter only if the selected backend cannot expose the existing bot contract:
+- [x] Implement an adapter only if the selected backend cannot expose the existing bot contract:
       `POST {TTS_SERVICE_URL}/v1/audio/speech`, JSON
       `{model:"tts-1", input:text, voice:"auto", response_format:"pcm"}`,
       `X-API-Key: <TTS_API_TOKEN>` when configured.
-- [ ] Verify headerless PCM16 little-endian, mono, **24 kHz**; resample exactly once if needed.
+- [x] Verify headerless PCM16 little-endian, mono, **24 kHz**; resample exactly once if needed.
       A WAV header, a different sample rate, or Bearer-only auth cannot silently pass as compatible.
-- [ ] Use a private env file and optional deployment overlay. Configure the endpoint/token for
+- [x] Use a private env file and optional deployment overlay. Configure the endpoint/token for
       Meeting API, then spawn a **new** voice-enabled bot; old bot environments are not updated.
 - [ ] Send a bounded text through the Gateway Speak endpoint, then test DELETE Speak cancellation.
       Current text limit is 4,000 characters; reject or deliberately shorten oversized answers.
@@ -136,6 +140,31 @@ Exit: one identified source revision, recoverable local config, and reproducible
 
 Exit: audible, intelligible speech and working Stop on one platform. The ordinary transcript path
 continues to work. No changes to the LLM worker, transcript schema, or meeting capture modules.
+
+Phase 1 evidence (2026-11-04):
+
+- Added only the optional [`deploy/tts`](../deploy/tts/README.md) runtime, tests, configuration
+  and supporting CI/architecture/license documentation. Existing core Speak/Stop code is reused.
+- Nine offline regression tests pass, including authentication, bounded concurrency, input
+  validation, PCM resampling and pinned offline asset verification.
+- Three real CPU syntheses returned HTTP 200: 2.354, 1.666 and 1.618 seconds for respectively
+  3.92, 3.68 and 3.60 seconds of speech. This small smoke sample is not a latency benchmark.
+- The shipped bot adapter and real PulseAudio virtual microphone produced non-silent audio;
+  Stop during playback settled in 17 ms and re-muted the source. An automated STT round trip
+  recognized the test sentence but misrecognized the name TINA; human intelligibility remains open.
+- Two controlled Google Meet attempts failed before admission with HTTP 403 and
+  `awaiting_admission_rejected`, including after the operator reported accepting the bot.
+  Gateway Speak/Stop in an admitted meeting and remote-participant listening remain unchecked.
+- Main Meeting API reaches both TTS and existing STT health endpoints successfully. Synthetic
+  WAVs and content-free timing reports are kept under ignored `output/tts-stage1/`.
+- README, architecture/dataflow seal, CALM validation and existing image-license gates pass;
+  CALM retains advisory warnings for existing nodes. The raw Windows checkout's contract-version
+  gate fails because schema hashes include CRLF bytes. A disposable Git HEAD snapshot and a
+  disposable LF-normalized working snapshot both pass all 40 sealed contracts; no contract files
+  or contract seals were changed to hide this checkout issue.
+
+Do not mark phase 1's meeting acceptance gate complete until a second participant hears the
+speech and verifies Stop in a room that admits the bot.
 
 ### 2. Prove local wake detection without agent/network actions
 
@@ -210,7 +239,7 @@ cause repeated wake -> answer loops.
 | Area | Planned change |
 | --- | --- |
 | `clients/speech/` (new) | Local audio/KWS adapter, bounded turn controller, coordinator, Gateway/TTS clients, focused tests and README; split by responsibility only as needed |
-| `deploy/speech/` (new, only if needed) | One optional TTS deployment and private configuration example; no new default startup services |
+| `deploy/tts/` (implemented) | One optional TTS deployment and private configuration example; no new default startup services |
 | Core contracts | New speech-turn/status boundary owned by the appropriate core domain; additive correlation for the existing Speak path only when implementing playback status |
 | Meeting API + bot | Minimal playback lifecycle/status bridge, preserving existing Speak/Stop behavior; no direct agent imports |
 | Agent/Knowledge | Reuse the current published endpoint; no second prompt/retrieval pipeline |
@@ -221,8 +250,8 @@ Dispatcher, model-provider adapters, identity policies or existing user tables f
 If a genuine owner/access restriction prevents the intended room policy, stop treating it as a
 client bug: document the exact missing authorization contract before expanding core behavior.
 
-The plan itself changes documentation only, so the architecture model continues to describe the
-implemented runtime. Add proposed nodes/flows when code actually introduces them, not in advance.
+The architecture model now includes the implemented optional TTS service and bot HTTP edge.
+Add the remaining proposed nodes/flows when their code actually exists, not in advance.
 
 ## Focused acceptance and stop condition
 
