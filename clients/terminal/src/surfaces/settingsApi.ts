@@ -5,7 +5,7 @@
 import { ApiError } from "./apiClient";
 
 export type ModelPrefs = {
-  mode?: "subscription" | "custom" | "bedrock" | "openai-api" | "openai-subscription" | "antigravity" | null;
+  mode?: "subscription" | "custom" | "bedrock" | "openai-api" | "openai-subscription" | "antigravity" | "groq" | "deepseek" | "gemini" | null;
   model?: string | null;
   meeting_model?: string | null;
   effort?: string | null; // reasoning-effort pin (low|medium|high|xhigh) for the agent harness
@@ -15,6 +15,17 @@ export type ModelPrefs = {
   api_key?: string | null; // masked on read (********abcd) — write-only in the clear
   antigravity_terms_acknowledged?: string | null;
 };
+
+const API_MODEL_PROVIDERS = {
+  groq: { label: "Groq", model: "openai/gpt-oss-20b", keyUrl: "https://console.groq.com/keys" },
+  deepseek: { label: "DeepSeek", model: "deepseek-flash", keyUrl: "https://platform.deepseek.com/api_keys" },
+  gemini: { label: "Gemini", model: "gemini-3.8-flash", keyUrl: "https://aistudio.google.com/apikey" },
+} as const;
+
+export function apiModelProvider(mode: string | undefined) {
+  return mode && Object.hasOwn(API_MODEL_PROVIDERS, mode)
+    ? API_MODEL_PROVIDERS[mode as keyof typeof API_MODEL_PROVIDERS] : null;
+}
 
 export function canSaveModelPrefs(values: Record<string, string>): boolean {
   return values.mode !== "antigravity" || values.antigravity_terms_acknowledged === "true";
@@ -98,6 +109,29 @@ export type ConfigTestResult = {
 
 export async function testModels(): Promise<ConfigTestResult> {
   return jsonOrThrow(await fetch("/api/models/test", { cache: "no-store" }));
+}
+
+export type ModelCatalogModel = { id: string; name?: string };
+
+/** The provider's live model list for the picker. `apiKey` may be a DRAFT the user is still typing
+ *  (shown before Save); a masked read-back is not a credential and is omitted so the server uses
+ *  the saved effective key for that provider. The key is used for this one request only. */
+export async function fetchModelCatalog(
+  mode: string, apiKey: string | undefined, signal?: AbortSignal,
+): Promise<ModelCatalogModel[]> {
+  const draft = apiKey && !apiKey.startsWith("********") ? apiKey : undefined;
+  const res = await fetch("/api/models/catalog", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ mode, ...(draft ? { api_key: draft } : {}) }),
+    cache: "no-store",
+    signal,
+  });
+  const body = await res.json().catch(() => ({})) as { models?: ModelCatalogModel[]; error?: string; detail?: string };
+  if (!res.ok) {
+    throw new ApiError(res.status, body.error || body.detail || "Could not load models from the provider.", res.url);
+  }
+  return Array.isArray(body.models) ? body.models : [];
 }
 
 export async function testTranscription(): Promise<ConfigTestResult> {

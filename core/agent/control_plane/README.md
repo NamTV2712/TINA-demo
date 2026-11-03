@@ -10,6 +10,12 @@ This clears the selected TINA user's connection, not browser sessions or tokens 
 running workers. Meeting model labels resolve personal settings before deployment defaults, with
 an explicit workspace model pin taking precedence; labels describe configuration, not inference health.
 
+Settings → Models lists come from the provider itself (`model_catalog.py` behind
+`POST /api/models/catalog`): fixed first-party endpoints selected by `mode`, the caller's draft or
+saved key used for that single request, non-chat entries filtered out, and a rejected key reported as
+401 instead of an empty list. Callers supply `mode` only — never a base URL — so this route cannot be
+turned into an egress proxy.
+
 ## Workspace membership + invites + roles (Lane M — the access layer for shared workspaces)
 
 > **The full workspace + collaboration model (tiers, personal, sharing, live collaboration, deferred)

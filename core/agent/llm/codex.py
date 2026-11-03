@@ -107,6 +107,8 @@ class CodexHarness:
             return "ChatGPT plan credentials are not connected for this TINA user."
         if mode == "api-key" and not os.environ.get("OPENAI_API_KEY"):
             return "OpenAI API key is missing for this TINA user."
+        if mode == "groq" and not os.environ.get("TINA_LLM_API_KEY"):
+            return "Groq API key is missing. Add it in Settings → Models."
         return None
 
     @staticmethod
@@ -228,10 +230,24 @@ class CodexHarness:
             pass
         return config, sorted(shell_environment_excludes)
 
-    def _argv(self, shell_environment_excludes: Iterable[str] = ()) -> list[str]:
+    def _argv(self, shell_environment_excludes: Iterable[str] = (), *,
+              groq_base_url: Optional[str] = None) -> list[str]:
         mode = (os.environ.get("TINA_CODEX_AUTH_MODE") or "api-key").strip()
         argv = [self._executable, "app-server", "--listen", "stdio://"]
-        if mode == "chatgpt-plan":
+        if mode == "groq":
+            settings = {
+                "model_provider": '"groq"',
+                "model_providers.groq.name": '"Groq"',
+                "model_providers.groq.base_url": self._toml_string(
+                    groq_base_url or "https://api.groq.com/openai/v1"),
+                "model_providers.groq.env_key": '"TINA_LLM_API_KEY"',
+                "model_providers.groq.wire_api": '"responses"',
+                "model_providers.groq.requires_openai_auth": "false",
+                "model_providers.groq.supports_websockets": "false",
+                "model_context_window": "131072",
+                "model_auto_compact_token_limit": "100000",
+            }
+        elif mode == "chatgpt-plan":
             settings = {
                 "model_provider": '"openai_chatgpt_plan"',
                 "model_providers.openai_chatgpt_plan.name": '"ChatGPT plan"',
@@ -327,7 +343,8 @@ class CodexHarness:
 
     @staticmethod
     def _redact_secrets(text: str) -> str:
-        for secret in (os.environ.get("ACCESS_TOKEN", ""), os.environ.get("OPENAI_API_KEY", "")):
+        for secret in (os.environ.get("ACCESS_TOKEN", ""), os.environ.get("OPENAI_API_KEY", ""),
+                       os.environ.get("TINA_LLM_API_KEY", "")):
             if secret:
                 text = text.replace(secret, "[redacted]")
         return text
@@ -340,12 +357,53 @@ class CodexHarness:
                 "Codex could not authenticate with the ChatGPT plan. Reconnect the ChatGPT account "
                 "in Settings → Models and retry."
             )
+        if mode == "groq":
+            return "Groq could not authenticate. Check the Groq API key in Settings → Models and retry."
         return (
             "Codex could not authenticate with the OpenAI API key. Check the key in Settings → Models "
             "or connect a ChatGPT plan."
         )
 
     def run_turn(self, work: Path, prompt: str, *, allowed_tools: Iterable[str] = (),
+                 session: Optional[str] = None, model: Optional[str] = None,
+                 mcp_config: Optional[str] = None, gated_mcp_servers: Iterable[str] = (),
+                 mcp_servers: Optional[dict] = None, mcp_env: Optional[dict[str, str]] = None,
+                 mcp_tools: Optional[dict[str, list[str]]] = None,
+                 approval_handler: Optional[Callable[[dict], Optional[bool]]] = None) -> Iterator[dict]:
+        kwargs = dict(allowed_tools=allowed_tools, session=session, model=model,
+                      mcp_config=mcp_config, gated_mcp_servers=gated_mcp_servers,
+                      mcp_servers=mcp_servers, mcp_env=mcp_env, mcp_tools=mcp_tools,
+                      approval_handler=approval_handler)
+        if (os.environ.get("TINA_CODEX_AUTH_MODE") or "").strip() != "groq":
+            yield from self._run_turn(work, prompt, **kwargs)
+            return
+        preflight = self.preflight()
+        if preflight:
+            yield {"type": "done", "ok": False, "reply": preflight}
+            return
+        # An explicit empty dispatch value means the operator's allowlist rejected the model.
+        # Never let Codex substitute its OpenAI default in a Groq turn.
+        target = model or os.environ.get("TINA_AGENT_MODEL")
+        if target is None:
+            target = "openai/gpt-oss-20b"
+        if not target.strip():
+            yield {"type": "done", "ok": False,
+                   "reply": "No approved Groq chat model is selected. Choose an allowed model in Settings → Models."}
+            return
+        kwargs["model"] = target
+        # Keep the compatibility boundary alive for the entire turn, including tool follow-ups.
+        # Codex retains its existing sandbox, MCP approval bridge, and local session history.
+        from llm.groq_responses import groq_responses_proxy
+        try:
+            with groq_responses_proxy(os.environ["TINA_LLM_API_KEY"]) as base:
+                yield from self._run_turn(work, prompt, groq_base_url=base, **kwargs)
+        except Exception as exc:  # normalize proxy startup/cleanup failures without leaking a key
+            detail = self._redact_secrets(str(exc))[:400]
+            yield {"type": "done", "ok": False,
+                   "reply": f"Could not prepare Groq model connection: {detail}"}
+
+    def _run_turn(self, work: Path, prompt: str, *, groq_base_url: Optional[str] = None,
+                 allowed_tools: Iterable[str] = (),
                  session: Optional[str] = None, model: Optional[str] = None,
                  mcp_config: Optional[str] = None,
                  gated_mcp_servers: Iterable[str] = (),
@@ -386,7 +444,8 @@ class CodexHarness:
         # the TINA turn policy so a read-only event cannot write through that shell.
         try:
             proc = subprocess.Popen(
-                self._argv(shell_environment_excludes), cwd=str(work), env=env, stdin=subprocess.PIPE,
+                self._argv(shell_environment_excludes, groq_base_url=groq_base_url),
+                cwd=str(work), env=env, stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1,
             )
         except OSError as exc:
@@ -425,7 +484,9 @@ class CodexHarness:
             send({"method": "initialized", "params": {}})
 
             if session:
-                params = {"threadId": session, "excludeTurns": True}
+                # excludeTurns requires Codex's experimentalApi handshake; ordinary resume
+                # works on the pinned CLI without expanding the API surface we depend on.
+                params = {"threadId": session}
                 if developer_instructions:
                     params["developerInstructions"] = developer_instructions
                 send({"method": "thread/resume", "id": request_id, "params": params})

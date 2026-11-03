@@ -100,7 +100,7 @@ system service-authority-system  # optional operator-owned admission and active-
 system system-webhook-system  # optional operator-owned terminal-event consumer; absent in stock OSS and never selected from customer or meeting data
   service system-webhook
 
-system completion-provider  # the deployment or per-user model endpoint selected by TINA_LLM_PROVIDER; may be tenant-hosted or an external provider
+system completion-provider  # the deployment or per-user model endpoint; may be tenant-hosted or an external provider. Groq uses Codex Responses at https://api.groq.com/openai/v1 for chat, DeepSeek uses the Claude Code Anthropic-compatible endpoint at https://api.deepseek.com/anthropic, and Gemini uses agy with its Gemini API-key provider. Their tool-less meeting jobs use OpenAI-compatible Chat Completions at the respective fixed Groq, DeepSeek and Gemini endpoints. The same masked per-user/platform provider credential selects both paths; TINA transcript API tokens remain separate.
 
 system platform  # shared infra backing the services
   service redis

@@ -5,6 +5,7 @@ subscription file), zero-balance external transcription token (402 per segment),
 token, unreachable backend, and the happy paths.
 """
 import json
+import pytest
 
 from control_plane import config_test as ct
 
@@ -93,6 +94,95 @@ def test_run_models_test_does_not_claim_antigravity_auth_was_checked():
     assert out["ok"] is False
     assert "agent-worker" in out["summary"]
     assert "SECRET" not in json.dumps(out)
+
+
+def test_groq_checks_chat_and_summary_models_using_their_actual_dialects():
+    calls = []
+    def post(url, payload, headers):
+        calls.append((url, payload, headers))
+        return 200, "{}"
+
+    result = ct.run_models_test({"mode": "groq", "api_key": "groq-secret",
+                                 "meeting_model": "summary-model"}, env={}, post=post)
+
+    assert result["ok"] and result["mode"] == "groq"
+    assert [call[0] for call in calls] == [
+        "https://api.groq.com/openai/v1/responses",
+        "https://api.groq.com/openai/v1/chat/completions",
+    ]
+    assert calls[0][1]["model"] == "openai/gpt-oss-20b"
+    assert calls[1][1]["model"] == "summary-model"
+    assert "input" in calls[0][1] and "messages" in calls[1][1]
+    assert not {"store", "include", "previous_response_id", "truncation"}.intersection(calls[0][1])
+    assert all(call[2] == {"Authorization": "Bearer groq-secret"} for call in calls)
+    assert "groq-secret" not in json.dumps(result)
+
+
+def test_groq_does_not_accept_a_foreign_deployment_key():
+    def post(*_args):
+        raise AssertionError("Groq must not be called without its own saved credential")
+
+    result = ct.run_models_test({"mode": "groq"}, env={"ANTHROPIC_API_KEY": "foreign-secret",
+                                "OPENAI_API_KEY": "another-secret"}, post=post)
+    assert not result["ok"] and "Groq API key is missing" in result["summary"]
+
+
+def test_groq_fails_if_summary_endpoint_rejects_the_key_and_redacts_provider_detail():
+    def post(url, payload, headers):
+        return (200, "{}") if url.endswith("/responses") else (400, "bad groq-secret model")
+
+    result = ct.run_models_test({"mode": "groq", "api_key": "groq-secret"}, env={}, post=post)
+    assert not result["ok"] and "meeting summaries" in result["summary"]
+    assert "groq-secret" not in json.dumps(result)
+    assert "[redacted]" in result["summary"]
+    result = ct.run_models_test({"mode": "groq", "api_key": "groq-secret"}, env={},
+                               post=lambda *_args: (401, "bad groq-secret"))
+    assert not result["ok"] and result["status"] == 401
+    assert "groq-secret" not in json.dumps(result)
+
+
+def test_deepseek_probes_its_anthropic_chat_and_compat_summary_dialects():
+    calls = []
+    def post(url, payload, headers):
+        calls.append((url, payload, headers))
+        return 200, "{}"
+    result = ct.run_models_test({"mode": "deepseek", "api_key": "own-key",
+                                 "meeting_model": "summary-model"}, env={}, post=post)
+    assert result["ok"] and result["mode"] == "deepseek"
+    assert calls[0][0] == "https://api.deepseek.com/anthropic/v1/messages"
+    assert calls[0][1]["model"] == "deepseek-flash"
+    assert calls[0][2] == {"Authorization": "Bearer own-key", "anthropic-version": "2023-06-01"}
+    assert calls[1][0] == "https://api.deepseek.com/chat/completions"
+    assert calls[1][1]["model"] == "summary-model"
+    assert calls[1][2] == {"Authorization": "Bearer own-key"}
+    assert "own-key" not in json.dumps(result)
+
+
+def test_gemini_tests_completion_without_claiming_the_cli_has_been_verified():
+    calls = []
+    def post(url, payload, headers):
+        calls.append((url, payload, headers))
+        return 200, "{}"
+    result = ct.run_models_test({"mode": "gemini", "api_key": "own-key"}, env={}, post=post)
+    assert result["ok"] and result["mode"] == "gemini"
+    assert calls == [("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
+        "model": "gemini-3.8-flash", "messages": [{"role": "user", "content": "Reply with OK."}],
+        "max_tokens": 16,
+    }, {"Authorization": "Bearer own-key"})]
+    assert "first agent turn" in result["summary"]
+
+
+@pytest.mark.parametrize("mode", ["deepseek", "gemini"])
+def test_api_provider_tests_require_own_keys_and_redact_errors(mode):
+    def no_post(*_args):
+        raise AssertionError("must not use a deployment credential")
+    result = ct.run_models_test({"mode": mode}, env={"ANTHROPIC_API_KEY": "foreign"}, post=no_post)
+    assert not result["ok"] and "API key is missing" in result["summary"]
+    for status in (400, 401):
+        result = ct.run_models_test({"mode": mode, "api_key": "own-key"}, env={},
+                                   post=lambda *_args: (status, "rejected own-key"))
+        assert not result["ok"] and result["status"] == status
+        assert "own-key" not in json.dumps(result)
 
 
 # ── transcription backend ─────────────────────────────────────────────────────────────────────

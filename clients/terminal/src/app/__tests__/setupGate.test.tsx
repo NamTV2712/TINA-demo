@@ -93,4 +93,48 @@ describe("SetupGate", () => {
     render(<SetupGate><div data-testid="workbench" /></SetupGate>);
     await waitFor(() => expect(screen.getByTestId("workbench")).toBeTruthy());
   });
+
+  it.each([
+    ["groq", "Groq"], ["deepseek", "DeepSeek"], ["gemini", "Gemini"],
+  ])("saves a %s key with the server default model and tests before continuing", async (mode, label) => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (String(url).includes("/api/admin/settings/setup")) {
+        return Response.json({ key: "setup", value: {} });
+      }
+      if (String(url).includes("/api/admin/settings/models") && init?.method === "PUT") {
+        return Response.json({ key: "models", value: { mode } });
+      }
+      return Response.json({ ok: false, summary: "No model connected" });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<SetupGate><div data-testid="workbench" /></SetupGate>);
+
+    await screen.findByText("How should the agent think?");
+    fireEvent.click(screen.getByRole("radio", { name: `${label} API key` }));
+    const save = screen.getByRole("button", { name: "Save & test" }) as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText(`${label} API key`), { target: { value: "synthetic-provider-key" } });
+    fireEvent.click(save);
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/admin/settings/models", expect.objectContaining({
+      method: "PUT", body: JSON.stringify({ mode, api_key: "synthetic-provider-key", model: "" }),
+    })));
+    await waitFor(() => expect(save.textContent).toBe("Save & test"));
+    expect((screen.getByRole("button", { name: "Continue" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole("status").textContent).toContain("No model connected");
+  });
+
+  it.each(["Groq", "DeepSeek", "Gemini"])("clears %s credentials when changing to a different provider", async (label) => {
+    stubSetupProbe({ status: 200, value: {} });
+    render(<SetupGate><div data-testid="workbench" /></SetupGate>);
+    await screen.findByText("How should the agent think?");
+    fireEvent.click(screen.getByRole("radio", { name: `${label} API key` }));
+    fireEvent.change(screen.getByLabelText(`${label} API key`), { target: { value: "synthetic-provider-key" } });
+    fireEvent.change(screen.getByLabelText(`${label} model`), { target: { value: "explicit-model" } });
+    fireEvent.click(screen.getByRole("radio", { name: "OpenAI API key" }));
+    expect((screen.getByPlaceholderText("OpenAI API key") as HTMLInputElement).value).toBe("");
+    expect((screen.getByPlaceholderText("OpenAI API model ID") as HTMLInputElement).value).toBe("");
+    fireEvent.click(screen.getByRole("radio", { name: `${label} API key` }));
+    expect((screen.getByLabelText(`${label} API key`) as HTMLInputElement).value).toBe("");
+  });
 });

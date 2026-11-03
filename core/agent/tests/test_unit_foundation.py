@@ -531,6 +531,75 @@ def test_dispatcher_model_config_custom_mode_stamps_both_call_shapes():
     assert env["TINA_AGENT_MODEL"] == "qwen3"
 
 
+def test_groq_overlay_routes_chat_and_summaries_with_isolated_credentials(monkeypatch):
+    monkeypatch.setenv("TINA_LLM_API_KEY", "deployment-secret")
+    env = {key: "other-provider-secret" for key in dispatch.MODEL_AUTH_ENV_ALLOWLIST}
+    env.update(TINA_AGENT_MODEL="sonnet", TINA_MEETING_MODEL="haiku")
+    dispatch.overlay_model_config(env, {"mode": "groq", "api_key": "groq-user-key",
+                                        "base_url": "https://unrelated.invalid"})
+
+    assert env["TINA_RUNNER"] == "codex"
+    assert env["TINA_CODEX_AUTH_MODE"] == "groq"
+    assert env["TINA_LLM_PROVIDER"] == "openai-compat"
+    assert env["TINA_LLM_BASE_URL"] == "https://api.groq.com/openai/v1"
+    assert env["TINA_LLM_API_KEY"] == "groq-user-key"
+    assert env["TINA_AGENT_MODEL"] == "openai/gpt-oss-20b"
+    assert env["TINA_LLM_MODEL"] == "openai/gpt-oss-20b"
+    assert env["TINA_MEETING_MODEL"] == "openai/gpt-oss-20b"
+    for key in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL",
+                "OPENAI_API_KEY", "ACCESS_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "GEMINI_API_KEY"):
+        assert env[key] == ""
+
+    dispatch.overlay_model_config(env, {"mode": "groq"})
+    assert env["TINA_LLM_API_KEY"] == ""  # no deployment/provider credential fallback
+
+
+def test_groq_overlay_preserves_meeting_override_and_honors_model_allowlist():
+    env = {}
+    dispatch.overlay_model_config(env, {"mode": "groq", "model": "openai/gpt-oss-120b",
+                                        "meeting_model": "llama-3.3-70b-versatile"})
+    assert env["TINA_AGENT_MODEL"] == "openai/gpt-oss-120b"
+    assert env["TINA_MEETING_MODEL"] == "llama-3.3-70b-versatile"
+    dispatch.overlay_model_config(env, {"mode": "groq", "model": "denied-model"},
+                                  allowlist="allowed-model")
+    assert env["TINA_AGENT_MODEL"] == ""
+    assert env["TINA_MEETING_MODEL"] == ""
+
+
+@pytest.mark.parametrize("mode,runner,base,default", [
+    ("deepseek", "claude-code", "https://api.deepseek.com", "deepseek-flash"),
+    ("gemini", "antigravity", "https://generativelanguage.googleapis.com/v1beta/openai", "gemini-3.8-flash"),
+])
+def test_api_providers_route_both_call_shapes_and_isolate_defaults(mode, runner, base, default):
+    env = {key: "foreign-secret" for key in dispatch.MODEL_AUTH_ENV_ALLOWLIST}
+    env.update(TINA_AGENT_MODEL="foreign-chat", TINA_MEETING_MODEL="foreign-summary")
+    dispatch.overlay_model_config(env, {"mode": mode, "api_key": "own-key"})
+    assert env["TINA_RUNNER"] == runner
+    assert env["TINA_LLM_PROVIDER"] == "openai-compat"
+    assert env["TINA_LLM_BASE_URL"] == base
+    assert env["TINA_LLM_API_KEY"] == "own-key"
+    assert env["TINA_AGENT_MODEL"] == env["TINA_MEETING_MODEL"] == default
+    assert env["OPENAI_API_KEY"] == env["ACCESS_TOKEN"] == env["CLAUDE_CODE_OAUTH_TOKEN"] == ""
+    if mode == "deepseek":
+        assert env["ANTHROPIC_BASE_URL"] == "https://api.deepseek.com/anthropic"
+        assert env["ANTHROPIC_AUTH_TOKEN"] == "own-key"
+        assert env["ANTHROPIC_API_KEY"] == env["GEMINI_API_KEY"] == ""
+        assert env["ANTHROPIC_DEFAULT_SONNET_MODEL"] == default
+    else:
+        assert env["GEMINI_API_KEY"] == "own-key"
+        assert env["TINA_ANTIGRAVITY_AUTH_MODE"] == "gemini-api"
+        assert env["TINA_ANTIGRAVITY_TERMS_ACKNOWLEDGED"] == ""
+        assert env["ANTHROPIC_BASE_URL"] == env["ANTHROPIC_AUTH_TOKEN"] == ""
+
+    dispatch.overlay_model_config(env, {"mode": mode, "model": "chat-override",
+                                        "meeting_model": "summary-override"})
+    assert env["TINA_AGENT_MODEL"] == "chat-override"
+    assert env["TINA_MEETING_MODEL"] == "summary-override"
+    assert env["TINA_LLM_API_KEY"] == ""
+    dispatch.overlay_model_config(env, {"mode": mode}, allowlist="another-model")
+    assert env["TINA_AGENT_MODEL"] == env["TINA_MEETING_MODEL"] == ""
+
+
 def test_dispatcher_model_config_subscription_mode_keeps_deployment_credentials(monkeypatch):
     """mode:subscription (or unset) never stamps endpoint/credential env — the deployment's
     brokered credential (mounted subscription / deployment key) stays in charge."""

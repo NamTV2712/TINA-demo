@@ -203,6 +203,43 @@ Point the agent at your own model so no inference leaves the network.
 | `TINA_AGENT_DEFAULT_SUBJECT` | `u_live` | Fallback subject before the gateway fronts agent-api. |
 | `TINA_ALLOW_LOCAL_REPO_ROOT` | — | `os.pathsep`-separated directories a workspace repo may be attached from as a local path (`POST /agent/workspace/swap`). Unset refuses local paths. |
 
+### Groq, DeepSeek and Gemini for chat and meeting summaries
+
+In **Settings → Models → Agent model**, choose **Groq**, **DeepSeek** or **Gemini**, enter
+that provider's API key in **Credential**, then save and run **Test model credentials**.
+An empty **Meeting model** uses the chat model. An administrator can set the same provider
+under the platform defaults. Personal model preferences take precedence.
+
+**Chat model** and **Meeting model** are pickers fed by the provider's own model list: once a
+key is entered (or saved), the field asks that provider which models the credential can use, so
+the list is not a maintained guess. A short built-in list stays visible while the request is in
+flight or when the provider is unreachable; **Custom model…** accepts any ID the list does not
+carry (a newer release, an account-only model, or a pinned snapshot).
+
+**Intelligence** is a separate choice — `Auto`, `Fast`, `Balanced`, `Deep` or `Maximum` — because
+the reasoning budget is a per-turn property, not part of the model's name. It is passed to the
+agent harness as its reasoning-effort pin; `Auto` leaves the model's own default in place.
+
+| Provider | Default model | Chat harness | Meeting summaries |
+|---|---|---|---|
+| Groq | `openai/gpt-oss-20b` | Codex using `https://api.groq.com/openai/v1/responses` | Chat Completions at `https://api.groq.com/openai/v1` |
+| DeepSeek | `deepseek-flash` | Claude Code using `https://api.deepseek.com/anthropic` | Chat Completions at `https://api.deepseek.com` |
+| Gemini | `gemini-3.8-flash` | `agy` using its Gemini API-key provider | Chat Completions at `https://generativelanguage.googleapis.com/v1beta/openai` |
+
+The endpoints are fixed by the selected provider. Groq's
+[Responses API](https://console.groq.com/docs/responses-api) is currently in beta. DeepSeek
+documents its [Claude Code integration](https://api-docs.deepseek.com/quick_start/agent_integrations/claude_code/)
+and [Anthropic-compatible API](https://api-docs.deepseek.com/guides/anthropic_api/); Gemini
+documents its [OpenAI-compatible API](https://ai.google.dev/gemini-api/docs/openai). Choose
+a model available to your account, test the credentials, then send a short chat message to
+check the harness as well. Gemini's API-key selection uses the Gemini provider directly;
+it does not use an Antigravity consumer/OAuth sign-in.
+
+These are **provider API keys**, separate from the TINA API token used by the transcript
+extension. They are stored in the existing per-user/platform model settings and masked on
+reads. Chat and meeting text are sent to the selected provider. Speech-to-text keeps using
+the separately configured transcription backend.
+
 ### Claude subscription credentials (`HOST_CLAUDE_CREDENTIALS`)
 
 Setting `HOST_CLAUDE_CREDENTIALS=~/.claude/.credentials.json` mounts your Claude Code

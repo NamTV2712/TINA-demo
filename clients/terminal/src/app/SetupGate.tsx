@@ -13,7 +13,7 @@
 import { useEffect, useState, type CSSProperties } from "react";
 import styles from "./SetupGate.module.css";
 import {
-  getGlobalSetting, setGlobalSetting, testModels, testTranscription,
+  apiModelProvider, getGlobalSetting, setGlobalSetting, testModels, testTranscription,
   type ConfigTestResult, type GlobalSetting,
 } from "../surfaces/settingsApi";
 import { ChatGPTModelInput } from "../surfaces/chatGPTModelInput";
@@ -59,11 +59,14 @@ function TestLine({ res, err, busy }: { res: ConfigTestResult | null; err: strin
 /** Step 1 — agent model: Claude subscription on this machine (detect via the real test edge) or a
  *  custom OpenRouter/OpenAI-compatible endpoint. */
 function ModelsStep({ onNext }: { onNext: (state: StepState) => void }) {
-  type Choice = "subscription" | "openai-subscription" | "openai-api" | "antigravity" | "bedrock" | "custom";
-  const providers: Array<{ value: Choice; label: string; description: string; logo: string }> = [
+  type Choice = "subscription" | "openai-subscription" | "openai-api" | "antigravity" | "bedrock" | "custom" | "groq" | "deepseek" | "gemini";
+  const providers: Array<{ value: Choice; label: string; description: string; logo?: string }> = [
     { value: "subscription", label: "Claude subscription on this machine", description: "Uses the Claude Code credentials already on this computer. No API key needed.", logo: "anthropic.svg" },
     { value: "openai-subscription", label: "ChatGPT plan (Codex app-server)", description: "Connect your ChatGPT account and allow TINA to use eligible plan usage. Requests count toward that account’s usage.", logo: "openai.svg" },
     { value: "openai-api", label: "OpenAI API key", description: "API usage is billed through your OpenAI API account, separately from your ChatGPT plan.", logo: "openai.svg" },
+    { value: "groq", label: "Groq API key", description: "Use a Groq-hosted model for chat and meeting notes. Bring your Groq API key; speech-to-text is configured separately." },
+    { value: "deepseek", label: "DeepSeek API key", description: "Use DeepSeek for chat and meeting notes with your DeepSeek API key." },
+    { value: "gemini", label: "Gemini API key", description: "Use Google's Gemini API for chat and meeting notes with a key from Google AI Studio." },
     { value: "antigravity", label: "Google Antigravity CLI (agy)", description: "Use a Gemini API key or Gemini Enterprise credential. This choice affects agent turns; meeting summaries keep using the deployment completion provider. Access is checked on the first agent turn.", logo: "antigravity.svg" },
     { value: "bedrock", label: "AWS Bedrock", description: "Use a Bedrock API key with a Claude model enabled in your AWS account. Short-term keys expire and may need renewal.", logo: "aws.svg" },
     { value: "custom", label: "OpenRouter or custom endpoint", description: "Any Anthropic/OpenAI-compatible endpoint. Bring your own key.", logo: "openrouter.svg" },
@@ -109,6 +112,10 @@ function ModelsStep({ onNext }: { onNext: (state: StepState) => void }) {
       } else if (selected === "openai-api") {
         await setGlobalSetting("models", {
           mode: "openai-api", base_url: "https://api.openai.com/v1", api_key: apiKey.trim(), model: model.trim(),
+        });
+      } else if (apiModelProvider(selected)) {
+        await setGlobalSetting("models", {
+          mode: selected, api_key: apiKey.trim(), model: model.trim(),
         });
       } else if (selected === "bedrock") {
         await setGlobalSetting("models", {
@@ -176,6 +183,7 @@ function ModelsStep({ onNext }: { onNext: (state: StepState) => void }) {
   const canContinue = (choice === "subscription" && detected) || res?.ok === true
     || (choice === "antigravity" && antigravityAcknowledged && antigravitySaved);
   const selectedProvider = providers.find((provider) => provider.value === choice)!;
+  const selectedApiProvider = apiModelProvider(choice);
 
   return (
     <>
@@ -190,8 +198,15 @@ function ModelsStep({ onNext }: { onNext: (state: StepState) => void }) {
           {providers.map((provider) => (
             <label key={provider.value} className={`${styles.providerChoice} ${choice === provider.value ? styles.providerChoiceSelected : ""}`}>
               <input type="radio" name="model-provider" id={`mp-${provider.value}`} style={srOnly}
-                checked={choice === provider.value} onChange={() => setChoice(provider.value)} />
-              <img className={styles.providerLogo} src={`/provider-logos/${provider.logo}`} alt="" aria-hidden="true" />
+                checked={choice === provider.value} onChange={() => {
+                  if (provider.value !== choice && (apiModelProvider(provider.value) || apiModelProvider(choice))) {
+                    setApiKey(""); setModel(""); setRes(null); setErr(null);
+                  }
+                  setChoice(provider.value);
+                }} />
+              {provider.logo
+                ? <img className={styles.providerLogo} src={`/provider-logos/${provider.logo}`} alt="" aria-hidden="true" />
+                : <span className={styles.providerLogo} aria-hidden="true" style={{ fontSize: 14, fontWeight: 700 }}>{provider.label[0]}</span>}
               <span className={styles.providerOptionName}>{provider.label}</span>
               {provider.value === "subscription" && (
                 <Badge tone={detecting ? "muted" : detected ? "ok" : "warn"}>
@@ -244,6 +259,19 @@ function ModelsStep({ onNext }: { onNext: (state: StepState) => void }) {
               <div className={styles.actions}>
                 <button style={{ ...quietBtn, opacity: busy || !apiKey.trim() || !model.trim() ? 0.5 : 1 }} disabled={busy || !apiKey.trim() || !model.trim()}
                   onClick={() => void saveAndTest("openai-api")}>{busy ? "Testing…" : "Save & test"}</button>
+                <TestLine res={res} err={err} busy={false} />
+              </div>
+            </div>
+          )}
+
+          {selectedApiProvider && (
+            <div className={styles.formFields}>
+              <a href={selectedApiProvider.keyUrl} target="_blank" rel="noopener noreferrer">Get a {selectedApiProvider.label} API key</a>
+              <input style={field} aria-label={`${selectedApiProvider.label} API key`} placeholder={`${selectedApiProvider.label} API key`} value={apiKey} type="password" autoComplete="off" onChange={(e) => setApiKey(e.target.value)} />
+              <input style={field} aria-label={`${selectedApiProvider.label} model`} placeholder={`${selectedApiProvider.model} (default)`} value={model} onChange={(e) => setModel(e.target.value)} />
+              <div className={styles.actions}>
+                <button style={{ ...quietBtn, opacity: busy || !apiKey.trim() ? 0.5 : 1 }} disabled={busy || !apiKey.trim()}
+                  onClick={() => void saveAndTest(choice)}>{busy ? "Testing…" : "Save & test"}</button>
                 <TestLine res={res} err={err} busy={false} />
               </div>
             </div>

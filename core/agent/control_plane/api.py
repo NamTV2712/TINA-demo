@@ -584,7 +584,7 @@ def _has_custom_model_endpoint(cfg: dict) -> bool:
     mode = (cfg.get("mode") or "").strip()
     if mode == "custom":
         return bool((cfg.get("base_url") or "").strip())
-    return mode in {"antigravity", "bedrock", "openai-api", "openai-subscription"}
+    return mode in {"antigravity", "bedrock", "groq", "deepseek", "gemini", "openai-api", "openai-subscription"}
 
 
 def _model_creds_error_message() -> str:
@@ -1079,15 +1079,21 @@ def create_app(
         # Match the dispatch-time precedence: the caller's effective Settings → Models config
         # overrides deployment defaults, and an explicit workspace meeting pin wins last.
         model_config = dispatcher.resolve_model_config(subject) or {}
-        chat_model = model_config.get("model") or settings.agent_model or settings.llm_model or "default"
-        streaming_model = (
-            model_config.get("meeting_model")
-            or model_config.get("model")
-            or settings.meeting_model
-            or settings.llm_model
-            or default_meeting_model()
-            or "default"
-        )
+        provider_default = {"groq": "openai/gpt-oss-20b", "deepseek": "deepseek-flash",
+                            "gemini": "gemini-3.8-flash"}.get(model_config.get("mode"))
+        if provider_default:
+            chat_model = model_config.get("model") or provider_default
+            streaming_model = model_config.get("meeting_model") or chat_model
+        else:
+            chat_model = model_config.get("model") or settings.agent_model or settings.llm_model or "default"
+            streaming_model = (
+                model_config.get("meeting_model")
+                or model_config.get("model")
+                or settings.meeting_model
+                or settings.llm_model
+                or default_meeting_model()
+                or "default"
+            )
         try:
             # A workspace-pinned model (free string) wins; an unpinned workspace ("" — deployment
             # default) must NOT blank the label out.
@@ -1096,13 +1102,16 @@ def create_app(
                 streaming_model = workspace_model
         except ValueError:
             pass
-        from control_plane.openai_auth import profile_status
+        chatgpt_connected = None
+        if model_config.get("mode") == "openai-subscription":
+            from control_plane.openai_auth import profile_status
+            chatgpt_connected = profile_status(subject)["connected"]
         return {
             "chat_model": chat_model,
             "agent_model": chat_model,
             "streaming_model": streaming_model,
             "meeting_model": streaming_model,
-            "chatgpt_connected": profile_status(subject)['connected'] if model_config.get('mode') == 'openai-subscription' else None,
+            "chatgpt_connected": chatgpt_connected,
         }
 
     @app.api_route('/internal/openai-auth/{subject}', methods=['GET', 'PUT', 'DELETE'], include_in_schema=False)
@@ -2627,6 +2636,41 @@ def create_app(
     # ── Settings → Models "Test" buttons (on-demand credential tests, fail-loud surface) ────────
     # Both test the caller's EFFECTIVE config — the same user > global > env resolution the
     # dispatch overlay / bot_spawn apply — so what's tested is what a turn/bot actually gets.
+
+    @app.post("/api/models/catalog")
+    def models_catalog(request: Request, body: dict = Body(...)):
+        """List the models the caller's provider credential can actually use.
+
+        ``api_key`` may carry a just-typed draft key so the picker fills BEFORE Save; when absent
+        (or masked) the subject's effective config supplies the credential — but only when that
+        config's mode matches the requested provider, so a stale Groq key can never be sent to
+        OpenAI. Fixed first-party endpoints only (control_plane.model_catalog); no base_url here.
+        """
+        from control_plane import model_catalog as _mc
+
+        subject = subject_of(request)
+        mode = str(body.get("mode") or "").strip()
+        raw_key = body.get("api_key")
+        api_key = _mc.masked_or_blank(raw_key if isinstance(raw_key, str) else "")
+        if not api_key:
+            cfg: dict = {}
+            mc = getattr(dispatcher, "_model_config", None)
+            if mc is not None:
+                try:
+                    cfg = mc.resolve(subject) or {}
+                except Exception:  # resolver down → env/draft only, never a cross-provider key
+                    cfg = {}
+            if (cfg.get("mode") or "").strip() == mode:
+                api_key = _mc.masked_or_blank(str(cfg.get("api_key") or ""))
+        if not api_key and mode == "openai-api":
+            api_key = (os.environ.get("OPENAI_API_KEY") or "").strip()
+        if not api_key and mode in ("gemini", "antigravity"):
+            api_key = (os.environ.get("GEMINI_API_KEY") or "").strip()
+        try:
+            return _mc.list_models(mode, api_key)
+        except _mc.CatalogError as exc:
+            status = exc.status or (401 if exc.auth else 502)
+            raise HTTPException(status_code=status, detail=str(exc)) from exc
 
     @app.get("/api/models/test")
     def models_test(request: Request):

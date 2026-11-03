@@ -12,6 +12,44 @@ def _event(value: dict) -> str:
     return json.dumps(value) + "\n"
 
 
+def test_gemini_api_uses_native_provider_without_consumer_oauth_ack(monkeypatch, tmp_path):
+    monkeypatch.setattr("llm.antigravity.shutil.which", lambda _name: "/usr/local/bin/agy")
+    monkeypatch.setenv("TINA_ANTIGRAVITY_AUTH_MODE", "gemini-api")
+    monkeypatch.setenv("GEMINI_API_KEY", "gemini-own-key")
+    monkeypatch.setenv("TINA_ANTIGRAVITY_TERMS_ACKNOWLEDGED", "")
+    monkeypatch.setenv("TINA_AGENT_MODEL", "gemini-3.8-flash")
+    monkeypatch.setenv("TINA_LLM_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai")
+    captured = {}
+
+    def execute(argv, _cwd):
+        captured["model"] = argv[argv.index("--model") + 1]
+        path = Path(argv[argv.index("--settings") + 1])
+        captured["settings"] = json.loads(path.read_text())
+        return [_event({"event": "result", "result": {"status": "SUCCESS", "response": "OK"}})]
+
+    harness = AntigravityHarness(exec_fn=execute)
+    harness.prepare(tmp_path)
+    assert harness.preflight() is None
+    events = list(harness.run_turn(tmp_path, "hello", model="gemini-3.8-flash", allowed_tools=["Read"]))
+    assert events[-1]["ok"] is True
+    assert captured["model"] == "gemini-3.8-flash"
+    assert captured["settings"]["modelProvider"] == "gemini"
+    assert "gemini-own-key" not in json.dumps(captured)
+    monkeypatch.setenv("TINA_AGENT_MODEL", "")
+    assert "approved Gemini chat model" in harness.preflight()
+    monkeypatch.delenv("GEMINI_API_KEY")
+    assert "Gemini API key is missing" in harness.preflight()
+
+
+def test_gemini_api_error_redacts_its_credential(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "gemini-own-key")
+    events = list(parse_stream_json([_event({"event": "result", "result": {
+        "status": "ERROR", "error": "HTTP 401: invalid gemini-own-key",
+    }})]))
+    assert not events[-1]["ok"]
+    assert "gemini-own-key" not in json.dumps(events)
+
+
 def test_parse_stream_json_normalizes_text_tools_and_session():
     events = list(parse_stream_json([
         _event({"event": "init", "conversation_id": "conv-1"}),

@@ -154,6 +154,104 @@ def test_openai_responses(api_key: str, model: str, *, base_url: str = "https://
     return _result(False, f"OpenAI endpoint answered HTTP {status}: {detail}", status=status)
 
 
+def test_groq(api_key: str, model: str = "", meeting_model: str = "", *,
+              post: HttpPost = _post) -> dict:
+    """Test the Responses chat harness and Chat Completions summary endpoint independently."""
+    if not api_key:
+        return _result(False, "Groq API key is missing. Add it in Settings → Models.")
+    target = model.strip() or "openai/gpt-oss-20b"
+    summary_model = meeting_model.strip() or target
+    headers = {"Authorization": f"Bearer {api_key}"}
+    requests = (
+        ("chat", "responses", {
+            "model": target,
+            "input": [{"role": "user", "content": "Reply with OK."}],
+            "max_output_tokens": 16,
+        }),
+        ("meeting summaries", "chat/completions", {
+            "model": summary_model,
+            "messages": [{"role": "user", "content": "Reply with OK."}],
+            "max_completion_tokens": 16,
+        }),
+    )
+    for capability, path, payload in requests:
+        try:
+            status, body = post(f"https://api.groq.com/openai/v1/{path}", payload, headers)
+        except Exception as exc:  # DNS, TLS, timeout; never echo credentials from transports
+            detail = str(exc).replace(api_key, "[redacted]")[:200]
+            return _result(False, f"Groq {capability} endpoint unreachable: {detail}")
+        if status in (401, 403):
+            return _result(False, f"Groq authentication or model access failed (HTTP {status}); "
+                                  "check the Groq API key and selected model.", status=status)
+        if not 200 <= status < 300:
+            detail = (body or "").replace(api_key, "[redacted]")[:200]
+            return _result(False, f"Groq {capability} endpoint answered HTTP {status}: {detail}",
+                           status=status)
+    return _result(True, f"Groq inference OK for chat ({target}) and meeting summaries "
+                         f"({summary_model}).", status=200)
+
+
+def test_deepseek(api_key: str, model: str = "", meeting_model: str = "", *,
+                  post: HttpPost = _post) -> dict:
+    """Exercise the native Anthropic chat dialect and the summary completion dialect."""
+    if not api_key:
+        return _result(False, "DeepSeek API key is missing. Add it in Settings → Models.")
+    target = model.strip() or "deepseek-flash"
+    summary_model = meeting_model.strip() or target
+    requests = (
+        ("chat", "https://api.deepseek.com/anthropic/v1/messages", {
+            "model": target, "max_tokens": 16,
+            "messages": [{"role": "user", "content": "Reply with OK."}],
+        }, {"Authorization": f"Bearer {api_key}", "anthropic-version": "2023-06-01"}),
+        ("meeting summaries", "https://api.deepseek.com/chat/completions", {
+            "model": summary_model, "max_tokens": 16,
+            "messages": [{"role": "user", "content": "Reply with OK."}],
+        }, {"Authorization": f"Bearer {api_key}"}),
+    )
+    for capability, url, payload, headers in requests:
+        try:
+            status, body = post(url, payload, headers)
+        except Exception as exc:
+            detail = str(exc).replace(api_key, "[redacted]")[:200]
+            return _result(False, f"DeepSeek {capability} endpoint unreachable: {detail}")
+        if status in (401, 403):
+            return _result(False, f"DeepSeek authentication or model access failed (HTTP {status}); "
+                                  "check the DeepSeek API key and selected model.", status=status)
+        if not 200 <= status < 300:
+            detail = (body or "").replace(api_key, "[redacted]")[:200]
+            return _result(False, f"DeepSeek {capability} endpoint answered HTTP {status}: {detail}",
+                           status=status)
+    return _result(True, f"DeepSeek inference OK for chat ({target}) and meeting summaries "
+                         f"({summary_model}).", status=200)
+
+
+def test_gemini(api_key: str, model: str = "", meeting_model: str = "", *,
+                post: HttpPost = _post) -> dict:
+    """Probe Gemini's summary API; the selected native CLI validates chat access on its first turn."""
+    if not api_key:
+        return _result(False, "Gemini API key is missing. Add a Gemini API key in Settings → Models.")
+    summary_model = meeting_model.strip() or model.strip() or "gemini-3.8-flash"
+    try:
+        status, body = post(
+            "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+            {"model": summary_model, "messages": [{"role": "user", "content": "Reply with OK."}],
+             "max_tokens": 16},
+            {"Authorization": f"Bearer {api_key}"},
+        )
+    except Exception as exc:
+        detail = str(exc).replace(api_key, "[redacted]")[:200]
+        return _result(False, f"Gemini completion endpoint unreachable: {detail}")
+    if status in (401, 403):
+        return _result(False, f"Gemini authentication or model access failed (HTTP {status}); "
+                              "check the Gemini API key and selected model.", status=status)
+    if not 200 <= status < 300:
+        detail = (body or "").replace(api_key, "[redacted]")[:200]
+        return _result(False, f"Gemini completion endpoint answered HTTP {status}: {detail}", status=status)
+    return _result(True, f"Gemini completion inference OK ({summary_model}). "
+                         "The Gemini CLI checks chat authentication and model access on the first agent turn.",
+                   status=200)
+
+
 def test_bedrock(api_key: str, model: str, region: str, *, post: HttpPost = _post) -> dict:
     """Probe Bedrock's Anthropic Messages endpoint with a Bedrock API key."""
     if not api_key:
@@ -192,7 +290,14 @@ def run_models_test(config: dict, env: Optional[dict] = None,
     base_url = (config.get("base_url") or "").strip() or env.get("ANTHROPIC_BASE_URL", "")
     api_key = (config.get("api_key") or "").strip() or env.get("ANTHROPIC_AUTH_TOKEN", "") \
         or env.get("ANTHROPIC_API_KEY", "")
-    if mode == "custom" or (not mode and base_url and api_key):
+    if mode in ("groq", "deepseek", "gemini"):
+        # Never use an Anthropic/OpenAI env credential as a Groq fallback.
+        probe = {"groq": test_groq, "deepseek": test_deepseek, "gemini": test_gemini}[mode]
+        out = probe((config.get("api_key") or "").strip(),
+                    (config.get("model") or "").strip(),
+                    (config.get("meeting_model") or "").strip(), post=post)
+        out["mode"] = mode
+    elif mode == "custom" or (not mode and base_url and api_key):
         out = test_custom_endpoint(base_url, api_key, (config.get("model") or "").strip(),
                                    post=post)
         out["mode"] = "custom"

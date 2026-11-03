@@ -12,6 +12,14 @@ content-free diagnostics through `/api/admin/asr-status`. It distinguishes missi
 unsupported backends, unconfigured endpoints and unreachable services; browser frame timings
 stay local to the current page.
 
+Settings → Models (`settings.tsx`) renders provider-specific model lists through
+`modelCatalog.ts` + `modelPicker.tsx`: the picker asks the provider for the credential's live
+model list (`/api/models/catalog`) and falls back to short built-in suggestions while that request
+is unavailable. **Custom model…** keeps newer or account-only IDs reachable, and **Intelligence**
+is its own selector for the per-turn reasoning budget. The credential test below the form is
+disabled while the form is dirty: it probes the SAVED config, so testing before Save would report
+the previous provider.
+
 One contributed module per surface. Each file `registerSurface`s its activity-bar item + view(s) (and
 optional `onSubmit`/commands); `index.tsx` is the barrel whose import triggers registration. The shell
 (`../workbench/`) renders whatever is registered — adding a surface is a new file + a barrel import,

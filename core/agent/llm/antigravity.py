@@ -32,6 +32,9 @@ _TOOL_NAMES = {
 
 def _short(value: object, limit: int = 160) -> str:
     text = value if isinstance(value, str) else json.dumps(value, default=str)
+    for key_name in ("GEMINI_API_KEY", "TINA_LLM_API_KEY"):
+        if secret := os.environ.get(key_name):
+            text = text.replace(secret, "[redacted]")
     return " ".join(text.split())[:limit]
 
 
@@ -104,6 +107,9 @@ def parse_stream_json(lines: Iterable[str]) -> Iterator[dict]:
             conversation_id = str(result.get("conversation_id") or conversation_id)
             response = result.get("response")
             response = response if isinstance(response, str) else ""
+            for key_name in ("GEMINI_API_KEY", "TINA_LLM_API_KEY"):
+                if secret := os.environ.get(key_name):
+                    response = response.replace(secret, "[redacted]")
             if response and not streamed_text:
                 yield {"type": "message-delta", "text": response}
             status = str(result.get("status") or "ERROR").upper()
@@ -377,14 +383,19 @@ class AntigravityHarness:
     def preflight(self) -> Optional[str]:
         if not shutil.which(self._executable):
             return "Antigravity runner is selected but the agy CLI is missing from the agent-worker image."
+        auth_mode = (os.environ.get("TINA_ANTIGRAVITY_AUTH_MODE") or "").strip()
+        if auth_mode == "gemini-api":
+            if not os.environ.get("GEMINI_API_KEY"):
+                return "Gemini API key is missing for this TINA user."
+            if ("TINA_AGENT_MODEL" in os.environ and not os.environ["TINA_AGENT_MODEL"].strip()
+                    and os.environ.get("TINA_LLM_BASE_URL") == "https://generativelanguage.googleapis.com/v1beta/openai"):
+                return "No approved Gemini chat model is selected. Choose an allowed model in Settings → Models."
+            return None
         if os.environ.get("TINA_ANTIGRAVITY_TERMS_ACKNOWLEDGED") != "true":
             return (
                 "Antigravity is disabled until its Terms warning is acknowledged in Settings → Models. "
                 "Google says third-party software access violates its Terms and could lead to account suspension."
             )
-        auth_mode = (os.environ.get("TINA_ANTIGRAVITY_AUTH_MODE") or "").strip()
-        if auth_mode == "gemini-api" and not os.environ.get("GEMINI_API_KEY"):
-            return "Gemini API key is missing for this TINA user."
         return None
 
     def run_turn(self, work: Path, prompt: str, *, allowed_tools: Iterable[str] = (),

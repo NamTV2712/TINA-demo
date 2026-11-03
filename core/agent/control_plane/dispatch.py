@@ -137,7 +137,7 @@ MODEL_AUTH_ENV_ALLOWLIST = (
     "TINA_LLM_BASE_URL",        # llm/ completion adapters' first-class endpoint (pairs with the key above)
     "OPENAI_API_KEY",           # Codex app-server / OpenAI Responses API (provider-specific)
     "ACCESS_TOKEN",             # short-lived Sign in with ChatGPT access token for Codex app-server
-    "TINA_CODEX_AUTH_MODE",     # API key or ChatGPT plan auth configuration for the Codex runner
+    "TINA_CODEX_AUTH_MODE",     # OpenAI, Groq API key or ChatGPT plan auth for the Codex runner
     "GEMINI_API_KEY",           # Antigravity CLI's official Gemini API-key auth mode
     "TINA_ANTIGRAVITY_AUTH_MODE",
     "TINA_ANTIGRAVITY_TERMS_ACKNOWLEDGED",
@@ -193,6 +193,47 @@ def overlay_model_config(env: dict[str, str], config: dict, *, allowlist: str = 
         env["GEMINI_API_KEY"] = ""
         env["TINA_ANTIGRAVITY_AUTH_MODE"] = ""
         env["TINA_ANTIGRAVITY_TERMS_ACKNOWLEDGED"] = ""
+    if mode in ("groq", "deepseek", "gemini"):
+        # Each API provider owns its endpoint/key/model defaults. Explicit empty values stop
+        # Runtime from restoring another provider's secrets or a deployment model.
+        key = (config.get("api_key") or "").strip()
+        default_model = {"groq": "openai/gpt-oss-20b", "deepseek": "deepseek-flash",
+                         "gemini": "gemini-3.8-flash"}[mode]
+        env["TINA_RUNNER"] = {"groq": "codex", "deepseek": "claude-code",
+                              "gemini": "antigravity"}[mode]
+        env["TINA_CODEX_AUTH_MODE"] = "groq" if mode == "groq" else ""
+        env["TINA_LLM_PROVIDER"] = "openai-compat"
+        env["TINA_LLM_BASE_URL"] = {
+            "groq": "https://api.groq.com/openai/v1", "deepseek": "https://api.deepseek.com",
+            "gemini": "https://generativelanguage.googleapis.com/v1beta/openai",
+        }[mode]
+        env["TINA_LLM_API_KEY"] = key
+        for other_key in (
+            "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL",
+            "CLAUDE_CODE_OAUTH_TOKEN", "OPENAI_API_KEY", "ACCESS_TOKEN",
+            "AWS_BEARER_TOKEN_BEDROCK", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
+            "AWS_SESSION_TOKEN", "AWS_PROFILE",
+        ):
+            env[other_key] = ""
+        target = model or default_model
+        target = target if _allowlisted(target, allowlist) else ""
+        env["TINA_AGENT_MODEL"] = target
+        env["TINA_LLM_MODEL"] = target
+        # Do not let an unrelated deployment's meeting model leak across the provider boundary.
+        env["TINA_MEETING_MODEL"] = (
+            meeting_model if meeting_model and _allowlisted(meeting_model, allowlist) else target
+        )
+        if mode == "deepseek":
+            env["ANTHROPIC_BASE_URL"] = "https://api.deepseek.com/anthropic"
+            env["ANTHROPIC_AUTH_TOKEN"] = key
+            # Claude's subagent/model aliases must stay on the selected DeepSeek model too.
+            for alias in ("ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL",
+                          "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL"):
+                env[alias] = target
+        elif mode == "gemini":
+            env["GEMINI_API_KEY"] = key
+            env["TINA_ANTIGRAVITY_AUTH_MODE"] = "gemini-api"
+        return
     if mode == "antigravity":
         env["TINA_RUNNER"] = "antigravity"
         env["TINA_ANTIGRAVITY_TERMS_ACKNOWLEDGED"] = (

@@ -25,6 +25,9 @@ from llm.ports import HarnessExec, harness_subprocess_env
 
 def _short(content: object, n: int = 80) -> str:
     s = content if isinstance(content, str) else json.dumps(content, default=str)
+    for key_name in ("ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "TINA_LLM_API_KEY"):
+        if secret := os.environ.get(key_name):
+            s = s.replace(secret, "[redacted]")
     s = " ".join(s.split())
     return s[:n]
 
@@ -83,6 +86,8 @@ def parse_stream_json(lines: Iterable[str]) -> Iterator[dict]:
                     }
         elif t == "result":
             reply = obj.get("result", "")
+            if obj.get("is_error") or obj.get("subtype") == "error":
+                reply = _short(reply, max(400, len(str(reply))))
             done = {
                 "type": "done",
                 "reply": reply,
@@ -100,6 +105,8 @@ def parse_stream_json(lines: Iterable[str]) -> Iterator[dict]:
                     "ANTHROPIC_AUTH_TOKEN, CLAUDE_CODE_OAUTH_TOKEN or TINA_LLM_API_KEY, "
                     "or configure a model under Settings → Models."
                 )
+                if os.environ.get("ANTHROPIC_BASE_URL", "").rstrip("/") == "https://api.deepseek.com/anthropic":
+                    done["reply"] = "DeepSeek could not authenticate. Check the DeepSeek API key in Settings → Models."
             yield done
 
 
@@ -250,4 +257,9 @@ class ClaudeCodeHarness:
         return total
 
     def preflight(self) -> Optional[str]:
+        if os.environ.get("ANTHROPIC_BASE_URL", "").rstrip("/") == "https://api.deepseek.com/anthropic":
+            if not os.environ.get("ANTHROPIC_AUTH_TOKEN"):
+                return "DeepSeek API key is missing. Add it in Settings → Models."
+            if "TINA_AGENT_MODEL" in os.environ and not os.environ["TINA_AGENT_MODEL"].strip():
+                return "No approved DeepSeek chat model is selected. Choose an allowed model in Settings → Models."
         return preflight_provider_guard()

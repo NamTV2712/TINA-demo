@@ -268,16 +268,20 @@ class CalendarPatch(BaseModel):
 # (mode "subscription" = the deployment's brokered credential — the mounted Claude Code
 # subscription or a deployment API key; mode "custom" = a user/operator-supplied
 # Anthropic-/OpenAI-compatible endpoint + key, "bedrock" = Bedrock Messages API + region/model,
-# and OpenAI modes use Codex app-server. Global transcription config stores deployment, Apple MLX,
+# and provider API modes use the selected agent adapter. Global transcription config stores deployment, Apple MLX,
 # NVIDIA CUDA, and FunASR endpoints; per-user transcription prefs store a backend choice or a custom URL.
 # Per-user copies live in users.data["model_prefs"] / ["transcription_prefs"]; the
 # platform defaults live in platform_settings rows "models" / "transcription". Effective config
 # resolves FIELD-BY-FIELD user > platform; the process env stays the bottom fallback downstream
 # (dispatch/bot_spawn only override what is set here).
 MODEL_MODES = ("subscription", "custom", "bedrock", "openai-api", "openai-subscription",
-               "antigravity")
+               "antigravity", "groq", "deepseek", "gemini")
 _MODELS_FIELDS = ("mode", "model", "meeting_model", "base_url", "api_key", "effort", "region",
                   "antigravity_terms_acknowledged")
+# Provider API presets use their own endpoint and credentials. A provider switch must not redirect
+# a retained credential or inherit another provider's model identifiers across these boundaries.
+_DIRECT_API_MODES = frozenset(("groq", "deepseek", "gemini"))
+_API_PROVIDER_FIELDS = ("model", "meeting_model", "base_url", "api_key", "effort", "region")
 _TRANSCRIPTION_FIELDS = (
     "default_backend", "url", "token", "funasr_url", "sherpa_url", "apple_url", "apple_token", "nvidia_url", "nvidia_token",
 )
@@ -393,6 +397,13 @@ def _validate_config_fields(update: dict, *, kind: str) -> dict:
 def _apply_config_update(stored: dict, cleaned: dict) -> dict:
     """Overlay a cleaned partial update onto a stored config: set non-empty, drop cleared."""
     out = dict(stored or {})
+    old_mode = out.get("mode")
+    new_mode = cleaned.get("mode")
+    if ("mode" in cleaned and new_mode != old_mode
+            and _DIRECT_API_MODES.intersection((old_mode, new_mode))):
+        for field in _API_PROVIDER_FIELDS:
+            if field not in cleaned:
+                out.pop(field, None)
     for field, value in cleaned.items():
         if value == "":
             out.pop(field, None)
@@ -408,10 +419,22 @@ def _apply_config_update(stored: dict, cleaned: dict) -> dict:
 
 
 def _resolve_effective(user_cfg: dict, platform_cfg: dict, fields: tuple) -> dict:
-    """FIELD-BY-FIELD user > platform. Only set fields appear — env fallback stays downstream."""
+    """User > platform, without cross-provider inheritance for provider API presets."""
     out: dict = {}
+    user_mode, platform_mode = user_cfg.get("mode"), platform_cfg.get("mode")
+    different_api_provider = bool(
+        user_mode and user_mode != platform_mode
+        and _DIRECT_API_MODES.intersection((user_mode, platform_mode))
+    )
+    follows_api_provider = not user_mode and platform_mode in _DIRECT_API_MODES
     for field in fields:
-        value = user_cfg.get(field) or platform_cfg.get(field)
+        # Legacy preferences can retain a key after their mode was cleared. Following a newly
+        # selected API provider must use its platform credential, never that unbound personal key.
+        # Model-only personal overrides remain available without declaring a different provider.
+        value = (None if follows_api_provider and field in ("api_key", "base_url", "region")
+                 else user_cfg.get(field))
+        if not value and not (different_api_provider and field in _API_PROVIDER_FIELDS):
+            value = platform_cfg.get(field)
         if value:
             out[field] = value
     return out
