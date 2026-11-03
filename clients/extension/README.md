@@ -4,7 +4,17 @@ The Chrome extension reads transcripts and can request a saved English translati
 
 ## Vietnamese to English
 
-The language dropdown under the selected Bot meeting defaults to **Song ngữ** and offers
+The compact **Review a meeting** disclosure is collapsed by default. Open it to select the
+transcript source, meeting or language, or refresh the meeting list. The selected meeting is shown
+in its collapsed summary, with a chevron indicating that the whole card opens the controls.
+The Transcript heading shows the effective display language, including the original-only
+Desktop archive view; translation progress and retry stay visible below it. Collapsing the controls
+does not stop transcript polling or translation. Expanded controls scroll within a bounded area
+so the transcript remains accessible on short panels. Original text and lightly tinted English
+blocks use separate visual levels in both light and dark themes. Empty meeting lists do not
+show a translation loading message. Connection/capture details remain in Settings.
+
+The language dropdown inside **Review a meeting** defaults to **Song ngữ** and offers
 **Tiếng Việt**, **English** and **Song ngữ**. The same owner-authorized
 agent cache serves Terminal and extension; provider credentials remain on the server and the
 saved Meeting model performs tool-less text translation. `meeting-translation.v2` groups

@@ -35,7 +35,10 @@ function renderTranslationControls(): void {
   const selector = $('transcriptLanguage') as HTMLSelectElement;
   selector.disabled = !supported;
   selector.value = language;
-  $('translationStatus').textContent = source === 'desktop' ? 'Dịch hiện hỗ trợ Meeting Bot.' : language === 'vi' ? ''
+  const displayLanguage = source === 'desktop' ? 'vi' : language;
+  $('displayLanguage').textContent = { vi: 'Tiếng Việt', en: 'English', bilingual: 'VI + EN' }[displayLanguage];
+  $('translationControls').dataset.state = translationError ? 'error' : translation?.status || 'pending';
+  $('translationStatus').textContent = !selected ? '' : source === 'desktop' ? 'Dịch hiện hỗ trợ Meeting Bot.' : language === 'vi' ? ''
     : translationError ? 'Dịch chưa khả dụng · transcript tiếng Việt vẫn hoạt động'
     : translation?.status === 'paused' ? 'Dịch tạm dừng · sẽ tự thử lại'
     : translation ? `VI → EN · ${translation.completed}/${translation.total} cụm${translation.groups.some(g => !g.ready) ? ' · Đang gom câu…' : ''}` : 'Đang tải bản dịch…';
@@ -119,6 +122,7 @@ function renderMeetings(): void {
     ? 'No Bot meetings yet. Send a meeting from TINA Terminal, then refresh.'
     : 'No saved Desktop transcripts were found.';
   updateDestinations();
+  renderTranslationControls();
 }
 
 function updateDestinations(): void {
