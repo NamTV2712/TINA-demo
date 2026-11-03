@@ -1,5 +1,18 @@
 # Third-party licenses — baked artifacts outside the dependency gate
 
+## Optional speech sidecar
+
+`deploy/tts` installs VieNeu 3.8.3 and sea-g2p (Apache-2.0) in a separate, optional image.
+Its operator-downloaded VieNeu-TTS-v3-Turbo and OpenMOSS MOSS-Audio-Tokenizer-Nano-ONNX
+assets declare Apache-2.0 in their upstream model cards. Exact revisions/checksums are in
+[`deploy/tts/model-assets.json`](deploy/tts/model-assets.json); cards travel with the private
+read-only model cache. No weights, reference voices or eSpeak data are baked into TINA images.
+The image retains the installed packages' upstream licence notices.
+Transitive Category B packages (certifi, orjson, Python-SoXR and SoundFile's shared libsndfile)
+remain unmodified separate packages/native libraries in this optional image; their scope and
+disposition are recorded in [`license-exceptions.json`](license-exceptions.json). This is not
+a claim that the complete SDK dependency tree is Apache-2.0.
+
 `gate:licenses` (ADR-0004, `scripts/gates.mjs`) scans the resolved **npm** dependency
 tree (`pnpm licenses list --json`) and the Python tree grows into `pip-licenses`. Neither
 sees **non-dependency artifacts baked into the images** — model weights pulled from a model

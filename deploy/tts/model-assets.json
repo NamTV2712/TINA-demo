@@ -1,0 +1,79 @@
+{
+  "model": "VieNeu-TTS-v3-Turbo ONNX fp32",
+  "runtime": "vieneu==3.8.3",
+  "license": "Apache-2.0 (upstream model cards)",
+  "repos": [
+    {
+      "repo": "pnnbao-ump/VieNeu-TTS-v3-Turbo",
+      "revision": "61b85e3d937fbbacb387714180e8182823512523",
+      "files": [
+        {
+          "path": "README.md",
+          "git_blob": "97c9821851a48a5a2b20625315bf9bcdfb7f1981"
+        },
+        {
+          "path": "onnx_update/config.json",
+          "git_blob": "9d6c81dbafafaf833371207f5efe35664cb917ba"
+        },
+        {
+          "path": "onnx_update/tokenizer.json",
+          "git_blob": "5c9785c19639481f69f407f8b96859f0ea0d65af"
+        },
+        {
+          "path": "onnx_update/vieneu_acoustic_cached.onnx",
+          "sha256": "f631e3387c788c3d8b9a5ac5df94952af5bc4c4d1049ff8a751e76a246fff2d4"
+        },
+        {
+          "path": "onnx_update/vieneu_backbone_shared.data",
+          "sha256": "c7c072193db33d0542457e2612c7272c44c4279d1cafaf0aa4c379964911db2f"
+        },
+        {
+          "path": "onnx_update/vieneu_decode_step.onnx",
+          "sha256": "bedc379cea61ea5d616312750d95ad3924e055856662d19187a889a5edc24ceb"
+        },
+        {
+          "path": "onnx_update/vieneu_prefill.onnx",
+          "sha256": "27f8b064f6b57b5448e95d095f1959588c005d614678045c2b97ecccf3b7a0f7"
+        },
+        {
+          "path": "onnx_update/vieneu_v3_heads.npz",
+          "sha256": "fb22484baa424bbb775133a6e5f0d00d6299b2b256fbe3312a864b85b9aed01e"
+        }
+      ]
+    },
+    {
+      "repo": "OpenMOSS-Team/MOSS-Audio-Tokenizer-Nano-ONNX",
+      "revision": "ceff0d0749bfb3fa2d61149794ec6feef0d1e1ae",
+      "files": [
+        {
+          "path": "README.md",
+          "git_blob": "46f3d445b16e8a283dd62fc9bdeec8aa35a59337"
+        },
+        {
+          "path": "codec_browser_onnx_meta.json",
+          "git_blob": "886953a56489516b847b7c1c953bde063eb78faa"
+        },
+        {
+          "path": "moss_audio_tokenizer_decode_full.onnx",
+          "sha256": "0fbbafe3fd4afa2a019af5c5ced204af6e2d1db044fa40f021525d2aee95b4ac"
+        },
+        {
+          "path": "moss_audio_tokenizer_decode_shared.data",
+          "sha256": "e69d52e0f4e84ca27850557ee54face46632d3a5a16c89bd246c7c408466dcad"
+        },
+        {
+          "path": "moss_audio_tokenizer_decode_step.onnx",
+          "sha256": "9527c86a29e1837edec1f74db57d5eeaadb3a715af3382703566460afed25855"
+        },
+        {
+          "path": "moss_audio_tokenizer_encode.data",
+          "sha256": "aa751265b2bab2887eac224484546b194875aa7494b607115439b3dc6b228a2c"
+        },
+        {
+          "path": "moss_audio_tokenizer_encode.onnx",
+          "sha256": "eadea4a645abdcf98714c7aead122ee2ce7da6e080f9f80b977cd1ca8e19473a"
+        }
+      ]
+    }
+  ]
+}
