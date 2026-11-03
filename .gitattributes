@@ -1,5 +1,7 @@
 # Shell entrypoints run inside Linux containers, including from Windows checkouts.
 *.sh text eol=lf
+# Contract seals hash exact schema bytes; keep Windows checkouts identical to CI.
+*.schema.json text eol=lf
 
 # .gitattributes — merge strategy per path.
 #
