@@ -121,6 +121,8 @@ system flows  # the reaction engine; owns the reaction row and its effect receip
 
 system foreground-application  # User-selected local application with the focused text field; receives only the transcript pasted after the explicit dictation hotkey is released.
 
+system speech-client  # Optional host-only clients/speech CLI: per-microphone Sherpa-ONNX English HEY TINA KWS on 16 kHz mono PCM, explicit device/Start/Stop, bounded callback queue and two-second in-memory pre-roll, cooldown and quiet re-arm. Downloads pinned model assets only on explicit setup; detection and WAV replay are offline. Emits content-free local diagnostics only; no STT, agent, Gateway or meeting requests. Question capture/VAD, coordinator enrollment and playback suppression are not implemented.
+
 edges:
   bot -write-> segments-stream
   bot -write-> tc-mutable

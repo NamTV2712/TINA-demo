@@ -1800,6 +1800,17 @@
      "type": "api"
     }
    ]
+  },
+  {
+   "unique-id": "speech-client",
+   "node-type": "system",
+   "name": "Local wake-word pilot",
+   "description": "Optional host-only clients/speech CLI: per-microphone Sherpa-ONNX English HEY TINA KWS on 16 kHz mono PCM, explicit device/Start/Stop, bounded callback queue and two-second in-memory pre-roll, cooldown and quiet re-arm. Downloads pinned model assets only on explicit setup; detection and WAV replay are offline. Emits content-free local diagnostics only; no STT, agent, Gateway or meeting requests. Question capture/VAD, coordinator enrollment and playback suppression are not implemented.",
+   "metadata": [
+    {
+     "path": "clients/speech"
+    }
+   ]
   }
  ],
  "relationships": [
