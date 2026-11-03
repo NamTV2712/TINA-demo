@@ -1,7 +1,7 @@
 # Wake-word + TTS implementation plan
 
-Status: phase 1 TTS sidecar implemented and locally deployed; remote meeting audibility remains
-unverified. Wake-word and the meeting coordinator are planned, not implemented.
+Status: phase 1 TTS sidecar and phase 2 local wake-word pilot implemented. Remote meeting
+audibility and human wake-word validation remain open. The meeting coordinator is not implemented.
 Branch: `feat/tina-speech`. Planning baseline: `6dfbbbf`; phase 1 started from `ab4a743`.
 
 ## Agreed outcome
@@ -43,7 +43,7 @@ to execute an action.
 
 | Capability | Existing implementation | Consequence |
 | --- | --- | --- |
-| Per-machine capture | `clients/desktop-native` is macOS-specific; no cross-platform wake-word client exists | Add a small separate local client; do not make the macOS application a Windows prerequisite |
+| Per-machine capture | `clients/desktop-native` is macOS-specific; `clients/speech` now provides an isolated Python host pilot | No macOS application prerequisite; real microphone validation remains on the participant's host |
 | Sherpa KWS | `core/meetings/services/native-asr/vendor/sherpa-onnx/src/kws.rs` exports `KeywordSpotter` | This is a library capability, not a configured detector; keep vendored code untouched |
 | STT | `deploy/transcription/docker-compose.cpu.yml`, existing OpenAI-compatible transcription API | Reuse Faster-Whisper; do not replace the meeting buffers or confirmation engine |
 | Gateway-only client | `clients/slim/tina_slim/client.py` and `sse.py` | Reuse these boundary conventions, not domain internals; its chat helper is not a complete voice-turn controller |
@@ -174,23 +174,47 @@ Ten regression tests pass. A new real synthesis produced 3.36 seconds of non-sil
 
 ### 2. Prove local wake detection without agent/network actions
 
-- [ ] Add the isolated `clients/speech/` package with one CLI entry point and an explicit microphone
+- [x] Add the isolated `clients/speech/` package with one CLI entry point and an explicit microphone
       device selector. Start with Python 3.11, Sherpa-ONNX Python bindings and a host audio adapter;
       pin the versions proven by the fixture run. Do not extend the native-ASR HTTP server for
       frame-by-frame detection or modify its vendored Rust bindings.
 - [ ] Select one English-capable KWS model and configure "HEY TINA" with that model's tokenizer.
       Test Vietnamese-accented speakers. A supported model language is not proof of this phrase's
       accuracy; "TINA oi" is not silently accepted as equivalent language support.
-- [ ] Normalize incoming audio once to the selected model format, typically 16 kHz mono PCM.
+- [x] Normalize incoming audio once to the selected model format, typically 16 kHz mono PCM.
       Use a dedicated capture/inference queue so native audio callbacks never block on HTTP.
-- [ ] Keep a short bounded ring buffer. Record the wake boundary so the immediate following question
+- [x] Keep a short bounded ring buffer. Record the wake boundary so the immediate following question
       is not clipped; only remove the wake prefix at that boundary, never arbitrary words in text.
-- [ ] Emit one local wake event per utterance; add cooldown/reset and isolate detector state per
-      microphone. VAD ends the question; it must not replace wake detection.
+- [x] Emit one local wake event per utterance; add cooldown/reset and isolate detector state per
+      microphone. Question-ending VAD remains phase 3; it must not replace wake detection.
 - [ ] Measure detection misses, false triggers, wake latency and CPU on held-out human audio.
       Do not count TTS-generated fixtures alone as human wake-word validation.
 
 Exit: repeatable local wake events without sending audio to STT/LLM or playing speech.
+
+Phase 2 evidence (2026-11-04):
+
+- [`clients/speech`](../clients/speech/README.md) has explicit setup/devices/listen/file commands,
+  pinned Sherpa-ONNX 2.0.1 CPU, sounddevice and SentencePiece dependencies, and a universal uv lock.
+  Model archive/file hashes are pinned; startup only validates local files. Model tokenizer gives
+  `▁HE Y ▁T IN A @HEY_TINA`. Core source/API/event contracts and the running stack are unchanged.
+- PortAudio is requested at 16 kHz mono float32. The callback enqueues <=20 ms frames into a
+  one-second bounded queue; inference is outside the callback. A two-second pre-roll retains the
+  detection boundary, not an exact word-end alignment. Overflow/disconnect stops/disarms capture;
+  Ctrl+C closes it. Question endpointing/VAD and upload belong to phase 3.
+- Nineteen deterministic tests cover gating, cooldown, isolated state, bounded memory, Stop,
+  device failure, WAV format, offline operation and corrupt assets. The real INT8 model detects
+  all three Microsoft Zira English synthetic calls and no near-match/ordinary-speech triggers.
+  A shared Trúc Ly response without the wake phrase also has zero triggers.
+- The synthetic **Trúc Ly Vietnamese-accented wake phrase is missed: 0/3**. This is retained as a
+  known failing acoustic fixture, not hidden by lowering the threshold. The English-model choice
+  remains provisional pending the user's real voice/accent pilot; do not enable meeting actions
+  or claim release accuracy from these synthetic results.
+- Artifacts and per-file timings/hashes live under ignored `output/speech-stage2/`.
+  `make-fixtures.ps1` reproducibly creates the English positive/negative fixtures on Windows.
+  The user requested synthetic validation first and will perform the microphone pilot later;
+  no real microphone recording was started in this phase. Trúc Ly / "ti na" remains the approved
+  default for shared TTS.
 
 ### 3. Connect one authorized participant end to end
 
