@@ -3,11 +3,19 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from pathlib import Path
 
 MODEL = "vieneu-v3-turbo"
 SAMPLE_RATE = 24000
 MAX_AUDIO_SECONDS = 120
+PRESET_VOICE = "Trúc Ly"
+
+
+def spoken_text(text: str) -> str:
+    # The Vietnamese normalizer spells uppercase TINA as an acronym. Only alter
+    # the spoken copy of this standalone name, not agent text or other acronyms.
+    return re.sub(r"\bTINA\b", "ti na", text, flags=re.IGNORECASE)
 
 
 def verify_assets(directory: Path) -> None:
@@ -63,5 +71,5 @@ class Engine:
 
     def synthesize(self, text: str) -> bytes:
         # Preset voice only: never accept an audio reference or user model path.
-        audio = self.tts.infer(text, apply_watermark=False)
+        audio = self.tts.infer(spoken_text(text), voice=PRESET_VOICE, apply_watermark=False)
         return pcm24(audio, self.tts.sample_rate)

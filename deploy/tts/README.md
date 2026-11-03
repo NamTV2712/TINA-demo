@@ -1,6 +1,7 @@
 # Optional Vietnamese TTS sidecar (speech phase 1)
 
-One preset voice from **VieNeu-TTS v3 Turbo**, using the ONNX CPU backend. This implements
+The female **Trúc Ly** preset (Northern Vietnamese, natural style) from **VieNeu-TTS v3 Turbo**,
+using the ONNX CPU backend. This implements
 the bot's existing speech HTTP interface. STT, agent dispatch, transcripts and bot playback
 are unchanged. It is an optional separate Compose project, not part of `make all`.
 
@@ -83,6 +84,8 @@ playback. Discord speaking remains unsupported.
 - Body: `{"model":"tts-1","input":"Xin chào","voice":"auto","response_format":"pcm"}`.
 - Output: **headerless little-endian PCM16, mono, 24,000 Hz**, resampled from the model's 48 kHz.
 - Only preset `auto` and PCM are supported; unsupported choices return 422.
+- `auto` selects Trúc Ly explicitly. Standalone `TINA`/`Tina`/`tina` is spoken as "ti na"
+  to prevent acronym spelling; agent/transcript text and other acronyms remain unchanged.
 - Limits: 4,000 input characters, 20,000 request bytes, 120 seconds synthesized audio.
 - GET `/health` and `/status` expose content-free readiness/format information.
 - One native synthesis at a time; a competing request gets 503, with no unbounded queue.

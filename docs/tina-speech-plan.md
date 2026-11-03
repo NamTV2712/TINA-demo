@@ -26,8 +26,9 @@ to execute an action.
 - Wake-word: `sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01`, INT8,
   with the English keyword `HEY TINA` tokenized using that model's BPE files. Run on each
   participant's CPU. Evaluate Vietnamese-accented pronunciation before accepting it.
-- TTS implemented: VieNeu-TTS v3 Turbo, ONNX CPU, SDK 3.8.3, stock default voice
-  (Hải Đăng). The optional service resamples 48 kHz output to the bot's 24 kHz PCM contract.
+- TTS implemented: VieNeu-TTS v3 Turbo, ONNX CPU, SDK 3.8.3, female Trúc Ly preset
+  (Northern Vietnamese, natural style). Standalone TINA is normalized to "ti na" only for
+  synthesis. The optional service resamples 48 kHz output to the bot's 24 kHz PCM contract.
   Piper was dropped because eSpeak introduces GPL, conflicting with ADR-0004. The selected
   SDK, phonemizer and model/codec cards declare Apache-2.0. Vietnamese/English listening
   quality is still an operator acceptance check, not a validated bilingual claim.
@@ -165,6 +166,11 @@ Phase 1 evidence (2026-11-04):
 
 Do not mark phase 1's meeting acceptance gate complete until a second participant hears the
 speech and verifies Stop in a room that admits the bot.
+
+Voice correction after the initial pilot: explicitly select the female Trúc Ly preset instead
+of the SDK's male default and normalize the standalone name TINA to "ti na" before inference.
+Ten regression tests pass. A new real synthesis produced 3.36 seconds of non-silent audio in
+2.056 seconds; the listening sample is ignored `output/tts-stage1/tina-female.wav`.
 
 ### 2. Prove local wake detection without agent/network actions
 

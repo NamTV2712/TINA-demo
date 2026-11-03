@@ -115,6 +115,23 @@ class ServerTests(unittest.TestCase):
 
 
 class AudioTests(unittest.TestCase):
+    def test_synthesis_uses_female_voice_and_spoken_name(self):
+        import numpy as np
+        from engine import Engine, spoken_text
+        from unittest.mock import Mock
+
+        engine = Engine.__new__(Engine)
+        engine.tts = SimpleNamespace(sample_rate=24000, infer=Mock(return_value=np.ones(240)))
+        original = "Xin chào, tôi là TINA. Tina giúp bạn dùng API."
+        self.assertTrue(engine.synthesize(original))
+        engine.tts.infer.assert_called_once_with(
+            "Xin chào, tôi là ti na. ti na giúp bạn dùng API.",
+            voice="Trúc Ly", apply_watermark=False)
+        self.assertIn("TINA", original)
+        unchanged = "retina Latina TINA_API Tina123 đTINA API"
+        self.assertEqual(spoken_text(unchanged), unchanged)
+        self.assertEqual(spoken_text("(TINA), tina!"), "(ti na), ti na!")
+
     def test_real_resampler_outputs_24k_little_endian_mono(self):
         import numpy as np
         from engine import pcm24
