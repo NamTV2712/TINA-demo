@@ -1,7 +1,7 @@
 """model_catalog.py — live provider model lists behind Settings → Models.
 
-The picker must show the models the caller's OWN credential can use, so the provider API answers the
-question instead of a curated list maintained here. The terminal keeps a small offline fallback for
+The picker asks the provider for models using the caller's OWN credential. Bedrock returns regional
+models/profiles; invocation permission is checked separately. The terminal keeps an offline fallback for
 the no-key / provider-unreachable case; this module is only the live answer.
 
 Endpoints are FIXED first-party URLs selected by mode. No caller-supplied base URL reaches this
@@ -15,19 +15,26 @@ import json
 import re
 import urllib.error
 import urllib.request
+from urllib.parse import quote
 from typing import Callable, Optional
+
+from llm.model_capabilities import groq_chat_model_error
 
 HttpGet = Callable[[str, dict[str, str]], tuple[int, str]]
 
 _TIMEOUT = 15.0
 _MAX_MODELS = 80
+# Cloudflare-fronted providers (Groq) answer the default `Python-urllib/x.y` User-Agent with
+# HTTP 403 "error code: 1010" even for a VALID key — the user then reads "bad key" while the same
+# key works from curl. Identify the product on every provider request.
+USER_AGENT = "TINA/0.12"
 
 # Chat models only: these families cannot run a conversation turn. A picker that lists them invites
 # a 400 at the first message, so they are filtered before the list leaves this module.
 _EXCLUDED_FRAGMENTS = (
     "embedding", "embed-", "whisper", "tts", "transcribe", "moderation", "dall-e", "gpt-image",
     "realtime", "audio", "sora", "computer-use", "search-preview", "search-api", "guard",
-    "rerank", "ocr",
+    "rerank", "ocr", "orpheus",
 )
 _LEGACY_PREFIXES = ("davinci", "babbage", "curie", "ada", "code-davinci", "code-cushman", "text-")
 _DATED_SNAPSHOT = re.compile(r"-\d{4}-\d{2}-\d{2}$")
@@ -41,7 +48,51 @@ _PROVIDERS: dict[str, tuple[str, str]] = {
 }
 
 # Modes whose credential arrives in the query/header of a fixed endpoint above.
-LIVE_MODES = frozenset(_PROVIDERS)
+LIVE_MODES = frozenset(_PROVIDERS) | {"bedrock"}
+
+
+def _bedrock_models(api_key: str, region: str, get: HttpGet) -> dict:
+    """Discover regional Claude models/profiles; listing does not grant invocation access."""
+    if not re.fullmatch(r"[a-z]{2}(?:-[a-z]+)+-\d", region):
+        raise CatalogError("Choose an AWS Region to load Bedrock models.", status=400)
+    key = api_key.strip()
+    if not key or len(key) > 32768:
+        raise CatalogError("Add a Bedrock API key to load regional models.", status=400)
+    headers = {"Authorization": f"Bearer {key}"}
+    base = f"https://bedrock.{region}.amazonaws.com"
+    entries: dict[str, dict] = {}
+    errors = []
+    for path, field in (("/inference-profiles?typeEquals=SYSTEM_DEFINED", "inferenceProfileSummaries"),
+                        ("/foundation-models?byProvider=Anthropic", "modelSummaries")):
+        try:
+            next_path = path
+            for _page in range(5):
+                status, raw = get(base + next_path, headers)
+                if status != 200:
+                    errors.append(f"HTTP {status}: {_provider_reason(raw.replace(key, '[redacted]'))}")
+                    break
+                payload = json.loads(raw)
+                for item in payload.get(field, []):
+                    model_id = item.get("inferenceProfileId") or item.get("modelId") or ""
+                    if "anthropic.claude" not in model_id or item.get("status", "ACTIVE") != "ACTIVE":
+                        continue
+                    if field == "modelSummaries" and "ON_DEMAND" not in item.get("inferenceTypesSupported", []):
+                        continue
+                    entries[model_id] = {"id": model_id, "name": item.get("inferenceProfileName") or item.get("modelName") or model_id}
+                token = payload.get("nextToken")
+                if not token or field != "inferenceProfileSummaries":
+                    break
+                next_path = path + "&nextToken=" + quote(str(token), safe="")
+        except Exception as exc:
+            errors.append(str(exc).replace(key, "[redacted]")[:160])
+    if not entries:
+        raise CatalogError("Could not list Bedrock models for this region. " + "; ".join(errors)[:400])
+    geography = "us" if region.startswith("us-") else "eu" if region.startswith("eu-") else "apac"
+    def rank(entry):
+        model = entry["id"]
+        preferred = model.startswith(geography + ".anthropic.claude-sonnet-4-6")
+        return (not preferred, model)
+    return {"mode": "bedrock", "models": sorted(entries.values(), key=rank)[:300]}
 
 
 class CatalogError(Exception):
@@ -59,12 +110,35 @@ class CatalogError(Exception):
 
 def _get(url: str, headers: dict[str, str]) -> tuple[int, str]:
     """One fixed-provider GET. HTTP errors are values (the route decides the user-facing status)."""
-    request = urllib.request.Request(url, headers=headers)
+    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, **headers})
     try:
         with urllib.request.urlopen(request, timeout=_TIMEOUT) as response:
             return response.status, response.read().decode("utf-8", "replace")
     except urllib.error.HTTPError as error:
         return error.code, error.read().decode("utf-8", "replace")
+
+
+def _provider_reason(raw: str) -> str:
+    """The provider's own one-line reason from an error body (never the credential).
+
+    A 403 is not always "bad key": Groq/Cloudflare says ``error code: 1010``, Google says
+    ``API key not valid``, OpenAI says ``model_not_found``. Repeating that line is the difference
+    between "the key works elsewhere" and knowing what actually failed."""
+    try:
+        payload = json.loads(raw)
+    except (ValueError, TypeError):
+        text = (raw or "").strip().splitlines()
+        return text[0][:160] if text else ""
+    if isinstance(payload, dict):
+        error = payload.get("error")
+        if isinstance(error, dict) and isinstance(error.get("message"), str):
+            return error["message"].strip()[:160]
+        if isinstance(error, str):
+            return error.strip()[:160]
+        detail = payload.get("detail")
+        if isinstance(detail, str):
+            return detail.strip()[:160]
+    return ""
 
 
 def _chat_model(model_id: str, *, drop_dated_snapshots: bool) -> bool:
@@ -128,7 +202,11 @@ def _gemini_entries(payload: dict) -> list[dict]:
             continue
         model_id = name.split("/", 1)[1] if name.startswith("models/") else name
         low = model_id.lower()
-        if model_id in seen or any(fragment in low for fragment in ("embedding", "aqa", "imagen", "veo")):
+        # generateContent also lists music, image, speech and specialist agents.
+        # Those are not the text/function-call contract used by TINA's CLI.
+        if (model_id in seen or not low.startswith(("gemini-", "gemma-"))
+                or not _chat_model(model_id, drop_dated_snapshots=False)
+                or any(fragment in low for fragment in ("-image", "nano-banana", "robotics", "-live"))):
             continue
         display = item.get("displayName")
         entries.append({
@@ -140,13 +218,16 @@ def _gemini_entries(payload: dict) -> list[dict]:
     return entries
 
 
-def list_models(mode: str, api_key: str, *, get: HttpGet = _get) -> dict:
-    """Return ``{"mode", "models": [{"id", "name"}]}`` for one provider.
+def list_models(mode: str, api_key: str, *, region: str = "", get: HttpGet = _get) -> dict:
+    """Return ``{"mode", "models": [{"id", "name", "supports_tools"?}]}`` for one provider.
 
     The list is the provider's own answer for THIS credential. A missing key is a 400 (the form has
     not been filled yet); a rejected key is a 401 (the remedy is a new key), never a silent empty
-    list that looks like \"this provider has no models\".
+    list that looks like \"this provider has no models\". An optional false ``supports_tools``
+    marks a known summary-only model; absence means Settings must verify its tool support.
     """
+    if mode == "bedrock":
+        return _bedrock_models(api_key, region, get)
     provider = _PROVIDERS.get(mode)
     if provider is None:
         raise CatalogError(f"Unknown model provider {mode!r}.", status=400)
@@ -163,12 +244,14 @@ def list_models(mode: str, api_key: str, *, get: HttpGet = _get) -> dict:
         detail = str(error).replace(key, "[redacted]")[:200]
         raise CatalogError(f"Could not reach {label}: {detail}") from error
     if status in (401, 403):
-        raise CatalogError(
-            f"{label} rejected the API key (HTTP {status}). Check the key and try again.",
-            auth=True, status=status,
-        )
+        reason = _provider_reason(raw)
+        message = f"{label} rejected the API key (HTTP {status})."
+        message += f" Provider says: {reason}" if reason else " Check the key and try again."
+        raise CatalogError(message, auth=True, status=status)
     if not 200 <= status < 300:
-        raise CatalogError(f"{label} model list answered HTTP {status}.")
+        reason = _provider_reason(raw)
+        detail = f" Provider says: {reason}" if reason else ""
+        raise CatalogError(f"{label} model list answered HTTP {status}.{detail}".strip())
     try:
         payload = json.loads(raw)
     except (ValueError, TypeError) as error:
@@ -180,10 +263,12 @@ def list_models(mode: str, api_key: str, *, get: HttpGet = _get) -> dict:
         if mode in ("gemini", "antigravity")
         else _openai_entries(payload, drop_dated_snapshots=mode == "openai-api")
     )
-    return {
-        "mode": mode,
-        "models": [{"id": entry["id"], "name": entry["name"]} for entry in entries[:_MAX_MODELS]],
-    }
+    models = [{"id": entry["id"], "name": entry["name"]} for entry in entries[:_MAX_MODELS]]
+    if mode == "groq":
+        for entry in models:
+            if groq_chat_model_error(entry["id"]):
+                entry["supports_tools"] = False
+    return {"mode": mode, "models": models}
 
 
 def masked_or_blank(value: Optional[str]) -> str:

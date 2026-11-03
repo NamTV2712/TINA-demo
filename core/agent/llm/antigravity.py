@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Callable, Iterable, Iterator, Optional
 
 from llm.errors import looks_like_auth_failure
+from llm.model_capabilities import agy_builtin_model, normalized_effort
 from llm.ports import HarnessExec, harness_env_overrides, harness_subprocess_env
 
 
@@ -240,9 +241,9 @@ def build_argv(
         argv.extend(["--conversation", session])
     if model:
         argv.extend(["--model", model])
-    effort_map = {"low": "low", "medium": "medium", "high": "high", "xhigh": "xhigh", "max": "max"}
-    if effort and effort in effort_map:
-        argv.extend(["--effort", effort_map[effort]])
+    selected_effort = normalized_effort("gemini", model or "", effort)
+    if selected_effort:
+        argv.extend(["--effort", selected_effort])
     return argv
 
 
@@ -304,7 +305,7 @@ class AntigravityHarness:
             return
 
     def _write_settings(self, mounts: list[dict], allowed_tools: set[str],
-                        mcp_rules: list[str]) -> Path:
+                        mcp_rules: list[str], *, model: Optional[str] = None) -> Path:
         if self._home is None:
             raise RuntimeError("Antigravity harness was not prepared")
         settings_dir = self._home / ".gemini" / "antigravity-cli"
@@ -313,6 +314,20 @@ class AntigravityHarness:
         auth_mode = (os.environ.get("TINA_ANTIGRAVITY_AUTH_MODE") or "").strip()
         if auth_mode == "gemini-api" or (not auth_mode and os.environ.get("GEMINI_API_KEY")):
             settings["modelProvider"] = "gemini"
+            model = (model or os.environ.get("TINA_AGENT_MODEL") or "").strip()
+            if model and not agy_builtin_model(model):
+                # Provider-listed API models need not exist in agy's bundled model registry.
+                # Register the exact selected ID without assigning unsupported CLI effort tiers.
+                if not re.fullmatch(r"[A-Za-z0-9._-]{1,200}", model):
+                    raise ValueError("Invalid Gemini model ID")
+                settings["customModelsConfig"] = {"customModels": {model: {
+                    # In pinned agy 1.4.11, Gemini-provider requests pass modelName to the
+                    # native SDK. A URI here becomes part of /models/... and returns 404.
+                    # The Gemini provider owns the base URL and API version, not this ID.
+                    "modelName": model,
+                    "label": model,
+                    "toolFormatterType": "TOOL_FORMATTER_TYPE_NONE",
+                }}}
         path = settings_dir / "settings.json"
         path.write_text(json.dumps(settings, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         try:
@@ -416,7 +431,7 @@ class AntigravityHarness:
             mcp_path, mcp_rules = self._write_mcp_config(
                 mcp_servers, allowed, gated, None, mcp_tools,
             )
-            settings_path = self._write_settings(mounts, allowed, mcp_rules)
+            settings_path = self._write_settings(mounts, allowed, mcp_rules, model=model)
             dirs = [item["path"] for item in mounts if Path(item["path"]) != work]
             writable = bool({"Write", "Edit"}.intersection(allowed)) and any(
                 item["write"] for item in mounts

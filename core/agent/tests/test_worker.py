@@ -769,6 +769,25 @@ def test_codex_turn_receives_server_owned_mcp_grants_and_scoped_identity_token(t
     assert captured["mcp_env"] == {"TINA_AGENT_IDENTITY_TOKEN": "scoped-unit-token"}
 
 
+def test_rotating_provider_threads_keep_the_display_history_index(tmp_path, monkeypatch):
+    from worker import worker
+    from worker import engine
+    ids = iter(['thread-old', 'thread-new'])
+    class Harness:
+        name = 'codex'
+        def prepare(self, *args, **kwargs): pass
+        def transcript_bytes(self, *args): return 100
+        def run_turn(self, *args, **kwargs):
+            yield {'type': 'done', 'ok': True, 'reply': 'ok', 'sessionId': next(ids)}
+    monkeypatch.setattr(worker, 'harness_factory', lambda: Harness())
+    monkeypatch.setenv('TINA_CHAT_RESUME_MAX_BYTES', '1')
+    monkeypatch.setenv('TINA_MOUNTS', json.dumps([{'path': str(tmp_path), 'role': 'private', 'primary': True, 'write': True}]))
+    for prompt in ['First', 'Second']:
+        list(engine.run_turn_over_workspace(tmp_path, prompt, commit=False, session='chat'))
+    assert json.loads((tmp_path / '.claude/sessions/chat.history.json').read_text()) == ['thread-old', 'thread-new']
+    assert (tmp_path / '.claude/sessions/chat.session').read_text() == 'thread-new'
+
+
 def test_read_only_turn_does_not_initialize_workspace_repo(tmp_path, monkeypatch):
     from worker import worker
 

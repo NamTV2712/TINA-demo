@@ -32,8 +32,14 @@ KEYCHAIN_REFRESH = ('security find-generic-password -s "Claude Code-credentials"
                     "> ~/.claude/.credentials.json")
 
 _TIMEOUT = 8.0
+_MODEL_PROBE_TIMEOUT = 20.0
 # The audio round-trip probe transcribes a real ~1s clip — give the model time to answer.
 _STT_PROBE_TIMEOUT = 20.0
+
+# Groq sits behind Cloudflare, which answers the default `Python-urllib/x.y` User-Agent with HTTP
+# 403 "error code: 1010" even for a valid key — the exact trap where the key works in curl but the
+# Settings test says it is rejected. Identify the product on every provider call.
+_USER_AGENT = "TINA/0.12"
 
 # (status, body_text) — injectable for tests; None body on network failure.
 HttpPost = Callable[[str, dict, dict], tuple[int, str]]
@@ -44,17 +50,24 @@ TranscribeProbe = Callable[[str, str], tuple[int, str]]
 
 def _post(url: str, payload: dict, headers: dict) -> tuple[int, str]:
     req = urllib.request.Request(url, data=json.dumps(payload).encode(),
-                                 headers={"Content-Type": "application/json", **headers},
+                                 headers={"Content-Type": "application/json",
+                                          "User-Agent": _USER_AGENT, **headers},
                                  method="POST")
     try:
-        with urllib.request.urlopen(req, timeout=_TIMEOUT) as r:
+        with urllib.request.urlopen(req, timeout=_MODEL_PROBE_TIMEOUT) as r:
+            if r.headers.get("Content-Type", "").split(";", 1)[0] == "application/vnd.amazon.eventstream":
+                from llm.bedrock_stream import decode_anthropic_stream
+                raw = r.read(2 * 1024 * 1024 + 1)
+                if len(raw) > 2 * 1024 * 1024:
+                    raise ValueError("Bedrock probe stream exceeds the size limit.")
+                return r.status, json.dumps(decode_anthropic_stream(raw))
             return r.status, r.read().decode("utf-8", "replace")
     except urllib.error.HTTPError as e:
         return e.code, e.read().decode("utf-8", "replace")
 
 
 def _get(url: str, headers: dict) -> tuple[int, str]:
-    req = urllib.request.Request(url, headers=headers, method="GET")
+    req = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT, **headers}, method="GET")
     try:
         with urllib.request.urlopen(req, timeout=_TIMEOUT) as r:
             return r.status, r.read().decode("utf-8", "replace")
@@ -64,6 +77,32 @@ def _get(url: str, headers: dict) -> tuple[int, str]:
 
 def _result(ok: bool, summary: str, **extra) -> dict:
     return {"ok": ok, "summary": summary, **extra}
+
+
+def _reason(body: str, secret: str = "") -> str:
+    """The provider's own one-line explanation (``error.message`` / ``detail`` / plain text).
+
+    A bare 403 hides the difference between "invalid key", "model access denied" and Cloudflare's
+    "error code: 1010"; repeating the provider's line is the only honest verdict. The credential is
+    stripped in case a provider echoes it."""
+    try:
+        payload = json.loads(body)
+    except (ValueError, TypeError):
+        text = (body or "").strip().splitlines()
+        reason = text[0][:160] if text else ""
+    else:
+        reason = ""
+        if isinstance(payload, dict):
+            error = payload.get("error")
+            if isinstance(error, dict) and isinstance(error.get("message"), str):
+                reason = error["message"].strip()[:160]
+            elif isinstance(error, str):
+                reason = error.strip()[:160]
+            elif isinstance(payload.get("detail"), str):
+                reason = payload["detail"].strip()[:160]
+            elif isinstance(payload.get("message") or payload.get("Message"), str):
+                reason = (payload.get("message") or payload.get("Message")).strip()
+    return (reason.replace(secret, "[redacted]") if secret else reason)[:400]
 
 
 # ── models ────────────────────────────────────────────────────────────────────────────────────
@@ -147,7 +186,9 @@ def test_openai_responses(api_key: str, model: str, *, base_url: str = "https://
     except Exception as exc:  # DNS, refused connection, TLS, timeout
         return _result(False, f"OpenAI endpoint unreachable: {exc}")
     if status in (401, 403):
-        return _result(False, f"OpenAI authentication failed (HTTP {status}); check the key or reconnect ChatGPT.", status=status)
+        reason = _reason(body, api_key)
+        detail = f" Provider says: {reason}" if reason else " Check the key or reconnect ChatGPT."
+        return _result(False, f"OpenAI authentication failed (HTTP {status}).{detail}", status=status)
     if 200 <= status < 300:
         return _result(True, f"Responses API inference OK (model {model.strip()}).", status=status)
     detail = body[:200] if body else ""
@@ -156,53 +197,113 @@ def test_openai_responses(api_key: str, model: str, *, base_url: str = "https://
 
 def test_groq(api_key: str, model: str = "", meeting_model: str = "", *,
               post: HttpPost = _post) -> dict:
-    """Test the Responses chat harness and Chat Completions summary endpoint independently."""
+    """Check the chat tool-call/result round trip, then the summary completion endpoint.
+
+    A text-only ping can pass for models that reject the agent's roles or tools.
+    Use the worker's request adapter and a harmless local no-op tool instead.
+    """
+    from llm.groq_responses import sanitize_responses_request
+    from llm.model_capabilities import groq_chat_model_error
+
     if not api_key:
         return _result(False, "Groq API key is missing. Add it in Settings → Models.")
     target = model.strip() or "openai/gpt-oss-20b"
     summary_model = meeting_model.strip() or target
+    if problem := groq_chat_model_error(target):
+        return _result(False, problem)
     headers = {"Authorization": f"Bearer {api_key}"}
-    requests = (
-        ("chat", "responses", {
-            "model": target,
-            "input": [{"role": "user", "content": "Reply with OK."}],
-            "max_output_tokens": 16,
-        }),
-        ("meeting summaries", "chat/completions", {
-            "model": summary_model,
-            "messages": [{"role": "user", "content": "Reply with OK."}],
-            "max_completion_tokens": 16,
-        }),
-    )
-    for capability, path, payload in requests:
+
+    def probe(capability: str, path: str, payload: dict) -> tuple[str, Optional[dict]]:
         try:
             status, body = post(f"https://api.groq.com/openai/v1/{path}", payload, headers)
         except Exception as exc:  # DNS, TLS, timeout; never echo credentials from transports
             detail = str(exc).replace(api_key, "[redacted]")[:200]
-            return _result(False, f"Groq {capability} endpoint unreachable: {detail}")
+            return "", _result(False, f"Groq {capability} endpoint unreachable: {detail}")
         if status in (401, 403):
-            return _result(False, f"Groq authentication or model access failed (HTTP {status}); "
-                                  "check the Groq API key and selected model.", status=status)
+            reason = _reason(body, api_key)
+            detail = f" Provider says: {reason}" if reason else " Check the Groq API key and selected model."
+            return "", _result(False, f"Groq authentication or model access failed (HTTP {status}).{detail}",
+                               status=status)
         if not 200 <= status < 300:
             detail = (body or "").replace(api_key, "[redacted]")[:200]
-            return _result(False, f"Groq {capability} endpoint answered HTTP {status}: {detail}",
-                           status=status)
-    return _result(True, f"Groq inference OK for chat ({target}) and meeting summaries "
-                         f"({summary_model}).", status=200)
+            return "", _result(False, f"Groq {capability} endpoint answered HTTP {status}: {detail}",
+                               status=status)
+        return body, None
+
+    tool_name = "tina_connection_check"
+    nonce = "tina_probe"
+    request = sanitize_responses_request({
+        "model": target,
+        "input": [
+            {"role": "developer", "content": [{"type": "input_text", "text":
+                "Call tina_connection_check with nonce tina_probe exactly once. "
+                "After it returns, reply only OK. This tool has no side effects."}]},
+            {"role": "user", "content": "Check the connection using the tool."},
+        ],
+        "tools": [{"type": "function", "name": tool_name, "description": "No-op connection check.",
+                   "parameters": {"type": "object", "properties": {"nonce": {"type": "string"}},
+                                  "required": ["nonce"], "additionalProperties": False}}],
+        "tool_choice": "required", "max_output_tokens": 1024,
+    })
+    raw, error = probe("chat tool calling", "responses", request)
+    if error:
+        return error
+    try:
+        output = json.loads(raw)["output"]
+        calls = [item for item in output if item.get("type") == "function_call"]
+        call, = calls
+        valid = (call.get("name") == tool_name and isinstance(call.get("call_id"), str)
+                 and bool(call["call_id"]) and json.loads(call["arguments"]) == {"nonce": nonce})
+    except (ValueError, KeyError, TypeError, AttributeError):
+        valid = False
+    if not valid:
+        return _result(False, f"Groq chat model {target} did not return a valid tool call. "
+                       "TINA chat requires function tools; choose a tool-capable model. "
+                       "A successful text completion alone does not verify agent chat.")
+    followup = {**request, "tool_choice": "auto", "input": request["input"] + output + [
+        {"type": "function_call_output", "call_id": call["call_id"], "output": "OK"},
+    ]}
+    raw, error = probe("chat tool results", "responses", sanitize_responses_request(followup))
+    if error:
+        return error
+    try:
+        response = json.loads(raw)
+        text = "".join(part.get("text", "") for item in response.get("output", [])
+                       if item.get("type") == "message" for part in item.get("content", [])
+                       if part.get("type") == "output_text")
+        completed = response.get("status") == "completed" and bool(text.strip())
+    except (ValueError, TypeError, AttributeError):
+        completed = False
+    if not completed:
+        return _result(False, f"Groq chat model {target} did not finish the reply after receiving "
+                       "a tool result. The agent tool round trip was not verified.")
+    _, error = probe("meeting summaries", "chat/completions", {
+        "model": summary_model,
+        "messages": [{"role": "system", "content": "Answer briefly."},
+                     {"role": "user", "content": "Reply with OK."}],
+        "max_completion_tokens": 16,
+    })
+    if error:
+        return error
+    return _result(True, f"Groq chat tool round trip OK ({target}); meeting summaries "
+                         f"inference OK ({summary_model}).", status=200)
 
 
 def test_deepseek(api_key: str, model: str = "", meeting_model: str = "", *,
                   post: HttpPost = _post) -> dict:
-    """Exercise the native Anthropic chat dialect and the summary completion dialect."""
+    """Exercise a native Anthropic tool round trip and the summary completion dialect."""
     if not api_key:
         return _result(False, "DeepSeek API key is missing. Add it in Settings → Models.")
     target = model.strip() or "deepseek-flash"
     summary_model = meeting_model.strip() or target
+    from control_plane.model_probe import anthropic_tools
+    chat = anthropic_tools("DeepSeek", target, api_key, post, lambda payload: (
+        "https://api.deepseek.com/anthropic/v1/messages", payload,
+        {"Authorization": f"Bearer {api_key}", "anthropic-version": "2023-06-01"},
+    ))
+    if not chat["ok"]:
+        return chat
     requests = (
-        ("chat", "https://api.deepseek.com/anthropic/v1/messages", {
-            "model": target, "max_tokens": 16,
-            "messages": [{"role": "user", "content": "Reply with OK."}],
-        }, {"Authorization": f"Bearer {api_key}", "anthropic-version": "2023-06-01"}),
         ("meeting summaries", "https://api.deepseek.com/chat/completions", {
             "model": summary_model, "max_tokens": 16,
             "messages": [{"role": "user", "content": "Reply with OK."}],
@@ -215,22 +316,29 @@ def test_deepseek(api_key: str, model: str = "", meeting_model: str = "", *,
             detail = str(exc).replace(api_key, "[redacted]")[:200]
             return _result(False, f"DeepSeek {capability} endpoint unreachable: {detail}")
         if status in (401, 403):
-            return _result(False, f"DeepSeek authentication or model access failed (HTTP {status}); "
-                                  "check the DeepSeek API key and selected model.", status=status)
+            reason = _reason(body, api_key)
+            detail = f" Provider says: {reason}" if reason else " Check the DeepSeek API key and selected model."
+            return _result(False, f"DeepSeek authentication or model access failed (HTTP {status}).{detail}",
+                           status=status)
         if not 200 <= status < 300:
             detail = (body or "").replace(api_key, "[redacted]")[:200]
             return _result(False, f"DeepSeek {capability} endpoint answered HTTP {status}: {detail}",
                            status=status)
-    return _result(True, f"DeepSeek inference OK for chat ({target}) and meeting summaries "
+    return _result(True, f"DeepSeek native chat tool round trip OK ({target}); meeting summaries inference OK "
                          f"({summary_model}).", status=200)
 
 
 def test_gemini(api_key: str, model: str = "", meeting_model: str = "", *,
                 post: HttpPost = _post) -> dict:
-    """Probe Gemini's summary API; the selected native CLI validates chat access on its first turn."""
+    """Probe the native tool round trip and summary API; do not claim CLI execution."""
     if not api_key:
         return _result(False, "Gemini API key is missing. Add a Gemini API key in Settings → Models.")
-    summary_model = meeting_model.strip() or model.strip() or "gemini-3.8-flash"
+    from control_plane.model_probe import gemini_tools
+    chat_model = model.strip() or "gemini-3.5-flash"
+    summary_model = meeting_model.strip() or chat_model
+    chat = gemini_tools(chat_model, api_key, post)
+    if not chat["ok"]:
+        return chat
     try:
         status, body = post(
             "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
@@ -242,18 +350,21 @@ def test_gemini(api_key: str, model: str = "", meeting_model: str = "", *,
         detail = str(exc).replace(api_key, "[redacted]")[:200]
         return _result(False, f"Gemini completion endpoint unreachable: {detail}")
     if status in (401, 403):
-        return _result(False, f"Gemini authentication or model access failed (HTTP {status}); "
-                              "check the Gemini API key and selected model.", status=status)
+        reason = _reason(body, api_key)
+        detail = f" Provider says: {reason}" if reason else " Check the Gemini API key and selected model."
+        return _result(False, f"Gemini authentication or model access failed (HTTP {status}).{detail}",
+                       status=status)
     if not 200 <= status < 300:
         detail = (body or "").replace(api_key, "[redacted]")[:200]
         return _result(False, f"Gemini completion endpoint answered HTTP {status}: {detail}", status=status)
-    return _result(True, f"Gemini completion inference OK ({summary_model}). "
-                         "The Gemini CLI checks chat authentication and model access on the first agent turn.",
+    return _result(True, f"Gemini native chat tool round trip OK ({chat_model}); meeting API OK ({summary_model}). "
+                         "The full CLI workflow is exercised by sending a chat message.",
                    status=200)
 
 
-def test_bedrock(api_key: str, model: str, region: str, *, post: HttpPost = _post) -> dict:
-    """Probe Bedrock's Anthropic Messages endpoint with a Bedrock API key."""
+def test_bedrock(api_key: str, model: str, region: str, *, post: HttpPost = _post,
+                 require_tools: bool = True) -> dict:
+    """Probe the same native Bedrock InvokeModel route used by Claude Code and summaries."""
     if not api_key:
         return _result(False, "AWS Bedrock API key is missing.")
     if not model.strip():
@@ -263,20 +374,31 @@ def test_bedrock(api_key: str, model: str, region: str, *, post: HttpPost = _pos
             or not region.replace("-", "").isalnum()):
         return _result(False, "Enter a valid AWS region such as us-east-1.")
     base = f"https://bedrock-runtime.{region}.amazonaws.com/anthropic"
+    from llm.anthropic_api import bedrock_request
+    if require_tools:
+        from control_plane.model_probe import anthropic_tools
+        def streaming_request(payload):
+            url, body, headers = bedrock_request(base, api_key, model.strip(), payload)
+            return url.removesuffix("/invoke") + "/invoke-with-response-stream", body, headers
+        result = anthropic_tools("Bedrock", model.strip(), api_key, post,
+                                 streaming_request)
+        if result["ok"]:
+            result["summary"] += f" Streaming API; region: {region}."
+        return result
+    url, payload, headers = bedrock_request(base, api_key, model.strip(), {
+        "max_tokens": 16, "messages": [{"role": "user", "content": "Reply with OK."}],
+    })
     try:
-        status, body = post(
-            f"{base}/v1/messages",
-            {"model": model.strip(), "max_tokens": 4,
-             "messages": [{"role": "user", "content": "Reply with OK."}]},
-            {"x-api-key": api_key, "anthropic-version": "2023-06-01"},
-        )
+        status, body = post(url, payload, headers)
     except Exception as exc:  # DNS, refused connection, TLS, timeout
-        return _result(False, f"Bedrock endpoint unreachable: {exc}")
+        return _result(False, f"Bedrock endpoint unreachable: {str(exc).replace(api_key, '[redacted]')}")
+    reason = _reason(body, api_key)
     if status in (401, 403):
-        return _result(False, f"Bedrock authentication or model access failed (HTTP {status}).", status=status)
+        return _result(False, f"Bedrock denied model {model.strip()} in {region} (HTTP {status}). "
+                       + (reason or "Check the key's region, expiry and this model's access permissions."), status=status)
     if 200 <= status < 300:
         return _result(True, f"Bedrock inference OK (model {model.strip()}, region {region}).", status=status)
-    detail = body[:200] if body else ""
+    detail = reason
     return _result(False, f"Bedrock answered HTTP {status}: {detail}", status=status)
 
 
@@ -302,9 +424,16 @@ def run_models_test(config: dict, env: Optional[dict] = None,
                                    post=post)
         out["mode"] = "custom"
     elif mode == "bedrock":
-        out = test_bedrock(api_key or env.get("AWS_BEARER_TOKEN_BEDROCK", ""),
+        bedrock_key = (config.get("api_key") or "").strip() or env.get("AWS_BEARER_TOKEN_BEDROCK", "")
+        out = test_bedrock(bedrock_key,
                            (config.get("model") or "").strip(),
                            (config.get("region") or env.get("AWS_REGION") or "").strip(), post=post)
+        meeting_model = (config.get("meeting_model") or "").strip()
+        if out["ok"] and meeting_model and meeting_model != (config.get("model") or "").strip():
+            out = test_bedrock(bedrock_key, meeting_model,
+                               (config.get("region") or env.get("AWS_REGION") or "").strip(), post=post,
+                               require_tools=False)
+            out["summary"] = "Meeting model: " + out["summary"]
         out["mode"] = "bedrock"
     elif mode == "openai-api":
         out = test_openai_responses(api_key, (config.get("model") or "").strip(), post=post)
@@ -345,7 +474,7 @@ def _transcribe_probe(endpoint: str, token: str, model: str = "whisper-1") -> tu
     from control_plane.config_preflight import audio_probe_body
 
     content_type, body = audio_probe_body(model)
-    headers = {"Content-Type": content_type}
+    headers = {"Content-Type": content_type, "User-Agent": _USER_AGENT}
     if token:
         headers["Authorization"] = f"Bearer {token}"
     req = urllib.request.Request(

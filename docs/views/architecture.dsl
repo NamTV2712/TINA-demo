@@ -213,9 +213,9 @@ edges:
   meeting-api -read-> canonical-notes-results  # Canonical source snapshot -> isolated tool-less CompletionPort -> meeting-row source/lease CAS -> approved derived view.
   meeting-api -write-> canonical-notes-approved  # Canonical source snapshot -> isolated tool-less CompletionPort -> meeting-row source/lease CAS -> approved derived view.
   agent-api -read-> canonical-notes-approved  # Canonical source snapshot -> isolated tool-less CompletionPort -> meeting-row source/lease CAS -> approved derived view.
-  agent-api -req-> meeting-api  # Owner-scoped GET meeting and canonical transcript for bounded evidence-backed Q&A; no transcript writes.
+  agent-api -req-> meeting-api  # Owner-scoped GET meeting and canonical transcript for bounded evidence-backed Q&A across an anchor meeting and up to four explicitly selected meetings; each source is reauthorized, and there are no transcript writes.
   agent-api -write-> meeting-knowledge-pages  # Persist private answer/source snapshots and explicitly reviewed create-only Wiki pages; no overwrites.
-  terminal -read-> meeting-knowledge-pages  # Through existing authenticated Gateway workspace proxy: related docs, bounded answers, source quotes/audio and freshness warnings.
+  terminal -read-> meeting-knowledge-pages  # Through existing authenticated Gateway workspace proxy: related docs, bounded multi-meeting answers, source-meeting quotes/audio, freshness warnings and revision-guarded fact reviews.
   agent-api -write-> workspace-human-documents  # Authenticated explicit Markdown edit and optional selected-path local commit; owner and content preconditions are enforced in the control plane.
   bot, agent-worker deployed-in runtime
   gateway, meeting-api, agent-api, admin-api, runtime, redis, postgres, object-store, transcription deployed-in deploy

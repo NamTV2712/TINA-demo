@@ -141,10 +141,9 @@ def test_build_argv_core_flags_and_session_model():
     assert "--effort" not in argv
 
 
-def test_build_argv_effort_pin():
+def test_build_argv_ignores_legacy_effort_pin():
     argv = build_argv("hi", effort="medium")
-    assert "--effort" in argv and "medium" in argv
-    assert argv[argv.index("--effort") + 1] == "medium"
+    assert "--effort" not in argv
 
 # ── the untrusted-subprocess env scrub (data-plane tenancy) ──────────────────
 # The model-driven harness CLI exposes a Bash tool. It must NOT inherit the worker's REDIS_URL (which

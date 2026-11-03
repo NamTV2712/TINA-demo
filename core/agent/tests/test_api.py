@@ -326,7 +326,7 @@ def test_chat_preflight_routes_api_provider_without_deployment_credentials(monke
     assert "own-test-key" not in response.text
 
 
-@pytest.mark.parametrize("mode,default", [("groq", "openai/gpt-oss-20b"), ("deepseek", "deepseek-flash"), ("gemini", "gemini-3.8-flash")])
+@pytest.mark.parametrize("mode,default", [("groq", "openai/gpt-oss-20b"), ("deepseek", "deepseek-flash"), ("gemini", "gemini-3.5-flash")])
 def test_models_reports_api_provider_defaults_instead_of_another_deployment_provider(mode, default):
     client, _runtime = _preflight_client(_FakeModelConfig({"mode": mode}))
     result = client.get("/api/models").json()
@@ -1024,6 +1024,66 @@ def test_codex_session_history_does_not_sweep_another_subject(tmp_path):
     }])
 
     assert WorkspaceReader(str(tmp_path)).history("u_attacker", "main") == []
+
+
+def test_codex_history_omits_runtime_context_and_preserves_assistant_paragraphs(tmp_path):
+    from control_plane.workspace_reader import WorkspaceReader
+    system = tmp_path / '.system/u_jane'
+    pointer = system / '.claude/sessions/main.session'
+    pointer.parent.mkdir(parents=True)
+    pointer.write_text('thread-context')
+    _write_codex_rollout(system, 'thread-context', [
+        {'type': 'response_item', 'payload': {'type': 'message', 'role': 'user', 'content': [{'type': 'input_text', 'text': '<environment_context><cwd>/workspaces/u_jane</cwd></environment_context>'}]}},
+        {'type': 'response_item', 'payload': {'type': 'message', 'role': 'user', 'content': [{'type': 'input_text', 'text': 'Create my brief'}]}},
+        {'type': 'event_msg', 'payload': {'type': 'user_message', 'message': 'Create my brief'}},
+        {'type': 'response_item', 'payload': {'type': 'message', 'role': 'assistant', 'content': [{'type': 'output_text', 'text': 'I will read the workspace.'}]}},
+        {'type': 'response_item', 'payload': {'type': 'function_call', 'name': 'exec_command', 'call_id': 'a', 'arguments': '{"cmd":"ls"}'}},
+        {'type': 'response_item', 'payload': {'type': 'message', 'role': 'assistant', 'content': [{'type': 'output_text', 'text': 'Your brief is ready.'}]}},
+    ])
+    turns = WorkspaceReader(str(tmp_path)).history('u_jane', 'main')
+    assert [t['text'] for t in turns] == ['Create my brief', 'I will read the workspace.\n\nYour brief is ready.']
+    assert turns[1]['ops'][0]['tool'] == 'Bash'
+
+
+def test_history_survives_provider_thread_rotation_and_respects_reset(tmp_path):
+    from control_plane.workspace_reader import WorkspaceReader
+    system = tmp_path / '.system/u_jane'
+    pointer = system / '.claude/sessions/main.session'
+    pointer.parent.mkdir(parents=True)
+    pointer.write_text('new-thread')
+    pointer.with_suffix('.history.json').write_text(json.dumps(['old-thread', 'new-thread']))
+    for sid, text in [('old-thread', 'Earlier question'), ('new-thread', 'Later question')]:
+        _write_codex_rollout(system, sid, [{'type': 'response_item', 'payload': {'type': 'message', 'role': 'user', 'content': [{'type': 'input_text', 'text': text}]}}])
+    reader = WorkspaceReader(str(tmp_path))
+    assert [t['text'] for t in reader.history('u_jane', 'main')] == ['Earlier question', 'Later question']
+    assert reader.drop_session('u_jane', 'main')
+    assert not pointer.with_suffix('.history.json').exists()
+    assert reader.history('u_jane', 'main', provider_sessions=['old-thread', 'new-thread']) == []
+
+
+def test_history_recovers_only_threads_from_this_subject_session_incarnation(tmp_path):
+    import fakeredis
+    from control_plane.api import _Sessions
+    from control_plane.workspace_reader import WorkspaceReader
+    from shared import units
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    sessions = _Sessions(redis)
+    sessions.upsert('u_jane', 'main')
+    redis.hset('agent:session:u_jane:main', 'created', '2')
+    system = tmp_path / '.system/u_jane'
+    pointer = system / '.claude/sessions/main.session'
+    pointer.parent.mkdir(parents=True)
+    pointer.write_text('latest')
+    for sid in ['deleted', 'earlier', 'latest', 'other-session']:
+        _write_codex_rollout(system, sid, [{'type': 'response_item', 'payload': {'type': 'message', 'role': 'user', 'content': [{'type': 'input_text', 'text': sid}]}}])
+    topic = units.output_topic(units.chat_unit_id('u_jane', 'main'))
+    for stamp, sid in [('1000-0', 'deleted'), ('2001-0', 'earlier'), ('2002-0', 'latest')]:
+        redis.xadd(topic, {'event': json.dumps({'type': 'done', 'sessionId': sid})}, id=stamp)
+    redis.xadd(units.output_topic(units.chat_unit_id('u_jane', 'other')), {'event': json.dumps({'type': 'done', 'sessionId': 'other-session'})})
+    client = TestClient(create_app(Dispatcher(load_settings(), _FakeRuntime(), _FakeIdentity()), sessions=sessions, reader=WorkspaceReader(str(tmp_path))))
+    response = client.get('/api/sessions/main/history', headers={'X-User-Id': 'u_jane'})
+    assert [turn['text'] for turn in response.json()['turns']] == ['earlier', 'latest']
+    assert client.get('/api/sessions/main/history', headers={'X-User-Id': 'u_other'}).json()['turns'] == []
 
 
 def test_session_history_parses_turns(tmp_path):

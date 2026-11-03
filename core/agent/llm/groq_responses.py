@@ -1,7 +1,7 @@
 """Worker-local compatibility boundary between Codex and Groq's Responses API.
 
-Codex owns the agent loop, workspace sandbox and tool approvals. This proxy only
-removes request features Groq does not implement; it never adds a tool or forwards
+Codex owns the agent loop, workspace sandbox and tool approvals. This proxy adapts
+instruction roles and removes unsupported request features; it never adds a tool or forwards
 to a caller-selected endpoint. The listener exists only for a harness turn.
 """
 from __future__ import annotations
@@ -40,11 +40,20 @@ def sanitize_responses_request(payload: dict) -> dict:
         cleaned["tools"] = [dict(tool) for tool in tools
                             if isinstance(tool, dict) and tool.get("type") == "function"] \
             if isinstance(tools, list) else []
-    if "reasoning" in cleaned:
-        reasoning = cleaned.pop("reasoning")
-        effort = reasoning.get("effort") if isinstance(reasoning, dict) else None
-        if effort in ("low", "medium", "high"):
-            cleaned["reasoning"] = {"effort": effort}
+    # Codex uses developer messages for workspace/sandbox instructions. Groq's
+    # non-GPT-OSS chat templates (including Qwen) accept system, not developer.
+    # Preserve their position, content and tool history; never turn them into user text.
+    if not str(cleaned.get("model", "")).startswith("openai/gpt-oss-"):
+        items = cleaned.get("input")
+        if isinstance(items, list):
+            cleaned["input"] = [
+                {**item, "role": "system"}
+                if isinstance(item, dict) and item.get("role") == "developer" else item
+                for item in items
+            ]
+    # Auto applies even when Codex supplies its own default effort. Groq owns the default,
+    # and non-reasoning models must never inherit a GPT-OSS-specific reasoning parameter.
+    cleaned.pop("reasoning", None)
     # Groq's default GPT-OSS models support function calls but not parallel
     # calls. Serial execution also works for models that support both shapes.
     cleaned["parallel_tool_calls"] = False

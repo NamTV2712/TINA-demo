@@ -14,10 +14,10 @@ import { startStreamingDictation, type StreamingDictation } from "../ui-kit/micD
 import { sessionTitle, type SessionSummary } from "./sessions";
 import { listSessions } from "./sessionsApi";
 import { streamChatTurn, type ChatPhase } from "./chatStream";
-import { buildChatContext, focusTarget, readIncludeSchedule, scheduleEligible, writeIncludeSchedule, type FocusPayload, type MeetingFocus } from "./chatContext";
+import { buildChatContext, focusTarget, readIncludeSchedule, scheduleEligible, writeIncludeSchedule, type FocusPayload } from "./chatContext";
 import { useLiveMeetings } from "./liveMeetings";
 import { meetingPhase, type MeetingMock, type MeetingPhase } from "./meetingModel";
-import { ASK_CHAT_EVENT, ONBOARDING_KICKOFF_MARK, ONBOARDING_SEED_EVENT, ONBOARDING_GREETING, ONBOARDING_GROUNDING, ONBOARDING_REPLY_SEP } from "../canvas/actions";
+import { ASK_CHAT_EVENT, ONBOARDING_KICKOFF_MARK, ONBOARDING_SEED_EVENT, ONBOARDING_GREETING, ONBOARDING_GROUNDING, ONBOARDING_REPLY_SEP, type AskChatDetail } from "../canvas/actions";
 
 /** classify a tool name into one of the op icons so the operation line reads at a glance */
 function toolOp(tool: string): Op {
@@ -36,7 +36,7 @@ function toolOp(tool: string): Op {
 /** the backend history turn shape (GET /api/sessions/:session/history) */
 type HistoryTurn =
   | { role: "user"; text: string }
-  | { role: "agent"; text: string; ops?: { label: string }[]; commit?: string };
+  | { role: "agent"; text: string; ops?: { label: string; tool?: string }[]; commit?: string };
 
 type AgentTurn = Extract<Turn, { role: "agent" }>;
 type ChatSessionState = {
@@ -96,7 +96,8 @@ function patchAgentTurn(key: string, agentId: string, fn: (turn: AgentTurn) => A
 
 /** map a backend op label (read/search/edit/git/web/tool) to a frontend Op (icon from opIcon) */
 const OP_VERB: Record<string, string> = { read: "Reading", search: "Searching", edit: "Writing", git: "Committing", web: "Browsing", tool: "Working" };
-function historyOp(op: { label: string }): Op {
+export function historyOp(op: { label: string; tool?: string }): Op {
+  if (op.tool) return toolOp(op.tool);
   return { icon: opIcon[op.label] ?? opIcon.tool, label: OP_VERB[op.label] ?? op.label, status: "done" };
 }
 
@@ -735,6 +736,7 @@ export function Chat({ params = {}, variant = "rail" }: ChatProps) {
     (async () => {
       try {
         const r = await fetch(`/api/sessions/${encodeURIComponent(session)}/history`);
+        if (!r.ok) throw new Error('Could not load conversation history');
         const data: { turns?: HistoryTurn[] } = await r.json();
         const loaded: Turn[] = (data.turns ?? [])
           // Drop a PURE onboarding kickoff (legacy: marker with no user reply). A grounding-wrapped reply
@@ -807,7 +809,7 @@ export function Chat({ params = {}, variant = "rail" }: ChatProps) {
     return data.files ?? [];
   };
 
-  const send = async (text: string, prompt = text, referenceSource = text, opts: { hidden?: boolean; ground?: boolean; focus?: MeetingFocus } = {}) => {
+  const send = async (text: string, prompt = text, referenceSource = text, opts: Omit<AskChatDetail, 'prompt'> = {}) => {
     // hidden → no visible user bubble (system kickoffs); ground:false → don't append the active
     // meeting/file context (onboarding must not inherit whatever meeting happens to be focused).
     const { hidden = false, ground = true, focus: focusOverride } = opts;
@@ -823,7 +825,10 @@ export function Chat({ params = {}, variant = "rail" }: ChatProps) {
     const key = chatKey;
     const sessionForSend = session;
     const state = getChatState(key);
-    if (!v || !basePrompt || state.busy) return;
+    if (!v || !basePrompt || state.busy) {
+      opts.onRejected?.(state.busy ? 'Chat is busy. Wait for the current response or stop it, then retry.' : 'Enter a chat request.');
+      return;
+    }
     const n = state.nextId;
     const agentId = `a-${n}`;
     const displayText = appendReferenceToken(v, sendContextRef);
@@ -840,6 +845,7 @@ export function Chat({ params = {}, variant = "rail" }: ChatProps) {
       nextId: Math.max(s.nextId, n + 1),
       abort: ctrl,
     }));
+    opts.onAccepted?.();
     // Cold-start / mid-turn-drop robustness lives in streamChatTurn: a chat turn spawns a FRESH
     // per-dispatch worker (docker backend) that takes seconds to boot, and the turn is NEVER lost even
     // if the SSE closes early (durable, resumable output Stream). So instead of "No chat output arrived"
@@ -980,11 +986,12 @@ export function Chat({ params = {}, variant = "rail" }: ChatProps) {
   sendRef.current = send;
   useEffect(() => {
     const onAsk = (e: Event) => {
-      const detail = (e as CustomEvent<{ prompt?: string; hidden?: boolean; ground?: boolean; focus?: MeetingFocus }>).detail;
+      const detail = (e as CustomEvent<AskChatDetail>).detail;
       const prompt = detail?.prompt;
-      if (!prompt) return;
+      if (!prompt || detail.handled) return;
+      detail.handled = true;
       if (layout.store.getState().rightCollapsed) layout.toggleRight();
-      void sendRef.current(prompt, prompt, prompt, { hidden: detail?.hidden, ground: detail?.ground, focus: detail?.focus });
+      void sendRef.current(prompt, prompt, prompt, detail);
     };
     window.addEventListener(ASK_CHAT_EVENT, onAsk);
     return () => window.removeEventListener(ASK_CHAT_EVENT, onAsk);

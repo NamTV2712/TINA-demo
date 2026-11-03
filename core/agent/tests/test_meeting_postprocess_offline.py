@@ -191,6 +191,36 @@ def test_offline_meeting_doc_turn_authors_entity_from_fixed_cards(tmp_path):
     assert "unrelated.md" in subprocess.run(
         ["git", "status", "--porcelain"], cwd=tmp_path, capture_output=True, text=True, check=True,
     ).stdout
+    target = tmp_path / 'kg/entities/meeting' / f'{native}.md'
+    target.write_text(doc + '\nOwner correction\n')
+    next_completion, _ = _fake_completion('A regenerated summary')
+    events = list(worker.meeting_doc_turn(
+        tmp_path, cards, native=native, meeting_id=native, session_uid=native,
+        platform='google_meet', date='2026-06-27', title='GME All-In', completion=next_completion,
+    ))
+    assert target.read_text() == doc + '\nOwner correction\n'
+    assert any(event.get('type') == 'done' and not event.get('ok') for event in events)
+
+
+def test_meeting_summary_preserves_user_edits_before_and_during_generation(tmp_path):
+    target = tmp_path / 'kg/entities/meeting/demo.md'
+    target.parent.mkdir(parents=True)
+    target.write_text('User preparation')
+    completion, _ = _fake_completion('Generated summary')
+    arguments = dict(native='demo', meeting_id='1', session_uid='1', platform='google_meet',
+                     date='2026-11-02', title='Demo')
+    events = list(worker.meeting_doc_turn(tmp_path, [], completion=completion, **arguments))
+    assert target.read_text() == 'User preparation'
+    assert any(e.get('type') == 'done' and not e.get('ok') for e in events)
+    target.unlink()
+
+    class ConcurrentEdit:
+        def complete(self, *args, **kwargs):
+            target.write_text('Edited during inference')
+            return CompletionResult('New summary')
+
+    list(worker.meeting_doc_turn(tmp_path, [], completion=ConcurrentEdit(), **arguments))
+    assert target.read_text() == 'Edited during inference'
 
 
 def test_offline_meeting_doc_turn_rejects_unsafe_native_before_completion(tmp_path):

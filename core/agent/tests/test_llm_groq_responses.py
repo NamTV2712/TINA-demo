@@ -36,7 +36,7 @@ def test_sanitizes_captured_codex_fields_without_expanding_tools_or_mutation():
         "model": "openai/gpt-oss-20b", "instructions": "workspace rules",
         "input": [{"role": "user", "content": "hello"}], "tools": [function],
         "tool_choice": "auto", "parallel_tool_calls": False,
-        "reasoning": {"effort": "low"}, "stream": True,
+        "stream": True,
     }
     assert payload == original
 
@@ -44,6 +44,31 @@ def test_sanitizes_captured_codex_fields_without_expanding_tools_or_mutation():
 @pytest.mark.parametrize("reasoning", [{"summary": "auto"}, {"effort": "xhigh"}, None, "low"])
 def test_reasoning_omits_unsupported_effort_and_summary(reasoning):
     assert "reasoning" not in sanitize_responses_request({"reasoning": reasoning})
+
+
+@pytest.mark.parametrize("model", ["qwen/qwen3.8-27b", "qwen/qwen3.6-27b", "llama-3.3-70b-versatile"])
+def test_non_gpt_oss_preserves_instructions_and_tool_history_with_supported_roles(model):
+    payload = {"model": model, "input": [
+        {"type": "message", "role": "developer", "content": [{"type": "input_text", "text": "workspace rules"}]},
+        {"role": "user", "content": "read the transcript"},
+        {"type": "function_call", "name": "read_transcript", "call_id": "call-1", "arguments": "{}"},
+        {"type": "function_call_output", "call_id": "call-1", "output": "meeting text"},
+        {"role": "developer", "content": "follow-up instructions"},
+        {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "summary"}]},
+    ]}
+    original = json.loads(json.dumps(payload))
+    cleaned = sanitize_responses_request(payload)
+    assert cleaned["input"] == [
+        {**payload["input"][0], "role": "system"}, *payload["input"][1:4],
+        {**payload["input"][4], "role": "system"}, payload["input"][5],
+    ]
+    assert payload == original
+
+
+@pytest.mark.parametrize("model", ["openai/gpt-oss-20b", "openai/gpt-oss-120b"])
+def test_gpt_oss_keeps_native_developer_role(model):
+    payload = {"model": model, "input": [{"role": "developer", "content": "workspace rules"}]}
+    assert sanitize_responses_request(payload)["input"] == payload["input"]
 
 
 @pytest.mark.parametrize("key", ["", "contains space", "key\nheader", "non-ascii-\N{SNOWMAN}"])

@@ -97,8 +97,8 @@ def test_parse_stream_json_maps_auth_failure_and_missing_result():
 
 def test_build_argv_uses_headless_sandbox_continuity_and_model():
     argv = build_argv(
-        "inspect safely", session="conv-2", model="gemini-flash",
-        effort="xhigh", settings_path="/tmp/tina-agy.json",
+        "inspect safely", session="conv-2", model="gemini-3.8-flash",
+        effort="high", settings_path="/tmp/tina-agy.json",
         extra_dirs=["/workspaces/system", "/workspaces/shared"],
     )
 
@@ -108,9 +108,9 @@ def test_build_argv_uses_headless_sandbox_continuity_and_model():
     ]
     assert "accept-edits" in argv
     assert argv[argv.index("--conversation") + 1] == "conv-2"
-    assert argv[argv.index("--model") + 1] == "gemini-flash"
+    assert argv[argv.index("--model") + 1] == "gemini-3.8-flash"
     assert argv[argv.index("--settings") + 1] == "/tmp/tina-agy.json"
-    assert argv[argv.index("--effort") + 1] == "xhigh"
+    assert "--effort" not in argv
     assert argv.count("--add-dir") == 2
 
 

@@ -368,9 +368,12 @@ def _validate_config_fields(update: dict, *, kind: str) -> dict:
         if value in (None, ""):
             cleaned[field] = ""  # explicit clear
             continue
-        if not isinstance(value, str) or len(value) > 2048:
+        # Bedrock short-term bearer tokens can exceed ordinary API-key lengths.
+        # Keep other settings bounded separately and never echo a rejected secret.
+        limit = 32768 if kind in ("models", "model_prefs") and field == "api_key" else 2048
+        if not isinstance(value, str) or len(value) > limit:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
-                                detail=f"{field} must be a string under 2048 chars")
+                                detail=f"{field} must be a string of at most {limit} chars")
         if field == "mode" and value not in MODEL_MODES:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
                                 detail=f"mode must be one of {sorted(MODEL_MODES)}")

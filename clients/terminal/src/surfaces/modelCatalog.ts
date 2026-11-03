@@ -6,25 +6,28 @@
  *  never an empty box while the provider is unreachable. **Custom model…** covers every ID these
  *  short lists do not carry.
  *
- *  Intelligence is a separate choice (Settings → Models → Intelligence) because it is a per-turn
- *  reasoning budget, not part of the model's name.
+ *  Thinking is managed automatically by the selected model and runner.
  */
 
-export type ModelChoice = { id: string; label: string };
+export type ModelChoice = { id: string; label: string; supportsTools?: boolean };
 
 const GEMINI_FALLBACK: ModelChoice[] = [
+  { id: "gemini-3.5-flash", label: "Gemini 3.5 Flash" },
+  { id: "gemini-3.7-flash", label: "Gemini 3.7 Flash" },
   { id: "gemini-3.8-flash", label: "Gemini 3.8 Flash" },
-  { id: "gemini-3.8-pro", label: "Gemini 3.8 Pro" },
-  { id: "gemini-3.8-flash-lite", label: "Gemini 3.8 Flash Lite" },
+  { id: "gemini-3.1-pro-preview", label: "Gemini 3.1 Pro Preview" },
 ];
 
 /** Fallback suggestions per provider mode. A missing key (or null) keeps the field as free text. */
 export const MODEL_FALLBACKS: Record<string, ModelChoice[]> = {
+  // Bedrock suggestions come from the selected region, not a universal model ID.
+  bedrock: [],
   groq: [
     { id: "openai/gpt-oss-20b", label: "GPT-OSS 20B" },
     { id: "openai/gpt-oss-120b", label: "GPT-OSS 120B" },
     { id: "llama-3.3-70b-versatile", label: "Llama 3.3 70B" },
-    { id: "qwen/qwen3-32b", label: "Qwen3 32B" },
+    { id: "qwen/qwen3.8-27b", label: "Qwen 3.8 27B" },
+    { id: "qwen/qwen3.6-27b", label: "Qwen 3.6 27B" },
   ],
   deepseek: [
     { id: "deepseek-flash", label: "DeepSeek Flash" },
@@ -50,7 +53,21 @@ export const MODEL_FALLBACKS: Record<string, ModelChoice[]> = {
 /** Providers whose model list can be fetched with the user's key. The ChatGPT plan has its own
  *  account-bound catalogue (`ChatGPTModelInput`); Bedrock/custom depend on the endpoint/region and
  *  stay free text. */
-const LIVE_MODES = new Set(["groq", "deepseek", "gemini", "antigravity", "openai-api"]);
+const LIVE_MODES = new Set(["groq", "deepseek", "gemini", "antigravity", "openai-api", "bedrock"]);
+
+export const BEDROCK_REGIONS = [
+  { value: "us-east-1", label: "US East · N. Virginia" },
+  { value: "us-east-2", label: "US East · Ohio" },
+  { value: "us-west-2", label: "US West · Oregon" },
+  { value: "eu-west-1", label: "Europe · Ireland" },
+  { value: "eu-central-1", label: "Europe · Frankfurt" },
+  { value: "eu-west-2", label: "Europe · London" },
+  { value: "ap-northeast-1", label: "Asia Pacific · Tokyo" },
+  { value: "ap-northeast-2", label: "Asia Pacific · Seoul" },
+  { value: "ap-south-1", label: "Asia Pacific · Mumbai" },
+  { value: "ap-southeast-1", label: "Asia Pacific · Singapore" },
+  { value: "ap-southeast-2", label: "Asia Pacific · Sydney" },
+];
 
 export function hasLiveCatalog(mode: string | undefined | null): boolean {
   return !!mode && LIVE_MODES.has(mode);
@@ -62,15 +79,3 @@ export function fallbackChoicesForMode(mode: string | undefined | null): ModelCh
   if (!mode) return null;
   return MODEL_FALLBACKS[mode] ?? null;
 }
-
-/** The per-turn reasoning budget. Empty = the model/provider default; the value reaches the agent
- *  harness as its effort pin (the same `effort` pref the CLI used to expose as a raw enum). */
-export type IntelligenceLevel = "" | "low" | "medium" | "high" | "xhigh";
-
-export const INTELLIGENCE_OPTIONS: Array<{ value: IntelligenceLevel; label: string }> = [
-  { value: "", label: "Auto — model default" },
-  { value: "low", label: "Fast — minimal thinking" },
-  { value: "medium", label: "Balanced — moderate thinking" },
-  { value: "high", label: "Deep — more thinking" },
-  { value: "xhigh", label: "Maximum — deepest thinking" },
-];

@@ -1,6 +1,12 @@
 /** History hygiene: server-side grounding preambles never render as the user's words. */
 import { describe, expect, it } from "vitest";
-import { stripContextBlocks } from "../chat";
+import { stripContextBlocks, historyOp } from "../chat";
+
+it('restores descriptive tool labels after reload instead of generic Working rows', () => {
+  expect(historyOp({ label: 'tool', tool: 'Bash' }).label).toBe('Running · Bash');
+  expect(historyOp({ label: 'edit', tool: 'Edit' }).label).toBe('Writing · Edit');
+  expect(historyOp({ label: 'read' }).label).toBe('Reading');
+});
 
 describe("stripContextBlocks", () => {
   it("strips stacked kg-links + mount-stack preambles down to the user's text", () => {

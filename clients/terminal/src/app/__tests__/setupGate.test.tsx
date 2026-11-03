@@ -117,7 +117,7 @@ describe("SetupGate", () => {
     fireEvent.click(save);
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/admin/settings/models", expect.objectContaining({
-      method: "PUT", body: JSON.stringify({ mode, api_key: "synthetic-provider-key", model: "" }),
+      method: "PUT", body: JSON.stringify({ mode, api_key: "synthetic-provider-key", model: "", effort: "" }),
     })));
     await waitFor(() => expect(save.textContent).toBe("Save & test"));
     expect((screen.getByRole("button", { name: "Continue" }) as HTMLButtonElement).disabled).toBe(true);

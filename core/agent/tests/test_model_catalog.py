@@ -27,6 +27,8 @@ def test_groq_uses_fixed_endpoint_bearer_auth_and_drops_audio_models():
         return 200, _payload([
             {"id": "openai/gpt-oss-20b"},
             {"id": "whisper-large-v3"},
+            {"id": "canopylabs/orpheus-v1-english"},
+            {"id": "canopylabs/orpheus-arabic-saudi"},
             {"id": "llama-3.3-70b-versatile"},
         ])
 
@@ -36,6 +38,16 @@ def test_groq_uses_fixed_endpoint_bearer_auth_and_drops_audio_models():
     assert [model["id"] for model in out["models"]] == [
         "llama-3.3-70b-versatile", "openai/gpt-oss-20b",
     ]
+
+
+def test_groq_marks_known_text_only_models_without_excluding_them_from_summaries():
+    out = mc.list_models("groq", "gsk_test", get=lambda *_: (200, _payload([
+        {"id": "allam-2-7b"}, {"id": "qwen/qwen3.8-27b"},
+    ])))
+    models = {model["id"]: model for model in out["models"]}
+    assert models["allam-2-7b"]["supports_tools"] is False
+    # A listing alone does not prove a tool workflow for every new model.
+    assert "supports_tools" not in models["qwen/qwen3.8-27b"]
 
 
 def test_openai_drops_embeddings_tts_and_dated_snapshots():
@@ -96,6 +108,20 @@ def test_antigravity_reuses_the_gemini_catalogue():
     assert out["models"][0]["id"] == "gemini-2.5-pro"
 
 
+def test_gemini_chat_catalog_omits_specialist_image_audio_music_and_computer_models():
+    ids = ["gemini-3.8-flash", "gemini-3.1-pro-preview", "gemma-4-31b-it",
+           "gemini-3.8-flash-tts", "gemini-2.5-flash-image", "gemini-3.5-transcribe",
+           "gemini-nano-banana-2.1", "gemini-robotics-er-2-preview",
+           "gemini-2.5-computer-use-preview-10-2025", "lyria-3.5", "nano-banana-pro-preview",
+           "antigravity-preview-latest", "deep-research-max-preview-04-2026"]
+    payload = json.dumps({"models": [{"name": "models/" + model,
+                                     "supportedGenerationMethods": ["generateContent"]} for model in ids]})
+    result = mc.list_models("gemini", "dummy", get=lambda *_: (200, payload))
+    assert {model["id"] for model in result["models"]} == {
+        "gemini-3.8-flash", "gemini-3.1-pro-preview", "gemma-4-31b-it",
+    }
+
+
 def test_rejected_key_is_an_auth_status_not_an_empty_list():
     with pytest.raises(mc.CatalogError) as error:
         mc.list_models("groq", "bad-key", get=lambda url, headers: (403, "{}"))
@@ -103,6 +129,25 @@ def test_rejected_key_is_an_auth_status_not_an_empty_list():
     assert error.value.auth is True
     assert error.value.status == 403
     assert "rejected the API key" in str(error.value)
+
+
+def test_auth_error_repeats_the_provider_reason_instead_of_guessing():
+    body = json.dumps({"error": {"message": "Invalid API Key", "type": "invalid_request_error"}})
+
+    with pytest.raises(mc.CatalogError) as error:
+        mc.list_models("groq", "bad", get=lambda url, headers: (401, body))
+
+    assert "Provider says: Invalid API Key" in str(error.value)
+
+
+def test_cloudflare_body_is_surfaced_not_swallowed():
+    """The live trap: Groq/Cloudflare 403s the default Python UA with `error code: 1010` while the
+    same key works from curl — the user must see that line, not "bad key"."""
+    with pytest.raises(mc.CatalogError) as error:
+        mc.list_models("groq", "key", get=lambda url, headers: (403, "error code: 1010"))
+
+    assert "error code: 1010" in str(error.value)
+    assert error.value.auth is True
 
 
 def test_missing_key_and_unknown_mode_fail_with_400():
@@ -126,6 +171,25 @@ def test_masked_read_back_is_not_a_credential():
     assert mc.masked_or_blank("********abcd") == ""
     assert mc.masked_or_blank("  gsk_real  ") == "gsk_real"
     assert mc.masked_or_blank(None) == ""
+
+
+def test_bedrock_catalog_route_resolves_saved_region_and_honors_draft_region(monkeypatch):
+    calls = []
+
+    def fake(mode, api_key, *, region="", **kwargs):
+        calls.append((mode, api_key, region))
+        return {"mode": mode, "models": []}
+
+    monkeypatch.setattr(mc, "list_models", fake)
+    client = _app({"mode": "bedrock", "api_key": "bedrock-saved", "region": "us-east-1"})
+    headers = {"x-user-id": "u_jane"}
+    assert client.post("/api/models/catalog", json={"mode": "bedrock"}, headers=headers).status_code == 200
+    assert calls[-1] == ("bedrock", "bedrock-saved", "us-east-1")
+    assert client.post("/api/models/catalog", json={"mode": "bedrock", "region": "eu-west-1"}, headers=headers).status_code == 200
+    assert calls[-1] == ("bedrock", "bedrock-saved", "eu-west-1")
+    foreign = _app({"mode": "gemini", "api_key": "gemini-saved", "region": "us-east-1"})
+    assert foreign.post("/api/models/catalog", json={"mode": "bedrock", "region": "eu-west-1"}, headers=headers).status_code == 200
+    assert calls[-1] == ("bedrock", "", "eu-west-1")
 
 
 # ── the HTTP seam: which key reaches the provider ────────────────────────────────────────────────

@@ -47,7 +47,8 @@ export const entitySlug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, 
 /** Normalize a schemeless href into a workspace-relative path. `./x` and `../x` resolve
  *  against the linking doc's directory; anything else is taken from the workspace root. */
 export function normalizeDocPath(href: string, docPath?: string): string {
-  const clean = href.replace(/[?#].*$/, "");
+  let clean = href.replace(/[?#].*$/, "");
+  try { clean = decodeURIComponent(clean); } catch { /* A literal percent sign may be part of a filename. */ }
   const relative = /^\.\.?(\/|$)/.test(clean);
   const parts = [...(relative && docPath ? docPath.split("/").slice(0, -1) : []), ...clean.split("/")];
   const out: string[] = [];
@@ -152,7 +153,9 @@ export async function resolveDocRef(ref: DocRef, meta: DocMeta = {}): Promise<Re
     return { path: root, slug: order[0] };
   }
   if (ref.wikilink) {
-    const re = wikilinkMatcher(ref.wikilink);
+    const target = ref.wikilink.split('|')[0].trim();
+    if (target.includes('/') || /\.md(?:[?#]|$)/.test(target)) return resolveDocRef({ path: target }, meta);
+    const re = wikilinkMatcher(target);
     for (const ws of await searchOrder()) {
       const hit = (await workspaceTree(ws)).find((p) => re.test(p));
       if (hit) return { path: hit, slug: ws, type: re.exec(hit)?.[1] };
@@ -184,6 +187,7 @@ export function entityColor(kind?: string): string | undefined {
  *  Resolves against the doc's workspace (DocMetaContext); a title that matches no entity
  *  doc renders muted with a "not found" tooltip instead of a dead click. */
 export function Wikilink({ title }: { title: string }) {
+  const label = title.includes('|') ? title.split('|').slice(1).join('|') : title;
   const [hover, setHover] = useState(false);
   const meta = useContext(DocMetaContext);
   // undefined = resolving, null = not found, ResolvedDoc = found
@@ -204,7 +208,7 @@ export function Wikilink({ title }: { title: string }) {
           padding: "0.5px 9px 0.5px 7px", color: "var(--t3)", fontSize: "0.92em",
           fontWeight: 500, whiteSpace: "nowrap", lineHeight: 1.45 }}>
         <Icon name="link" size={11} style={{ opacity: 0.5 }} />
-        {title}
+        {label}
       </span>
     );
   }
@@ -217,7 +221,7 @@ export function Wikilink({ title }: { title: string }) {
         padding: "0.5px 9px 0.5px 7px", color: c.color, fontSize: "0.92em",
         fontWeight: 500, cursor: "pointer", whiteSpace: "nowrap", lineHeight: 1.45 }}>
       <Icon name={c.icon} size={11} style={{ opacity: 0.8 }} />
-      {title}
+      {label}
     </span>
   );
 }

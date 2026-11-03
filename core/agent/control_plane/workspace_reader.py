@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import json
 import glob
+import os
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -125,6 +127,41 @@ class WorkspaceReader:
         """The text at ``path`` within the subject's own workspace, or None if absent. Traversal-guarded."""
         return self.read_at(self._ws(subject), path)
 
+    def search_at(self, base: Path, query: str) -> dict:
+        """Literal Unicode content search; hidden files and symlinks never enter the corpus."""
+        ws = self._guard_under_root(base)
+        hits, scanned, size, bounded = [], 0, 0, False
+        for directory, folders, files in os.walk(ws):
+            folders[:] = sorted(d for d in folders if not d.startswith('.') and not (Path(directory) / d).is_symlink())
+            for name in sorted(files):
+                path = Path(directory) / name
+                if name.startswith('.') or path.suffix != '.md' or path.is_symlink():
+                    continue
+                safe = self._workspace_child(ws, path.relative_to(ws))
+                if safe is None:
+                    continue
+                if scanned >= 1000 or size >= 10_000_000:
+                    return {'hits': hits, 'scanned': scanned, 'bounded': True}
+                with safe.open('rb') as source:
+                    raw = source.read(500001)
+                scanned += 1
+                size += len(raw)
+                if len(raw) > 500000:
+                    bounded = True
+                    continue
+                try:
+                    text = raw.decode('utf-8')
+                except UnicodeDecodeError:
+                    continue
+                for number, line in enumerate(text.splitlines(), 1):
+                    position = line.casefold().find(query.casefold())
+                    if position >= 0:
+                        hits.append({'path': path.relative_to(ws).as_posix(), 'line': number,
+                                     'text': line[max(0, position - 80):position + 220]})
+                        if len(hits) >= 50:
+                            return {'hits': hits, 'scanned': scanned, 'bounded': True}
+        return {'hits': hits, 'scanned': scanned, 'bounded': bounded}
+
     def read_at(self, base: Path, path: str) -> Optional[str]:
         """The text at ``path`` within the ``base`` workspace dir, or None if absent. Traversal-guarded."""
         ws = self._guard_under_root(base)
@@ -202,12 +239,23 @@ class WorkspaceReader:
                     raw = path.read_text(encoding="utf-8")
                 except OSError:
                     continue
+                records = []
                 for line in raw.splitlines():
                     try:
                         record = json.loads(line)
                     except (json.JSONDecodeError, ValueError):
                         continue
-                    if not isinstance(record, dict) or record.get("type") != "response_item":
+                    if isinstance(record, dict) and isinstance(record.get('payload'), dict):
+                        records.append(record)
+                user_events = any(r.get('type') == 'event_msg' and r['payload'].get('type') == 'user_message' for r in records)
+                for record in records:
+                    if record.get('type') == 'event_msg' and record['payload'].get('type') == 'user_message':
+                        text = record['payload'].get('message')
+                        if isinstance(text, str) and text.strip():
+                            flush_agent()
+                            turns.append({'role': 'user', 'text': text})
+                        continue
+                    if record.get("type") != "response_item":
                         continue
                     item = record.get("payload")
                     if not isinstance(item, dict):
@@ -218,14 +266,18 @@ class WorkspaceReader:
                         if not text.strip():
                             continue
                         if item.get("role") == "user":
+                            if user_events or re.fullmatch(r'\s*<(environment_context|user_instructions)>[\s\S]*</\1>\s*', text):
+                                continue
                             flush_agent()
                             turns.append({"role": "user", "text": text})
                         elif item.get("role") == "assistant":
                             if cur_agent is None:
                                 cur_agent = {"role": "agent", "text": "", "ops": []}
-                            cur_agent["text"] += text
-                    elif item_type in ("function_call", "mcp_tool_call"):
+                            cur_agent["text"] += ('\n\n' if cur_agent['text'] else '') + text
+                    elif item_type in ("function_call", "mcp_tool_call", "web_search_call"):
                         name = item.get("name")
+                        if item_type == 'web_search_call':
+                            name = 'WebSearch'
                         if item_type == "mcp_tool_call":
                             server, tool = item.get("server"), item.get("tool")
                             if isinstance(server, str) and isinstance(tool, str):
@@ -233,7 +285,8 @@ class WorkspaceReader:
                         if isinstance(name, str) and name:
                             if cur_agent is None:
                                 cur_agent = {"role": "agent", "text": "", "ops": []}
-                            cur_agent["ops"].append(_tool_op(name))
+                            tool = {'exec_command': 'Bash', 'write_stdin': 'Bash', 'apply_patch': 'Edit'}.get(name, name)
+                            cur_agent["ops"].append(_tool_op(tool) | {'tool': tool})
             flush_agent()
             return turns
         return None
@@ -287,7 +340,8 @@ class WorkspaceReader:
             out.append(c)
         return out
 
-    def history(self, subject: str, session: str, extra_roots: "list[str | Path] | None" = None) -> list[dict]:
+    def history(self, subject: str, session: str, extra_roots: "list[str | Path] | None" = None,
+                provider_sessions: list[str] | None = None) -> list[dict]:
         """The session's prior conversation as ordered, terminal-renderable turns.
 
         Resolves the thread's claude sessionId from its continuity pointer, finds the transcript JSONL
@@ -307,6 +361,33 @@ class WorkspaceReader:
                 break
         if not sid:
             return []
+        indexed = []
+        for ws in roots:
+            index = self._workspace_child(ws, Path('.claude/sessions') / f'{session}.history.json')
+            if index is None or not index.is_file():
+                continue
+            try:
+                value = json.loads(index.read_text())
+                if isinstance(value, list) and all(isinstance(item, str) for item in value):
+                    indexed = value
+                    break
+            except (ValueError, OSError):
+                continue
+        # Merge chronological Stream recovery with the durable index, retaining older entries
+        # even when Redis has already trimmed their events.
+        ordered = list(dict.fromkeys(item for item in provider_sessions or [] if isinstance(item, str)))
+        for position, item in enumerate(indexed):
+            if item in ordered:
+                continue
+            following = next((known for known in indexed[position + 1:] if known in ordered), None)
+            ordered.insert(ordered.index(following) if following else len(ordered), item)
+        if sid not in ordered:
+            ordered.append(sid)
+        return [turn for item in ordered for turn in self._history_for_id(roots, item)]
+
+    def _history_for_id(self, roots: list[Path], sid: str) -> list[dict]:
+        if not sid or sid in ('.', '..') or Path(sid).name != sid or '\\' in sid:
+            return []
         # The cwd-slug dir is claude's encoding of the workspace path; there is normally one, but match by
         # the sessionId filename to be safe. Shared roots are excluded above; resolved transcript paths
         # must also remain under each private workspace in case .claude/projects contains a symlink.
@@ -315,7 +396,7 @@ class WorkspaceReader:
             projects = self._workspace_child(ws, Path(".claude") / "projects")
             if projects is None or not projects.exists():
                 continue
-            for cand in projects.glob(f"*/{sid}.jsonl"):
+            for cand in projects.glob(f"*/{glob.escape(sid)}.jsonl"):
                 try:
                     relative = cand.relative_to(ws)
                 except ValueError:
@@ -392,7 +473,8 @@ class WorkspaceReader:
         if "/" in session or "\\" in session or session in ("", ".", ".."):
             raise ValueError("invalid session")
         removed = False
-        targets = [Path(".claude") / "sessions" / f"{session}.session"]
+        targets = [Path(".claude") / "sessions" / f"{session}.session",
+                   Path('.claude') / 'sessions' / f'{session}.history.json']
         if session == "main":
             targets.append(Path(".claude") / ".session")
         # _continuity_roots includes only this subject's private workspace locations.

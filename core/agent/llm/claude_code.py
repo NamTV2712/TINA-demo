@@ -20,12 +20,13 @@ from pathlib import Path
 from typing import Callable, Iterable, Iterator, Optional
 
 from llm.errors import looks_like_auth_failure, preflight_provider_guard
+from llm.model_capabilities import normalized_effort
 from llm.ports import HarnessExec, harness_subprocess_env
 
 
 def _short(content: object, n: int = 80) -> str:
     s = content if isinstance(content, str) else json.dumps(content, default=str)
-    for key_name in ("ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "TINA_LLM_API_KEY"):
+    for key_name in ("ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY", "TINA_LLM_API_KEY", "AWS_BEARER_TOKEN_BEDROCK"):
         if secret := os.environ.get(key_name):
             s = s.replace(secret, "[redacted]")
     s = " ".join(s.split())
@@ -127,10 +128,8 @@ def build_argv(
     granted MCP tools (the toolbelt) and nothing else. The container sandbox is the other
     enforcement layer.
 
-    `effort` — when set — pins the session's reasoning effort (`--effort low|medium|high|xhigh`).
-    Backends that validate the OpenAI-compatible `reasoning_effort` field (e.g. vLLM/LiteLLM model
-    groups) reject the CLI's default `high` when it is outside their allowlist; an explicit value
-    overrides that default. Unset ⇒ no flag ⇒ the CLI's own behaviour, unchanged.
+    `effort` is retained as a compatibility argument and ignored. All providers use automatic
+    thinking; old settings must never reintroduce a manual CLI effort pin.
     """
     argv = ["claude", "-p", prompt, "--output-format", "stream-json", "--verbose",
             "--include-partial-messages", "--permission-mode", "acceptEdits"]
@@ -143,8 +142,7 @@ def build_argv(
         argv += ["--resume", session]
     if model:
         argv += ["--model", model]
-    if effort:
-        argv += ["--effort", effort]
+    # The compatibility argument is deliberately ignored: thinking is always automatic.
     return argv
 
 
@@ -235,8 +233,12 @@ class ClaudeCodeHarness:
                  mcp_servers: Optional[dict] = None, mcp_env: Optional[dict[str, str]] = None,
                  mcp_tools: Optional[dict[str, list[str]]] = None,
                  approval_handler: Optional[Callable[[dict], Optional[bool]]] = None) -> Iterator[dict]:
+        mode = "bedrock" if os.environ.get("CLAUDE_CODE_USE_BEDROCK") == "1" else (
+            "deepseek" if os.environ.get("ANTHROPIC_BASE_URL", "").rstrip("/") == "https://api.deepseek.com/anthropic"
+            else "custom" if os.environ.get("ANTHROPIC_BASE_URL") else "subscription")
+        effort = normalized_effort(mode, model or os.environ.get("TINA_AGENT_MODEL", ""), os.environ.get("TINA_AGENT_EFFORT"))
         argv = build_argv(prompt, allowed_tools=allowed_tools, session=session, model=model,
-                          effort=(os.environ.get("TINA_AGENT_EFFORT") or None),
+                          effort=effort or None,
                           mcp_config=mcp_config)
         yield from parse_stream_json(self._exec(argv, str(work)))
 
@@ -257,6 +259,12 @@ class ClaudeCodeHarness:
         return total
 
     def preflight(self) -> Optional[str]:
+        if os.environ.get("CLAUDE_CODE_USE_BEDROCK") == "1":
+            if not os.environ.get("AWS_BEARER_TOKEN_BEDROCK"):
+                return "Bedrock API key is missing. Add it in Settings → Models."
+            if not os.environ.get("AWS_REGION") or not os.environ.get("TINA_AGENT_MODEL"):
+                return "Choose a Bedrock region and an approved model in Settings → Models."
+            return None
         if os.environ.get("ANTHROPIC_BASE_URL", "").rstrip("/") == "https://api.deepseek.com/anthropic":
             if not os.environ.get("ANTHROPIC_AUTH_TOKEN"):
                 return "DeepSeek API key is missing. Add it in Settings → Models."

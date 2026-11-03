@@ -72,7 +72,7 @@ from control_plane import workspace_membership as membership_mod
 from control_plane import git_credentials as git_creds
 from control_plane import system_mounts
 from control_plane.workspace_membership import MembershipError, MembershipIndex, InMemoryMembershipIndex
-from control_plane.dispatch import Dispatcher, build_mount_set, worker_cwd
+from control_plane.dispatch import Dispatcher, ModelConfigRefreshError, build_mount_set, worker_cwd
 from control_plane.events import event_to_invocation
 from shared.ports import SchedulerPort, StreamReader
 from control_plane.workspace_reader import WorkspaceReader
@@ -1080,7 +1080,7 @@ def create_app(
         # overrides deployment defaults, and an explicit workspace meeting pin wins last.
         model_config = dispatcher.resolve_model_config(subject) or {}
         provider_default = {"groq": "openai/gpt-oss-20b", "deepseek": "deepseek-flash",
-                            "gemini": "gemini-3.8-flash"}.get(model_config.get("mode"))
+                            "gemini": "gemini-3.5-flash"}.get(model_config.get("mode"))
         if provider_default:
             chat_model = model_config.get("model") or provider_default
             streaming_model = model_config.get("meeting_model") or chat_model
@@ -1544,7 +1544,10 @@ def create_app(
                 is_new = not any(r["session"] == session for r in sess.list(subject))
                 sess.upsert(subject, session,
                             title=_truncate_title(body.prompt) if is_new else None)
-                unit_id = dispatcher.dispatch(inv)  # spawn-or-touch the thread's warm chat unit
+                try:
+                    unit_id = dispatcher.dispatch(inv)  # refresh immutable settings before warm delivery
+                except ModelConfigRefreshError as exc:
+                    raise HTTPException(status_code=exc.status, detail=str(exc)) from None
                 if body.turn_id and start is not None:
                     _record_chat_turn_head(redis_url, unit_id, body.turn_id, start)
                 resume = start
@@ -1608,7 +1611,23 @@ def create_app(
         except Exception:  # noqa: BLE001
             logger.warning("private mount resolution for history failed subject=%s — searching anchored roots only", subject)
         try:
-            turns = wsr.history(subject, session, extra_roots=extra)
+            provider_sessions = []
+            try:
+                if sess._redis is not None:
+                    created = sess._redis.hget(sess._meta_key(subject, session), 'created')
+                    if created:
+                        start = f'{int(float(created) * 1000)}-0'
+                        rows = sess._redis.xrange(units.output_topic(units.chat_unit_id(subject, session)), min=start)
+                        for _, fields in rows:
+                            try:
+                                event = json.loads(fields.get('event', '{}'))
+                            except (ValueError, TypeError):
+                                continue
+                            if isinstance(event, dict) and event.get('type') == 'done' and isinstance(event.get('sessionId'), str):
+                                provider_sessions.append(event['sessionId'])
+            except Exception:
+                logger.warning('Could not recover provider thread metadata subject=%s session=%s', subject, session)
+            turns = wsr.history(subject, session, extra_roots=extra, provider_sessions=provider_sessions)
         except Exception:  # noqa: BLE001 — history is best-effort; a bad path → empty, never an error
             logger.exception("loading session history failed subject=%s session=%s", subject, session)
             turns = []
@@ -2651,23 +2670,21 @@ def create_app(
         subject = subject_of(request)
         mode = str(body.get("mode") or "").strip()
         raw_key = body.get("api_key")
+        region = str(body.get("region") or "").strip()
         api_key = _mc.masked_or_blank(raw_key if isinstance(raw_key, str) else "")
         if not api_key:
-            cfg: dict = {}
-            mc = getattr(dispatcher, "_model_config", None)
-            if mc is not None:
-                try:
-                    cfg = mc.resolve(subject) or {}
-                except Exception:  # resolver down → env/draft only, never a cross-provider key
-                    cfg = {}
+            # The same user > platform > env resolution a turn applies. None = the lookup failed;
+            # fall through to the env/draft paths rather than probing with a foreign provider's key.
+            cfg = dispatcher.resolve_model_config(subject) or {}
             if (cfg.get("mode") or "").strip() == mode:
                 api_key = _mc.masked_or_blank(str(cfg.get("api_key") or ""))
+                region = region or str(cfg.get("region") or "").strip()
         if not api_key and mode == "openai-api":
             api_key = (os.environ.get("OPENAI_API_KEY") or "").strip()
         if not api_key and mode in ("gemini", "antigravity"):
             api_key = (os.environ.get("GEMINI_API_KEY") or "").strip()
         try:
-            return _mc.list_models(mode, api_key)
+            return _mc.list_models(mode, api_key, region=region) if mode == "bedrock" else _mc.list_models(mode, api_key)
         except _mc.CatalogError as exc:
             status = exc.status or (401 if exc.auth else 502)
             raise HTTPException(status_code=status, detail=str(exc)) from exc

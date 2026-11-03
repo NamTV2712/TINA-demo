@@ -91,6 +91,17 @@ def test_groq_codex_does_not_replace_a_rejected_model_with_its_own_default(monke
     assert "approved Groq chat model" in result[-1]["reply"]
 
 
+def test_groq_text_only_model_fails_helpfully_before_starting_a_cli(monkeypatch, tmp_path):
+    monkeypatch.setattr("llm.codex.shutil.which", lambda _executable: "/usr/bin/codex")
+    monkeypatch.setenv("TINA_CODEX_AUTH_MODE", "groq")
+    monkeypatch.setenv("TINA_LLM_API_KEY", "groq-secret")
+    result = list(CodexHarness().run_turn(tmp_path, "hello", model="allam-2-7b"))
+    assert result[-1]["ok"] is False
+    assert "does not support tool calling" in result[-1]["reply"]
+    assert "Meeting model" in result[-1]["reply"]
+    assert "groq-secret" not in json.dumps(result)
+
+
 def test_groq_codex_uses_compatibility_boundary_for_the_whole_sandboxed_turn(monkeypatch, tmp_path):
     proc = _FakeCodexProcess()
     captured = {}
@@ -108,6 +119,9 @@ def test_groq_codex_uses_compatibility_boundary_for_the_whole_sandboxed_turn(mon
     def spawn(argv, **kwargs):
         assert proxy_states == ["started"]
         captured.update(argv=argv, env=kwargs["env"])
+        profile_arg = next(arg for arg in argv if arg.startswith("model_catalog_json="))
+        profile_path = Path(json.loads(profile_arg.partition("=")[2]))
+        captured["profile"] = json.loads(profile_path.read_text())["models"][0]
         return proc
 
     monkeypatch.setattr("llm.groq_responses.groq_responses_proxy", proxy)
@@ -127,6 +141,10 @@ def test_groq_codex_uses_compatibility_boundary_for_the_whole_sandboxed_turn(mon
     assert 'model_providers.groq.base_url="http://127.0.0.1:12345/v1"' in settings
     assert 'model_providers.groq.env_key="TINA_LLM_API_KEY"' in settings
     assert 'model_providers.groq.requires_openai_auth=false' in settings
+    assert 'features.multi_agent=false' in settings
+    assert captured["profile"]["apply_patch_tool_type"] is None
+    assert "apply_patch" not in captured["profile"]["base_instructions"]
+    assert "You are TINA" in captured["profile"]["base_instructions"]
     assert "groq-secret" not in settings
     assert "shell_environment_policy.ignore_default_excludes=false" in settings
     assert "model_context_window=131072" in settings
@@ -208,6 +226,7 @@ def test_codex_keeps_workspace_write_sandbox_for_write_tools(monkeypatch, tmp_pa
     list(CodexHarness().run_turn(
         workspace, "write a note",
         allowed_tools=["Read", "Write", "Edit", "Bash"],
+        model="gpt-5",
     ))
 
     by_method = {request.get("method"): request for request in proc.requests}
@@ -219,7 +238,7 @@ def test_codex_keeps_workspace_write_sandbox_for_write_tools(monkeypatch, tmp_pa
         "excludeTmpdirEnvVar": True,
         "excludeSlashTmp": True,
     }
-    assert by_method["turn/start"]["params"]["effort"] == "medium"
+    assert "effort" not in by_method["turn/start"]["params"]
 
 
 def test_codex_stays_read_only_when_no_mount_has_a_write_grant(monkeypatch, tmp_path):

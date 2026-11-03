@@ -468,22 +468,21 @@ def test_dispatcher_model_config_overrides_deployment_models():
     assert env["TINA_MEETING_MODEL"] == "my-meeting"
 
 
-def test_dispatcher_model_config_stamps_reasoning_effort():
-    """Settings → Models effort pin reaches the worker env as TINA_AGENT_EFFORT (the claude-code
-    harness passes it through as --effort). Absent ⇒ no env key ⇒ the CLI's own default."""
+def test_dispatcher_uses_auto_even_with_a_legacy_reasoning_effort():
+    """Old saved effort pins must not override automatic provider thinking."""
     rt = _FakeRuntime()
     mc = _FakeModelConfig({"model": "my-model", "effort": "medium"})
     d = dispatch.Dispatcher(load_settings(), rt, _FakeIdentity(), model_config=mc)
     d.dispatch(VALID_INV)
     _, _profile, env = rt.spawned[0]
-    assert env["TINA_AGENT_EFFORT"] == "medium"
+    assert env["TINA_AGENT_EFFORT"] == ""
     # no effort configured ⇒ no env key at all (unset must mean "don't touch the CLI default")
     rt2 = _FakeRuntime()
     d2 = dispatch.Dispatcher(load_settings(), rt2, _FakeIdentity(),
                            model_config=_FakeModelConfig({"model": "my-model"}))
     d2.dispatch(VALID_INV)
     _, _profile2, env2 = rt2.spawned[0]
-    assert "TINA_AGENT_EFFORT" not in env2
+    assert env2["TINA_AGENT_EFFORT"] == ""
 
 
 def test_dispatcher_antigravity_mode_isolates_agent_model_and_requires_ack(monkeypatch):
@@ -568,7 +567,7 @@ def test_groq_overlay_preserves_meeting_override_and_honors_model_allowlist():
 
 @pytest.mark.parametrize("mode,runner,base,default", [
     ("deepseek", "claude-code", "https://api.deepseek.com", "deepseek-flash"),
-    ("gemini", "antigravity", "https://generativelanguage.googleapis.com/v1beta/openai", "gemini-3.8-flash"),
+    ("gemini", "antigravity", "https://generativelanguage.googleapis.com/v1beta/openai", "gemini-3.5-flash"),
 ])
 def test_api_providers_route_both_call_shapes_and_isolate_defaults(mode, runner, base, default):
     env = {key: "foreign-secret" for key in dispatch.MODEL_AUTH_ENV_ALLOWLIST}

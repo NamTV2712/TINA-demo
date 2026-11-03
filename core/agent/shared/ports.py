@@ -59,6 +59,10 @@ class RuntimePort(Protocol):
         """Block until the workload reaches a terminal ``runtime.v1`` state; return that state."""
         ...
 
+    def stop(self, workload_id: str) -> None:
+        """Stop an idle worker before replacing its immutable model configuration."""
+        ...
+
 
 @runtime_checkable
 class IdentityPort(Protocol):

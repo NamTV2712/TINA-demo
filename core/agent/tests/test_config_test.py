@@ -96,26 +96,91 @@ def test_run_models_test_does_not_claim_antigravity_auth_was_checked():
     assert "SECRET" not in json.dumps(out)
 
 
-def test_groq_checks_chat_and_summary_models_using_their_actual_dialects():
+def _groq_tool_response(payload):
+    if payload.get("tool_choice") == "required":
+        return json.dumps({"status": "completed", "output": [{
+            "type": "function_call", "name": "tina_connection_check", "call_id": "probe-call-1",
+            "arguments": '{"nonce":"tina_probe"}',
+        }]})
+    return json.dumps({"status": "completed", "output": [{"type": "message", "role": "assistant",
+                      "content": [{"type": "output_text", "text": "OK"}]}]})
+
+
+@pytest.mark.parametrize("model,role", [("openai/gpt-oss-20b", "developer"), ("qwen/qwen3.8-27b", "system")])
+def test_groq_checks_chat_tool_round_trip_and_summary_models_using_their_actual_dialects(model, role):
     calls = []
     def post(url, payload, headers):
         calls.append((url, payload, headers))
-        return 200, "{}"
+        return 200, _groq_tool_response(payload)
 
     result = ct.run_models_test({"mode": "groq", "api_key": "groq-secret",
+                                 "model": model,
                                  "meeting_model": "summary-model"}, env={}, post=post)
 
     assert result["ok"] and result["mode"] == "groq"
     assert [call[0] for call in calls] == [
         "https://api.groq.com/openai/v1/responses",
+        "https://api.groq.com/openai/v1/responses",
         "https://api.groq.com/openai/v1/chat/completions",
     ]
-    assert calls[0][1]["model"] == "openai/gpt-oss-20b"
-    assert calls[1][1]["model"] == "summary-model"
-    assert "input" in calls[0][1] and "messages" in calls[1][1]
+    assert calls[0][1]["model"] == model
+    assert calls[0][1]["input"][0]["role"] == role
+    assert calls[0][1]["tools"][0]["name"] == "tina_connection_check"
+    assert calls[0][1]["tool_choice"] == "required"
+    assert calls[1][1]["input"][-1] == {
+        "type": "function_call_output", "call_id": "probe-call-1", "output": "OK",
+    }
+    assert calls[2][1]["model"] == "summary-model"
+    assert "input" in calls[0][1] and "messages" in calls[2][1]
     assert not {"store", "include", "previous_response_id", "truncation"}.intersection(calls[0][1])
     assert all(call[2] == {"Authorization": "Bearer groq-secret"} for call in calls)
     assert "groq-secret" not in json.dumps(result)
+
+
+def test_groq_rejects_a_known_non_tool_chat_model_before_network_but_allows_it_for_summaries():
+    def forbidden(*_args):
+        pytest.fail("a text-only chat model must fail before inference")
+    result = ct.test_groq("groq-secret", "allam-2-7b", post=forbidden)
+    assert not result["ok"] and "does not support tool calling" in result["summary"]
+
+    seen = []
+    def post(url, payload, headers):
+        seen.append(payload)
+        return 200, _groq_tool_response(payload)
+    result = ct.test_groq("groq-secret", "openai/gpt-oss-20b", "allam-2-7b", post=post)
+    assert result["ok"] and seen[-1]["model"] == "allam-2-7b"
+    assert "tools" not in seen[-1]
+
+
+@pytest.mark.parametrize("output", [
+    [], [{"type": "message", "content": [{"type": "output_text", "text": "OK"}]}],
+    [{"type": "function_call", "name": "wrong_tool", "call_id": "1", "arguments": '{"nonce":"tina_probe"}'}],
+    [{"type": "function_call", "name": "tina_connection_check", "call_id": "1", "arguments": "not-json"}],
+    [{"type": "function_call", "name": "tina_connection_check", "call_id": "1", "arguments": '{"nonce":"wrong"}'}],
+])
+def test_groq_never_passes_a_text_ping_or_malformed_tool_call(output):
+    result = ct.test_groq("groq-secret", "new-model", post=lambda *_:
+                          (200, json.dumps({"status": "completed", "output": output})))
+    assert not result["ok"] and "did not return a valid tool call" in result["summary"]
+
+
+def test_groq_fails_when_the_model_cannot_consume_a_tool_result():
+    def post(url, payload, headers):
+        if payload.get("tool_choice") == "required":
+            return 200, _groq_tool_response(payload)
+        return 400, "invalid tool role groq-secret"
+    result = ct.test_groq("groq-secret", "new-model", post=post)
+    assert not result["ok"] and "chat tool results" in result["summary"]
+    assert "groq-secret" not in json.dumps(result)
+
+
+def test_groq_fails_on_incomplete_reply_after_tool_execution():
+    def post(url, payload, headers):
+        if payload.get("tool_choice") == "required":
+            return 200, _groq_tool_response(payload)
+        return 200, '{"status":"incomplete","output":[]}'
+    result = ct.test_groq("groq-secret", "new-model", post=post)
+    assert not result["ok"] and "did not finish the reply" in result["summary"]
 
 
 def test_groq_does_not_accept_a_foreign_deployment_key():
@@ -129,7 +194,7 @@ def test_groq_does_not_accept_a_foreign_deployment_key():
 
 def test_groq_fails_if_summary_endpoint_rejects_the_key_and_redacts_provider_detail():
     def post(url, payload, headers):
-        return (200, "{}") if url.endswith("/responses") else (400, "bad groq-secret model")
+        return (200, _groq_tool_response(payload)) if url.endswith("/responses") else (400, "bad groq-secret model")
 
     result = ct.run_models_test({"mode": "groq", "api_key": "groq-secret"}, env={}, post=post)
     assert not result["ok"] and "meeting summaries" in result["summary"]
@@ -141,35 +206,112 @@ def test_groq_fails_if_summary_endpoint_rejects_the_key_and_redacts_provider_det
     assert "groq-secret" not in json.dumps(result)
 
 
+def test_groq_auth_failure_repeats_the_provider_reason_and_never_the_key():
+    body = json.dumps({"error": {"message": "Invalid API Key groq-secret", "type": "invalid_request_error"}})
+
+    result = ct.run_models_test({"mode": "groq", "api_key": "groq-secret"}, env={},
+                                post=lambda *_args: (401, body))
+
+    assert "Provider says: Invalid API Key [redacted]" in result["summary"]
+    assert "groq-secret" not in json.dumps(result)
+
+
 def test_deepseek_probes_its_anthropic_chat_and_compat_summary_dialects():
     calls = []
     def post(url, payload, headers):
         calls.append((url, payload, headers))
-        return 200, "{}"
+        return 200, _anthropic_tool_response(payload)
     result = ct.run_models_test({"mode": "deepseek", "api_key": "own-key",
                                  "meeting_model": "summary-model"}, env={}, post=post)
     assert result["ok"] and result["mode"] == "deepseek"
     assert calls[0][0] == "https://api.deepseek.com/anthropic/v1/messages"
     assert calls[0][1]["model"] == "deepseek-flash"
     assert calls[0][2] == {"Authorization": "Bearer own-key", "anthropic-version": "2023-06-01"}
-    assert calls[1][0] == "https://api.deepseek.com/chat/completions"
-    assert calls[1][1]["model"] == "summary-model"
-    assert calls[1][2] == {"Authorization": "Bearer own-key"}
+    assert calls[1][0] == "https://api.deepseek.com/anthropic/v1/messages"
+    assert calls[1][1]["messages"][-1]["content"][0]["tool_use_id"] == "probe-call-1"
+    assert calls[2][0] == "https://api.deepseek.com/chat/completions"
+    assert calls[2][1]["model"] == "summary-model"
+    assert calls[2][2] == {"Authorization": "Bearer own-key"}
     assert "own-key" not in json.dumps(result)
 
 
-def test_gemini_tests_completion_without_claiming_the_cli_has_been_verified():
+def _anthropic_tool_response(payload):
+    if len(payload.get("messages", [])) == 1:
+        return json.dumps({"stop_reason": "tool_use", "content": [
+            {"type": "thinking", "thinking": "connection check", "signature": "opaque-signature"},
+            {"type": "tool_use", "id": "probe-call-1", "name": "tina_connection_check",
+             "input": {"nonce": "tina_probe"}},
+        ]})
+    return json.dumps({"stop_reason": "end_turn", "content": [{"type": "text", "text": "OK"}]})
+
+
+def _gemini_tool_response(payload):
+    if payload.get("toolConfig", {}).get("functionCallingConfig", {}).get("mode") == "ANY":
+        return json.dumps({"candidates": [{"content": {"role": "model", "parts": [{
+            "functionCall": {"name": "tina_connection_check", "args": {"nonce": "tina_probe"}, "id": "probe-call-1"},
+            "thoughtSignature": "opaque-signature",
+        }]}, "finishReason": "STOP"}]})
+    return json.dumps({"candidates": [{"content": {"role": "model", "parts": [{"text": "OK"}]}, "finishReason": "STOP"}]})
+
+
+def test_gemini_tests_native_chat_tool_round_trip_and_summary_without_claiming_cli_execution():
     calls = []
     def post(url, payload, headers):
         calls.append((url, payload, headers))
-        return 200, "{}"
+        return 200, _gemini_tool_response(payload)
     result = ct.run_models_test({"mode": "gemini", "api_key": "own-key"}, env={}, post=post)
     assert result["ok"] and result["mode"] == "gemini"
-    assert calls == [("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
-        "model": "gemini-3.8-flash", "messages": [{"role": "user", "content": "Reply with OK."}],
+    assert calls[0][0] == "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent"
+    assert calls[0][1]["tools"][0]["functionDeclarations"][0]["name"] == "tina_connection_check"
+    assert calls[0][2] == {"x-goog-api-key": "own-key"}
+    assert calls[1][1]["contents"][1]["parts"][0]["thoughtSignature"] == "opaque-signature"
+    assert calls[1][1]["contents"][2]["parts"][0]["functionResponse"]["id"] == "probe-call-1"
+    assert calls[2] == ("https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", {
+        "model": "gemini-3.5-flash", "messages": [{"role": "user", "content": "Reply with OK."}],
         "max_tokens": 16,
-    }, {"Authorization": "Bearer own-key"})]
-    assert "first agent turn" in result["summary"]
+    }, {"Authorization": "Bearer own-key"})
+    assert len(calls) == 3
+    assert "full CLI workflow" in result["summary"]
+
+
+@pytest.mark.parametrize("mode", ["deepseek", "gemini", "bedrock"])
+def test_native_text_only_ping_cannot_pass_the_chat_tool_test(mode):
+    cfg = {"mode": mode, "api_key": "own-key", "model": "test-model", "region": "us-east-1"}
+    result = ct.run_models_test(cfg, env={}, post=lambda *_: (200, '{"content":[{"type":"text","text":"OK"}]}'))
+    assert not result["ok"] and "function" in result["summary"]
+
+
+def test_anthropic_probe_preserves_thinking_signature_and_tool_id():
+    calls = []
+    def post(url, payload, headers):
+        calls.append(payload)
+        return 200, _anthropic_tool_response(payload)
+    assert ct.test_deepseek("own-key", post=post)["ok"]
+    assert calls[1]["messages"][1]["content"][0]["signature"] == "opaque-signature"
+    assert calls[1]["messages"][2]["content"][0]["tool_use_id"] == "probe-call-1"
+
+
+@pytest.mark.parametrize("mode", ["deepseek", "gemini"])
+def test_native_probe_rejects_incomplete_tool_followup(mode):
+    def post(url, payload, headers):
+        if mode == "gemini":
+            first = len(payload.get("contents", [])) == 1
+            return 200, _gemini_tool_response(payload) if first else '{"candidates":[]}'
+        first = len(payload.get("messages", [])) == 1
+        return 200, _anthropic_tool_response(payload) if first else '{"stop_reason":"max_tokens","content":[]}'
+    result = ct.run_models_test({"mode": mode, "api_key": "own-key"}, env={}, post=post)
+    assert not result["ok"] and "after a tool result" in result["summary"]
+
+
+def test_gemini_native_chat_failure_cannot_be_hidden_by_working_summary_api():
+    calls = []
+    def post(url, payload, headers):
+        calls.append(url)
+        return 404, '{"error":{"message":"Model not found"}}'
+    result = ct.test_gemini("own-key", "gemini-3.5-flash", post=post)
+    assert result["ok"] is False and result["status"] == 404
+    assert "native chat" in result["summary"] and "Model not found" in result["summary"]
+    assert len(calls) == 1 and calls[0].endswith("gemini-3.5-flash:generateContent")
 
 
 @pytest.mark.parametrize("mode", ["deepseek", "gemini"])

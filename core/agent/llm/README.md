@@ -50,11 +50,27 @@ interface so TINA can keep its existing workspace and event boundary.
 
 ## Provider model settings
 
+Thinking is automatic for every provider. Legacy saved effort pins are ignored by dispatch
+and CLI adapters; the settings editor has no manual thinking field. Groq requests omit
+inherited reasoning parameters. `model_capabilities.py` retains the pinned agy built-in model
+check so API IDs outside its registry can be registered through `customModelsConfig` on the
+fixed Google endpoint. No API key is written into that config.
+
 Settings use the existing masked per-user/platform model credential field, independently
 of TINA transcript API tokens. A selected provider uses that provider's key and fixed
 endpoints for both chat and meeting processing; switching providers must suppress the
 previous provider's credentials. Live account keys and available models are required to
 verify inference beyond local protocol tests.
+
+### AWS Bedrock
+
+Bedrock settings select Claude Code's native Bedrock mode (`CLAUDE_CODE_USE_BEDROCK`),
+the chosen `AWS_REGION` and the user's `AWS_BEARER_TOKEN_BEDROCK`. Anthropic credentials
+and model aliases are pinned or cleared at dispatch rather than inherited from another provider.
+The existing Anthropic completion adapter recognizes the fixed Bedrock runtime base and adapts
+its Messages body to `/model/{encoded-model-id}/invoke`, with bearer authentication and
+`anthropic_version` in the body. This includes older Claude models without the native Messages
+route. Credential tests exercise that same invocation format, including a separate meeting model.
 
 ### Groq
 
@@ -64,11 +80,33 @@ summaries through the same base URL's `/chat/completions`. The default model is
 `openai/gpt-oss-20b`; an explicit meeting model can override it for completion jobs.
 The Codex sandbox and TINA MCP approval grants continue to apply. The temporary worker-local
 `groq_responses.py` loopback proxy authenticates Codex requests, strips unsupported Responses
-fields and non-function tools, and serializes tool calls for Groq's GPT-OSS models. It does
-not execute tools or expand the harness's grants. Upstream SSE events and HTTP error statuses
+fields and non-function tools, and serializes tool calls for Groq's GPT-OSS models. For other
+models, including Qwen, it maps Codex's developer messages to system messages while preserving
+their content, position, and function-call/result history. It does not execute tools or expand
+the harness's grants. Upstream SSE events and HTTP error statuses
 retain their existing path through Codex. Groq's
 [Responses API is in beta](https://console.groq.com/docs/responses-api); a live account key
 and an available model are required to verify inference beyond local protocol tests.
+
+The Groq credential test requires a real no-op function call, sends its matching result back,
+and checks a completed text reply before testing the separate summary model. HTTP 200 from
+a plain text ping cannot pass the agent test. The probe uses the same role/field adapter as
+the worker; it does not execute workspace tools. Known text-only `allam-2-7b` is disabled in
+the chat picker and rejected helpfully before launching Codex, but remains available as a
+meeting-summary model. Speech-only Orpheus entries are excluded from both text pickers.
+
+The pinned Codex CLI also receives a temporary Groq model profile with TINA instructions,
+no freeform patch tool and no namespace delegation. File edits use the existing sandboxed
+exec function. This keeps the prompt and tool definitions consistent instead of telling
+the model to call a patch tool that the HTTP compatibility layer cannot forward.
+
+Gemini defaults to `gemini-3.5-flash`. Gemini and DeepSeek credential tests also verify native
+function calls and matching results, preserving thought signatures and thinking blocks.
+Bedrock tests use native streaming invocation, including its separate IAM permission, and
+validate complete AWS event-stream frames. The full CLI tool protocols have offline tests
+against the pinned worker binaries. Provider quota, model access and regional availability
+still depend on the selected account. Gemini's text picker excludes specialist image,
+speech, music, robotics and computer-use entries.
 
 ### DeepSeek
 
@@ -83,7 +121,11 @@ continue to govern tool execution.
 ### Gemini
 
 **Settings → Models → Gemini** selects the existing `agy` harness with
-`modelProvider=gemini` and Gemini API-key authentication. Meeting completion jobs use
+`modelProvider=gemini` and Gemini API-key authentication. The pinned agy 1.4.11
+Gemini provider expects custom `modelName` to be the exact API model ID, such as
+`gemini-3.5-flash`; putting a host/version URI there corrupts the native SDK model path.
+The Gemini provider owns the base URL and API version. The offline real-CLI wire regression
+checks `/v1beta/models/{id}:streamGenerateContent` and completes a streamed turn. Meeting completion jobs use
 `openai-compat` at `https://generativelanguage.googleapis.com/v1beta/openai`, following the
 [Gemini compatibility API](https://ai.google.dev/gemini-api/docs/openai). Both default to
 `gemini-3.8-flash`. This provider requires a Gemini API key and does not fall back to

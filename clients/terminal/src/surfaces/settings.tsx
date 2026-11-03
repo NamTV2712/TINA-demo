@@ -4,7 +4,7 @@
  *  "API Tokens" activity-bar item retired into here (its panels are imported, not duplicated);
  *  the Meetings sidebar keeps its own first-connect calendar card at the point of need — this is
  *  the durable home (multi-calendar management lives in `calendarConnections.tsx`). Sections are a left nav with local state. */
-import { Fragment, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { Fragment, useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { registerTab } from "../contributions";
 import { Icon } from "../ui-kit";
 import { Modal } from "../ui-kit/Modal";
@@ -13,7 +13,7 @@ import { presentError } from "./apiClient";
 import { CalendarConnectionsPanel } from "./calendarConnections";
 import { ChatGPTModelInput } from "./chatGPTModelInput";
 import { ModelPicker } from "./modelPicker";
-import { fallbackChoicesForMode, INTELLIGENCE_OPTIONS } from "./modelCatalog";
+import { BEDROCK_REGIONS, fallbackChoicesForMode } from "./modelCatalog";
 import { AsrStatusPanel } from "./asrStatus";
 import { apiModelProvider, canSaveModelPrefs, getModelPrefs, setModelPrefs, getTranscriptionPrefs, setTranscriptionPrefs, getGlobalSetting, setGlobalSetting, testModels, testTranscription, type ConfigTestResult } from "./settingsApi";
 
@@ -189,7 +189,7 @@ export function ChatGPTPlanConnection() {
  *  global settings. Secrets arrive MASKED (********abcd): an untouched masked value is never sent
  *  back, typing replaces it, and emptying a previously-set field clears it. */
 function ConfigForm({ fields, load, save, note, savedNote = "Saved — next agent turn uses it", chatGPTModelCatalog = false, chatGPTConnection = false, onValues, renderWarning, saveGuard, footer }: {
-  fields: Array<{ key: string; label: string; placeholder?: string | ((v: Record<string, string>) => string); secret?: boolean; checkbox?: boolean; options?: Array<{ value: string; label: string; disabled?: boolean }>; showIf?: (v: Record<string, string>) => boolean; modelPicker?: (v: Record<string, string>) => boolean; modelEmptyLabel?: (v: Record<string, string>) => string }>;
+  fields: Array<{ key: string; label: string; placeholder?: string | ((v: Record<string, string>) => string); secret?: boolean; checkbox?: boolean; options?: Array<{ value: string; label: string; disabled?: boolean }> | ((v: Record<string, string>) => Array<{ value: string; label: string; disabled?: boolean }>); hint?: (v: Record<string, string>) => string; showIf?: (v: Record<string, string>) => boolean; modelPicker?: (v: Record<string, string>) => boolean; modelEmptyLabel?: (v: Record<string, string>) => string }>;
   load: () => Promise<Record<string, string>>;
   save: (update: Record<string, string>) => Promise<Record<string, string>>;
   note?: string;
@@ -202,6 +202,7 @@ function ConfigForm({ fields, load, save, note, savedNote = "Saved — next agen
   footer?: (state: { dirty: boolean; values: Record<string, string> }) => ReactNode;
 }) {
   const [values, setValues] = useState<Record<string, string>>({});
+  const regionSuggestionsId = useId();
   const [initial, setInitial] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -218,11 +219,12 @@ function ConfigForm({ fields, load, save, note, savedNote = "Saved — next agen
   const dirty = fields.some((f) => (values[f.key] ?? "") !== (initial[f.key] ?? ""));
   const updateField = (key: string, value: string) => {
     const next = { ...values, [key]: value };
-    // An API provider is a different endpoint + credential + model namespace, so switching into or
-    // out of one must not carry the previous provider's values across. Intelligence (effort) is a
-    // separate per-turn budget and survives the switch.
-    if (key === "mode" && value !== values.mode && (apiModelProvider(value) || apiModelProvider(values.mode))) {
-      for (const providerField of ["api_key", "base_url", "model", "meeting_model"]) next[providerField] = "";
+    if (key === "mode" && value !== values.mode) {
+      // An API provider is a different endpoint + credential + model namespace, so switching into or
+      // out of one must not carry the previous provider's values across.
+      if (apiModelProvider(value) || apiModelProvider(values.mode)) {
+        for (const providerField of ["api_key", "base_url", "model", "meeting_model"]) next[providerField] = "";
+      }
     }
     setSaved(false);
     setValues(next);
@@ -257,15 +259,17 @@ function ConfigForm({ fields, load, save, note, savedNote = "Saved — next agen
           );
         }
         const useModelPicker = f.modelPicker?.(values) ?? false;
+        const options = typeof f.options === "function" ? f.options(values) : f.options;
+        const hint = f.hint?.(values);
         return (
           <Fragment key={f.key}>
             <label style={{ display: "flex", alignItems: useModelPicker ? "flex-start" : "center", gap: 12, fontSize: 13.5, color: "var(--t2)" }}>
               <span style={{ width: 128, flex: "none", color: "var(--t3)", ...(useModelPicker ? { paddingTop: 9 } : {}) }}>{f.label}</span>
-              {f.options ? (
+              {options ? (
                 <select value={values[f.key] ?? ""}
                   onChange={(e) => updateField(f.key, e.target.value)}
                   style={{ ...field, width: "auto", flex: 1 }}>
-                  {f.options.map((o) => <option key={o.value} value={o.value} disabled={o.disabled}>{o.label}</option>)}
+                  {options.map((o) => <option key={o.value} value={o.value} disabled={o.disabled}>{o.label}</option>)}
                 </select>
               ) : chatGPTModelCatalog && f.key === "model" && values.mode === "openai-subscription" ? (
                 <ChatGPTModelInput
@@ -281,16 +285,26 @@ function ConfigForm({ fields, load, save, note, savedNote = "Saved — next agen
                   onChange={(value) => updateField(f.key, value)}
                   mode={values.mode ?? ""}
                   apiKey={values.api_key}
+                  region={values.region}
+                  requiresTools={f.key === "model"}
+                  suggestDefault={values.mode === "bedrock" && f.key === "model"}
                   emptyLabel={f.modelEmptyLabel?.(values) ?? "Provider default"}
                   style={field}
                 />
               ) : (
-                <input value={values[f.key] ?? ""} aria-label={f.label} placeholder={typeof f.placeholder === "function" ? f.placeholder(values) : f.placeholder}
+                <><input value={values[f.key] ?? ""} aria-label={f.label} placeholder={typeof f.placeholder === "function" ? f.placeholder(values) : f.placeholder}
                   type={f.secret ? "password" : "text"}
+                  list={f.key === "region" ? regionSuggestionsId : undefined}
                   onChange={(e) => updateField(f.key, e.target.value)}
                   style={field} />
+                  {f.key === "region" && <datalist id={regionSuggestionsId}>
+                    {BEDROCK_REGIONS.map((region) => <option key={region.value} value={region.value}>{region.label}</option>)}
+                  </datalist>}</>
               )}
             </label>
+            {hint && (
+              <p style={{ margin: "0 0 0 140px", fontSize: 11.5, color: "var(--t3)", lineHeight: 1.5 }}>{hint}</p>
+            )}
             {chatGPTConnection && f.key === "mode" && values.mode === "openai-subscription" && <ChatGPTPlanConnection />}
           </Fragment>
         );
@@ -384,7 +398,8 @@ function ModelsSection() {
       { value: "custom", label: "Custom endpoint (open-source / gateway)" },
     ] },
     { key: "base_url", label: "Base URL", placeholder: "https://… (Anthropic/OpenAI-compatible gateway)", showIf: (v: Record<string, string>) => v.mode === "custom" },
-    { key: "region", label: "AWS Region", placeholder: "e.g. us-east-1", showIf: (v: Record<string, string>) => v.mode === "bedrock" },
+    { key: "region", label: "AWS Region", placeholder: "Choose or enter a region", showIf: (v: Record<string, string>) => v.mode === "bedrock",
+      hint: () => "Use the region where your Bedrock key was generated. Model suggestions refresh for this region; you can also enter another AWS region." },
     { key: "api_key", label: "Credential", placeholder: (v: Record<string, string>) => apiModelProvider(v.mode) ? `${apiModelProvider(v.mode)!.label} API key — unchanged unless typed` : "unchanged unless typed", secret: true, showIf: (v: Record<string, string>) => ["antigravity", "custom", "bedrock", "openai-api", "groq", "deepseek", "gemini"].includes(v.mode) },
     { key: "antigravity_terms_acknowledged", label: "I have read this warning and acknowledge the account risk.", checkbox: true, showIf: (v: Record<string, string>) => v.mode === "antigravity" },
     { key: "model", label: "Chat model", placeholder: (v: Record<string, string>) => apiModelProvider(v.mode) ? `${apiModelProvider(v.mode)!.model} (default)` : "deployment default (e.g. sonnet)",
@@ -394,12 +409,12 @@ function ModelsSection() {
         if (provider) return `Provider default — ${provider.model}`;
         if (v.mode === "subscription") return "Deployment default (e.g. sonnet)";
         if (v.mode === "antigravity") return "CLI default";
+        if (v.mode === "bedrock") return "Choose a regional model (required)";
         return "Provider default";
       } },
     { key: "meeting_model", label: "Meeting model", placeholder: "defaults to chat model", showIf: (v: Record<string, string>) => v.mode !== "antigravity",
       modelPicker: (v: Record<string, string>) => fallbackChoicesForMode(v.mode) !== null,
       modelEmptyLabel: () => "Same as chat model" },
-    { key: "effort", label: "Intelligence", options: INTELLIGENCE_OPTIONS.map((option) => ({ value: option.value, label: option.label })) },
   ];
   const renderModelWarning = (values: Record<string, string>) => values.mode === "antigravity" ? (
     <div role="alert" style={{ border: "1px solid var(--danger)", borderRadius: 8, padding: "10px 12px", background: "color-mix(in srgb, var(--danger) 8%, transparent)", color: "var(--t2)", fontSize: 12.5, lineHeight: 1.55 }}>

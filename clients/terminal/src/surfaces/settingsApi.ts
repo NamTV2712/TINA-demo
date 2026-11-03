@@ -8,7 +8,7 @@ export type ModelPrefs = {
   mode?: "subscription" | "custom" | "bedrock" | "openai-api" | "openai-subscription" | "antigravity" | "groq" | "deepseek" | "gemini" | null;
   model?: string | null;
   meeting_model?: string | null;
-  effort?: string | null; // reasoning-effort pin (low|medium|high|xhigh) for the agent harness
+  effort?: string | null; // deprecated; ignored by runners, cleared on save (Auto)
   base_url?: string | null;
   region?: string | null;
   api_key_set?: boolean;
@@ -19,7 +19,7 @@ export type ModelPrefs = {
 const API_MODEL_PROVIDERS = {
   groq: { label: "Groq", model: "openai/gpt-oss-20b", keyUrl: "https://console.groq.com/keys" },
   deepseek: { label: "DeepSeek", model: "deepseek-flash", keyUrl: "https://platform.deepseek.com/api_keys" },
-  gemini: { label: "Gemini", model: "gemini-3.8-flash", keyUrl: "https://aistudio.google.com/apikey" },
+  gemini: { label: "Gemini", model: "gemini-3.5-flash", keyUrl: "https://aistudio.google.com/apikey" },
 } as const;
 
 export function apiModelProvider(mode: string | undefined) {
@@ -60,7 +60,7 @@ export async function getModelPrefs(): Promise<ModelPrefs> {
 
 export async function setModelPrefs(update: Partial<Record<keyof ModelPrefs, string>>): Promise<ModelPrefs> {
   return jsonOrThrow(await fetch("/api/user/models", {
-    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(update),
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...update, effort: "" }),
   }));
 }
 
@@ -88,7 +88,7 @@ export async function getGlobalSetting(key: GlobalSettingKey): Promise<GlobalSet
 
 export async function setGlobalSetting(key: GlobalSettingKey, update: GlobalSetting): Promise<GlobalSetting> {
   const res = await fetch(`/api/admin/settings/${key}`, {
-    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(update),
+    method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(key === "models" ? { ...update, effort: "" } : update),
   });
   const body = await jsonOrThrow(res) as { value?: GlobalSetting };
   return body.value ?? {};
@@ -111,19 +111,19 @@ export async function testModels(): Promise<ConfigTestResult> {
   return jsonOrThrow(await fetch("/api/models/test", { cache: "no-store" }));
 }
 
-export type ModelCatalogModel = { id: string; name?: string };
+export type ModelCatalogModel = { id: string; name?: string; supports_tools?: boolean };
 
 /** The provider's live model list for the picker. `apiKey` may be a DRAFT the user is still typing
  *  (shown before Save); a masked read-back is not a credential and is omitted so the server uses
  *  the saved effective key for that provider. The key is used for this one request only. */
 export async function fetchModelCatalog(
-  mode: string, apiKey: string | undefined, signal?: AbortSignal,
+  mode: string, apiKey: string | undefined, signal?: AbortSignal, region?: string,
 ): Promise<ModelCatalogModel[]> {
   const draft = apiKey && !apiKey.startsWith("********") ? apiKey : undefined;
   const res = await fetch("/api/models/catalog", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ mode, ...(draft ? { api_key: draft } : {}) }),
+    body: JSON.stringify({ mode, ...(draft ? { api_key: draft } : {}), ...(mode === "bedrock" ? { region } : {}) }),
     cache: "no-store",
     signal,
   });

@@ -16,13 +16,16 @@ const CUSTOM_LABEL = "Custom model…";
  *  saved value is not in the list (a newer or account-only model).
  */
 export function ModelPicker({
-  ariaLabel, value, onChange, mode, apiKey, emptyLabel = "Provider default", style,
+  ariaLabel, value, onChange, mode, apiKey, region, requiresTools = true, suggestDefault = false, emptyLabel = "Provider default", style,
 }: {
   ariaLabel: string;
   value: string;
   onChange: (value: string) => void;
   mode: string;
   apiKey?: string;
+  region?: string;
+  requiresTools?: boolean;
+  suggestDefault?: boolean;
   emptyLabel?: string;
   style?: CSSProperties;
 }) {
@@ -30,6 +33,7 @@ export function ModelPicker({
   const [choices, setChoices] = useState<ModelChoice[]>(fallback);
   const [status, setStatus] = useState<"idle" | "loading" | "live" | "fallback">("idle");
   const [notice, setNotice] = useState<string | null>(null);
+  const [liveScope, setLiveScope] = useState("");
   const [custom, setCustom] = useState(() => value !== "" && !fallback.some((choice) => choice.id === value));
   const [chosenCustom, setChosenCustom] = useState(false);
 
@@ -50,9 +54,12 @@ export function ModelPicker({
     const timer = setTimeout(async () => {
       setStatus("loading");
       try {
-        const live = await fetchModelCatalog(mode, apiKey, controller.signal);
+        const live = await fetchModelCatalog(mode, apiKey, controller.signal, region);
         if (!active) return;
-        setChoices(live.map((model) => ({ id: model.id, label: model.name || model.id })));
+        setChoices(live.map((model) => ({
+          id: model.id, label: model.name || model.id, supportsTools: model.supports_tools,
+        })));
+        setLiveScope(`${mode}:${region ?? ""}`);
         setStatus("live");
         setNotice(live.length ? null : "The provider listed no chat models.");
       } catch (error: unknown) {
@@ -68,27 +75,48 @@ export function ModelPicker({
       clearTimeout(timer);
       controller.abort();
     };
-  }, [mode, apiKey, fallback]);
+  }, [mode, apiKey, region, fallback]);
 
   useEffect(() => {
-    // A saved ID that is not in the list must remain visible and editable; a live list that later
-    // contains it may close the custom box unless the user explicitly chose custom mode.
+    // A value the current list does not carry (a saved ID, an account-only model) must stay visible:
+    // showing the first option instead would hide what is actually saved. While the live request is
+    // in flight the fallback IS `choices`, so this only flips once the provider has answered. A live
+    // list that later contains the value closes the box unless the user explicitly chose custom.
+    if (value && choices.some((choice) => choice.id === value)) {
+      setCustom(false);
+      setChosenCustom(false);
+      return;
+    }
     if (chosenCustom) return;
     if (!value) {
       setCustom(false);
       return;
     }
-    setCustom(!choices.some((choice) => choice.id === value) && !fallback.some((choice) => choice.id === value));
-  }, [value, choices, fallback, chosenCustom]);
+    setCustom(!choices.some((choice) => choice.id === value));
+  }, [value, choices, chosenCustom]);
 
-  const hint = custom
-    ? "Type any model ID. Leave it blank to use the default."
+  useEffect(() => {
+    // Draft suggestion only: Save still owns persistence. Meeting model keeps its inherit option.
+    if (suggestDefault && status === "live" && liveScope === `${mode}:${region ?? ""}` && !value && !chosenCustom && choices.length) {
+      onChange(choices[0].id);
+    }
+  }, [suggestDefault, status, liveScope, mode, region, value, chosenCustom, choices, onChange]);
+
+  const unsupportedChat = requiresTools && choices.some((choice) => choice.id === value && choice.supportsTools === false);
+  const hint = unsupportedChat
+    ? "This model supports meeting summaries only. Choose a model with tool calling for chat."
+    : custom
+    ? mode === "bedrock"
+      ? `This ID is not in the current regional list. Choose a suggested model above, or enter an exact ID from working AWS code. ${notice ?? ""}`
+      : "Type any model ID. Leave it blank to use the default."
     : status === "loading"
       ? "Loading models from the provider…"
       : status === "fallback"
         ? `${notice ?? "Could not load models from the provider."} Showing built-in suggestions — use ${CUSTOM_LABEL} for another ID.`
         : status === "live"
-          ? `${choices.length} model${choices.length === 1 ? "" : "s"} available from the provider.`
+          ? mode === "bedrock"
+            ? `${choices.length} regional model/profile suggestions. Access depends on your account; save and test the selected model.`
+            : `${choices.length} model${choices.length === 1 ? "" : "s"} available from the provider.`
           : emptyLabel;
 
   return (
@@ -112,8 +140,9 @@ export function ModelPicker({
       >
         <option value="">{emptyLabel}</option>
         {choices.map((choice) => (
-          <option key={choice.id} value={choice.id}>
+          <option key={choice.id} value={choice.id} disabled={requiresTools && choice.supportsTools === false}>
             {choice.label === choice.id ? choice.id : `${choice.label} — ${choice.id}`}
+            {requiresTools && choice.supportsTools === false ? " (meeting summaries only)" : ""}
           </option>
         ))}
         <option value={CUSTOM_VALUE}>{CUSTOM_LABEL}</option>

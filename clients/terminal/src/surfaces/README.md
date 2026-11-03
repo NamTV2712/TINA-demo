@@ -15,8 +15,10 @@ stay local to the current page.
 Settings → Models (`settings.tsx`) renders provider-specific model lists through
 `modelCatalog.ts` + `modelPicker.tsx`: the picker asks the provider for the credential's live
 model list (`/api/models/catalog`) and falls back to short built-in suggestions while that request
-is unavailable. **Custom model…** keeps newer or account-only IDs reachable, and **Intelligence**
-is its own selector for the per-turn reasoning budget. The credential test below the form is
+is unavailable. **Custom model…** keeps newer or account-only IDs reachable. Thinking uses Auto
+for every provider, with no manual selector. Known text-only models are disabled for Chat model
+and remain selectable for Meeting model. Groq's credential test checks a function call, its
+matching result, and the final reply through the worker's compatibility adapter. The test below the form is
 disabled while the form is dirty: it probes the SAVED config, so testing before Save would report
 the previous provider.
 

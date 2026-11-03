@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import type { MeetingMock } from "../../surfaces/meetingModel";
 
 /** Behavioral contract of the transcript-pane toggle (fix/terminal-processed-default-view):
  *  - COMPLETED meeting with persisted processed notes → DEFAULTS to the processed view
@@ -12,7 +13,7 @@ import { createRoot, type Root } from "react-dom/client";
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const durableState: { lines: unknown[]; notes: unknown[]; processingStatus?: string } = { lines: [], notes: [] };
-let meetingsState: unknown[] = [];
+let meetingsState: MeetingMock[] = [];
 
 vi.mock("../../surfaces/liveMeetings", () => ({
   useLiveMeetings: () => meetingsState,
@@ -35,7 +36,7 @@ import { LayoutServiceId, createLayoutService } from "../../workbench/layout";
 const NOTE = { id: "n1", speaker: "Jane", text: "We agreed to ship Friday.", t: 1, pass: 1 };
 const LINE = { speaker: "Jane", text: "so um we agreed to ship friday", t: 1 };
 
-function meetingRow(live: boolean) {
+function meetingRow(live: boolean): MeetingMock {
   return {
     id: "abc-defg-hij", native_id: "abc-defg-hij",
     session_uid: live ? "abc-defg-hij" : undefined,
@@ -65,7 +66,7 @@ afterEach(() => {
 async function renderCanvas() {
   root = createRoot(container);
   const container2 = createContainer([reg(LayoutServiceId, () => createLayoutService("meetings"))]);
-  const meetingRecord = meetingsState[0] as ReturnType<typeof meetingRow> | undefined;
+  const meetingRecord = meetingsState[0];
   await act(async () => {
     root.render(
       <ServicesProvider container={container2}>

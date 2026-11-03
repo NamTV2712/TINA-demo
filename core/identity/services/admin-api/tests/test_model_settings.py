@@ -121,6 +121,40 @@ def test_api_provider_user_models_mask_secret_and_resolve_meeting_model(client, 
     }
 
 
+@pytest.mark.parametrize("scope", ["user", "platform"])
+@pytest.mark.parametrize("key_length", [4096, 32768])
+def test_bedrock_long_api_key_roundtrip_is_masked(client, scope, key_length):
+    uid, tok = _user_token(client)
+    path = "/user/models" if scope == "user" else "/internal/settings/models"
+    headers = {"X-API-Key": tok} if scope == "user" else _internal()
+    key = "test-bedrock-" + "a" * (key_length - len("test-bedrock-") - 4) + "abcd"
+    response = client.put(path, headers=headers, json={
+        "mode": "bedrock", "region": "us-east-1", "api_key": key,
+    })
+    assert response.status_code == 200
+    if scope == "user":
+        assert key not in response.text
+    public = client.get("/user/models", headers={"X-API-Key": tok})
+    assert key not in public.text
+    resolved = client.get(
+        f"/internal/users/{uid}/model-config", headers=_internal(),
+    ).json()["models"]
+    assert resolved["api_key"] == key
+
+
+@pytest.mark.parametrize("scope", ["user", "platform"])
+@pytest.mark.parametrize("field,length", [("api_key", 32769), ("model", 2049)])
+def test_model_settings_length_limits_do_not_echo_rejected_values(client, scope, field, length):
+    _uid, tok = _user_token(client)
+    path = "/user/models" if scope == "user" else "/internal/settings/models"
+    headers = {"X-API-Key": tok} if scope == "user" else _internal()
+    value = "x" * length
+    response = client.put(path, headers=headers, json={field: value})
+    assert response.status_code == 422
+    assert value not in response.text
+    assert field in response.json()["detail"]
+
+
 @pytest.mark.parametrize("provider,chat_model,meeting_model", PROVIDER_MODELS)
 def test_api_provider_platform_models_apply_to_default_user(client, provider, chat_model, meeting_model):
     uid, tok = _user_token(client, email=f"{provider}-default@example.test")

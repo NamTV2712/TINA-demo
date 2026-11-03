@@ -2,7 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import { ModelPicker } from "../modelPicker";
-import { fallbackChoicesForMode, hasLiveCatalog, INTELLIGENCE_OPTIONS } from "../modelCatalog";
+import {
+  fallbackChoicesForMode, hasLiveCatalog,
+} from "../modelCatalog";
 
 beforeEach(() => {
   vi.stubGlobal("fetch", vi.fn(async () => Response.json({
@@ -27,25 +29,83 @@ describe("modelCatalog", () => {
     expect(fallbackChoicesForMode("")).toBeNull();
     expect(fallbackChoicesForMode(undefined)).toBeNull();
     expect(fallbackChoicesForMode("custom")).toBeNull();
-    expect(fallbackChoicesForMode("bedrock")).toBeNull();
+    expect(fallbackChoicesForMode("bedrock")).toEqual([]);
     expect(fallbackChoicesForMode("openai-subscription")).toBeNull();
   });
 
   it("uses a live catalogue only for providers with a list endpoint", () => {
     expect(hasLiveCatalog("groq")).toBe(true);
+    expect(hasLiveCatalog("bedrock")).toBe(true);
     expect(hasLiveCatalog("openai-api")).toBe(true);
     expect(hasLiveCatalog("subscription")).toBe(false);
     expect(hasLiveCatalog("")).toBe(false);
   });
 
-  it("offers intelligence as its own choice, not part of the model name", () => {
-    expect(INTELLIGENCE_OPTIONS.map((option) => option.value)).toEqual(["", "low", "medium", "high", "xhigh"]);
-    expect(INTELLIGENCE_OPTIONS[0].label).toBe("Auto — model default");
-    expect(INTELLIGENCE_OPTIONS.at(-1)?.label).toBe("Maximum — deepest thinking");
-  });
+
 });
 
 describe("ModelPicker", () => {
+  it("keeps text-only models available for summaries and explains why chat cannot select them", async () => {
+    vi.mocked(fetch).mockImplementation(async () => Response.json({ models: [
+      { id: "allam-2-7b", name: "ALLaM 2 7B", supports_tools: false },
+      { id: "qwen/qwen3.8-27b", name: "Qwen 3.8 27B" },
+    ] }));
+    render(<ModelPicker ariaLabel="Chat model" value="allam-2-7b" onChange={() => undefined}
+      mode="groq" />);
+    const chatOption = await screen.findByRole("option", { name: /ALLaM 2 7B.*meeting summaries only/ });
+    expect((chatOption as HTMLOptionElement).disabled).toBe(true);
+    expect(screen.getByText(/Choose a model with tool calling for chat/)).toBeTruthy();
+    expect((screen.getByRole("option", { name: /Qwen 3.8 27B/ }) as HTMLOptionElement).disabled).toBe(false);
+    cleanup();
+    render(<ModelPicker ariaLabel="Meeting model" value="allam-2-7b" onChange={() => undefined}
+      mode="groq" requiresTools={false} />);
+    const summaryOption = await screen.findByRole("option", { name: "ALLaM 2 7B — allam-2-7b" });
+    expect((summaryOption as HTMLOptionElement).disabled).toBe(false);
+    expect(screen.queryByText(/Choose a model with tool calling for chat/)).toBeNull();
+  });
+
+  it("suggests a Bedrock chat model from the regional list without changing meeting inheritance", async () => {
+    vi.mocked(fetch).mockResolvedValue(Response.json({ models: [
+      { id: "us.anthropic.claude-sonnet-4-6", name: "Claude Sonnet 4.6" },
+    ] }));
+    const onChange = vi.fn();
+    render(<ModelPicker ariaLabel="Chat model" value="" onChange={onChange}
+      mode="bedrock" region="us-east-1" suggestDefault />);
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith("us.anthropic.claude-sonnet-4-6"));
+    cleanup();
+    onChange.mockClear();
+    render(<ModelPicker ariaLabel="Meeting model" value="" onChange={onChange}
+      mode="bedrock" region="us-east-1" />);
+    await screen.findByText(/regional model\/profile suggestions/);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("returns a typed Bedrock ID to the dropdown when the regional list contains it", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(Response.json({ models: [
+      { id: "us.anthropic.claude-sonnet-4-6", name: "Claude Sonnet 4.6" },
+    ] }));
+    render(<ModelPicker ariaLabel="Chat model" value="us.anthropic.claude-sonnet-4-6"
+      onChange={() => undefined} mode="bedrock" region="us-east-1" />);
+    await waitFor(() => expect((screen.getByLabelText("Chat model") as HTMLSelectElement).value)
+      .toBe("us.anthropic.claude-sonnet-4-6"), { timeout: 3000 });
+    expect(screen.queryByLabelText("Chat model (custom)")).toBeNull();
+  });
+  it("refreshes the Bedrock catalogue when the selected region changes", async () => {
+    const { rerender } = render(<ModelPicker ariaLabel="Chat model" value="" onChange={() => undefined}
+      mode="bedrock" apiKey="bedrock-draft" region="us-east-1" />);
+    await waitFor(() => expect(vi.mocked(fetch)).toHaveBeenCalled());
+    expect(JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body)))
+      .toEqual({ mode: "bedrock", api_key: "bedrock-draft", region: "us-east-1" });
+    vi.mocked(fetch).mockClear();
+    rerender(<ModelPicker ariaLabel="Chat model" value="" onChange={() => undefined}
+      mode="bedrock" apiKey="bedrock-draft" region="eu-west-1" />);
+    await waitFor(() => expect(vi.mocked(fetch)).toHaveBeenCalled());
+    expect(JSON.parse(String(vi.mocked(fetch).mock.calls[0][1]?.body)))
+      .toEqual({ mode: "bedrock", api_key: "bedrock-draft", region: "eu-west-1" });
+    expect(screen.getByText(/Access depends on your account/)).toBeTruthy();
+  });
+
+
   it("replaces the fallback list with the provider's live models", async () => {
     render(<ModelPicker ariaLabel="Chat model" value="" onChange={() => undefined}
       mode="deepseek" emptyLabel="Provider default — deepseek-flash" />);
