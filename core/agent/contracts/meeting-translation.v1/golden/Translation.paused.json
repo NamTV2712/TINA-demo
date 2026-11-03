@@ -1,0 +1,21 @@
+{
+  "version": "meeting-translation.v1",
+  "meeting_id": 6,
+  "target_language": "en",
+  "status": "paused",
+  "retry_after": 15,
+  "total": 2,
+  "completed": 1,
+  "segments": [
+    {
+      "segment_id": "s1",
+      "source_text": "Xin chào.",
+      "translated_text": "Hello."
+    },
+    {
+      "segment_id": "s2",
+      "source_text": "Hẹn gặp lại.",
+      "translated_text": null
+    }
+  ]
+}

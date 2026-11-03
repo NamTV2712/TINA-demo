@@ -38,8 +38,8 @@ const LINE = { speaker: "Jane", text: "so um we agreed to ship friday", t: 1 };
 
 function meetingRow(live: boolean): MeetingMock {
   return {
-    id: "abc-defg-hij", native_id: "abc-defg-hij",
-    session_uid: live ? "abc-defg-hij" : undefined,
+    id: "6", native_id: "abc-defg-hij",
+    session_uid: live ? "6" : undefined,
     title: "Google Meet · abc-defg-hij", when: "", status: live ? "live" : "past",
     platform: "Google Meet", participants: [], mentioned: [], actions: [], transcript: [], insights: [],
   };
@@ -70,12 +70,16 @@ async function renderCanvas() {
   await act(async () => {
     root.render(
       <ServicesProvider container={container2}>
-        <MeetingCanvasView meetingId="abc-defg-hij" meetingRecord={meetingRecord} />
+        <MeetingCanvasView meetingId="6" meetingRecord={meetingRecord} />
       </ServicesProvider>,
     );
   });
   // flush the async durable hydration
   await act(async () => { await Promise.resolve(); });
+  const language = container.querySelector<HTMLSelectElement>('select[aria-label="Transcript language"]')!;
+  expect(language.value).toBe('bilingual');
+  // These tests exercise original/processed switching after explicitly choosing Vietnamese.
+  await act(async () => { language.value = 'vi'; language.dispatchEvent(new Event('change', { bubbles: true })); });
 }
 
 function toggleButton(): HTMLButtonElement {
@@ -100,6 +104,7 @@ describe("MeetingCanvasView — default view + toggle semantics", () => {
     meetingsState = [meetingRow(false)]; durableState.lines = [LINE]; durableState.notes = [];
     await renderCanvas();
     expect(processCalls()).toBe(0);
+    await act(async () => { [...container.querySelectorAll('button')].find(b => b.textContent === 'Meeting info')!.click(); });
     const button = [...container.querySelectorAll('button')].find(b => b.textContent === 'Generate AI notes')!;
     await act(async () => { button.click(); });
     const request = fetchMock.mock.calls.find(([url]) => url === '/api/meeting/process');
@@ -109,6 +114,7 @@ describe("MeetingCanvasView — default view + toggle semantics", () => {
   it('allows disabling automatic AI updates for a completed meeting', async () => {
     meetingsState = [meetingRow(false)]; durableState.lines = [LINE]; durableState.notes = [NOTE]; durableState.processingStatus = 'current';
     await renderCanvas();
+    await act(async () => { [...container.querySelectorAll('button')].find(b => b.textContent === 'Meeting info')!.click(); });
     const button = [...container.querySelectorAll('button')].find(b => b.textContent === 'Disable AI updates')!;
     await act(async () => { button.click(); });
     const request = fetchMock.mock.calls.find(([url]) => url === '/api/meeting/process');

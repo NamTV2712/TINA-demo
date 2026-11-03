@@ -14,11 +14,13 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { recordAsrTiming } from "../lib/asrTelemetry";
 import { splitTextIntoSpans, type SpanEntity } from "./inlineSpans";
 import { entityColor } from "../ui-kit/docLinks";
+import type { TranscriptLanguage } from "./MeetingTranslation";
+import type { PhraseTranslation } from "./translationGroups";
 
 export interface EngineTag { label: string; kind: string }
 export interface EngineEntity { id?: string; label: string; kind: string; docPath?: string }
 export interface EngineSignal { id: string; kind: string; label: string }
-export interface EngineSegment { speakerId?: string; speaker?: string; text: string; tsMs?: number; endTsMs?: number; id?: string; completed?: boolean; tags?: EngineTag[]; stale?: boolean; evidence?: unknown[] }
+export interface EngineSegment { speakerId?: string; speaker?: string; text: string; tsMs?: number; endTsMs?: number; id?: string; completed?: boolean; tags?: EngineTag[]; stale?: boolean; evidence?: unknown[]; translation?: PhraseTranslation }
 
 export function TranscriptEvidence({ evidence }: { evidence?: unknown[] }) {
   const [open, setOpen] = useState(false);
@@ -155,6 +157,8 @@ export function LiveTranscriptEngine({
   onSegmentClick,
   playableSegmentIds,
   activeSegmentId,
+  language = "vi",
+  translationPaused = false,
 }: {
   segments: EngineSegment[];
   emptyLabel?: string;
@@ -164,6 +168,8 @@ export function LiveTranscriptEngine({
   onSegmentClick?: (segmentId: string) => void;
   playableSegmentIds?: ReadonlySet<string>;
   activeSegmentId?: string | null;
+  language?: TranscriptLanguage;
+  translationPaused?: boolean;
 }) {
   const renderedAt = performance.now();
   useLayoutEffect(() => {
@@ -206,6 +212,28 @@ export function LiveTranscriptEngine({
         )}
       </div>
     ) : null;
+
+  if (language !== "vi") {
+    return <div style={{ display: "flex", flexDirection: "column", gap: 18, maxWidth: 760 }}>
+      {segments.map((segment, index) => {
+        const translated = segment.translation?.text;
+        const draft = segment.completed === false;
+        const originalVisible = language === "bilingual" || !translated;
+        const playable = !!segment.id && playableSegmentIds?.has(segment.id) && !!onSegmentClick;
+        return <article key={segment.translation?.groupId ?? segment.id ?? index}>
+          {head(segment.speaker, segment.tsMs)}
+          {originalVisible && <div style={{ fontSize: 14, lineHeight: 1.65, color: "var(--t1)", fontStyle: draft ? "italic" : "normal" }}>
+            {playable ? <button type="button" onClick={() => onSegmentClick?.(segment.id!)} aria-label="Play transcript segment"
+              style={{ background: "transparent", border: 0, padding: 0, color: "inherit", font: "inherit", textAlign: "left", cursor: "pointer" }}>{segment.text}</button> : segment.text}
+          </div>}
+          <div lang="en" style={{ marginTop: 5, paddingLeft: 10, borderLeft: "2px solid var(--line2)", fontSize: 14, lineHeight: 1.65, color: "var(--t2)", whiteSpace: "pre-wrap" }}>
+            <span style={{ fontSize: 10, fontWeight: 700, marginRight: 6 }}>EN</span>
+            {translated || (draft ? "Chờ đoạn nói hoàn tất…" : translationPaused ? "Chưa dịch được · bản gốc vẫn được giữ" : segment.translation?.ready ? "Đang dịch…" : "Đang gom câu…")}
+          </div>
+        </article>;
+      })}
+    </div>;
+  }
 
   // When a saved recording is available, keep the original ASR turns separate so each click maps to
   // that exact audio timestamp. The regular live transcript still merges same-speaker fragments.

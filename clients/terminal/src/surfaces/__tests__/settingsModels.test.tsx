@@ -14,12 +14,12 @@ it("hides manual thinking and clears a legacy pin when model settings are saved"
   });
   vi.stubGlobal("fetch", fetchMock);
   render(<SettingsDialog onClose={() => undefined} />);
-  fireEvent.click(screen.getByRole("button", { name: "Models", exact: true }));
+  fireEvent.click(screen.getByRole("button", { name: "Models" }));
   await waitFor(() => expect((screen.getByLabelText("Chat model") as HTMLSelectElement).value).toBe("openai/gpt-oss-20b"));
   expect(screen.queryByText("Intelligence", { exact: true })).toBeNull();
   expect(screen.queryByLabelText(/thinking|intelligence/i)).toBeNull();
   fireEvent.change(screen.getByLabelText("Chat model"), { target: { value: "openai/gpt-oss-120b" } });
-  fireEvent.click(screen.getByRole("button", { name: "Save", exact: true }));
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
   await waitFor(() => {
     const saved = fetchMock.mock.calls.find(([path, init]) => String(path) === "/api/user/models" && init?.method === "PUT");
     expect(saved).toBeTruthy();

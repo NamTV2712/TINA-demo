@@ -13,6 +13,8 @@ import { MeetingMemory } from "../surfaces/MeetingMemory";
 import { SpeakerRegistry } from "../surfaces/SpeakerRegistry";
 import { TranscriptReview } from "../surfaces/TranscriptReview";
 import { MeetingAudioPlayer, type MeetingAudioFragment, type MeetingAudioPlayerHandle, type MeetingAudioPosition } from "./MeetingAudioPlayer";
+import { TranslationControls, useMeetingTranslation, type TranscriptLanguage } from "./MeetingTranslation";
+import { projectTranslationGroups, type TranslationGroup } from "./translationGroups";
 
 export const MEETING_CANVAS_CONTENT_INSET = 18;
 
@@ -28,17 +30,25 @@ function filterSegments<T extends { speaker?: string; text: string }>(segments: 
 
 /** ONE render engine for both modes (P23: the terminal RENDERS, it does not re-derive). The toggle picks
  *  the SOURCE — raw segments vs the cleaned processed mirror — not a different renderer. */
-function RawTranscript({ searchQuery, speakerFilter, onSegmentClick, playableSegmentIds, activeSegmentId }: {
+function RawTranscript({ searchQuery, speakerFilter, onSegmentClick, playableSegmentIds, activeSegmentId, language, translationGroups = [], translationPaused }: {
   searchQuery: string;
   speakerFilter: string;
   onSegmentClick?: (segmentId: string) => void;
   playableSegmentIds?: ReadonlySet<string>;
   activeSegmentId?: string | null;
+  language?: TranscriptLanguage;
+  translationGroups?: TranslationGroup[];
+  translationPaused?: boolean;
 }) {
   const { transcript } = useMeeting();
-  const segments = filterSegments(transcript.segments, searchQuery, speakerFilter);
+  const source = language && language !== "vi" ? transcript.segments.map(segment => ({ ...segment, text: segment.sourceText ?? segment.text })) : transcript.segments;
+  const paired = projectTranslationGroups(source, language && language !== "vi" ? translationGroups : []);
+  const searchable = paired.filter(segment => !searchQuery.trim() ||
+    `${segment.speaker ?? ''} ${segment.text} ${segment.translation?.text ?? ''}`.toLocaleLowerCase().includes(searchQuery.trim().toLocaleLowerCase()));
+  const segments = filterSegments(searchable, "", speakerFilter);
   return <LiveTranscriptEngine segments={segments} emptyLabel={searchQuery || speakerFilter ? "No transcript segments match these filters." : "Waiting for transcript…"}
-    onSegmentClick={onSegmentClick} playableSegmentIds={playableSegmentIds} activeSegmentId={activeSegmentId} />;
+    onSegmentClick={onSegmentClick} playableSegmentIds={playableSegmentIds} activeSegmentId={activeSegmentId}
+    language={language} translationPaused={translationPaused} />;
 }
 
 // Map a copilot signal's loose context/kind onto the badge taxonomy (decision / action-item /
@@ -122,7 +132,7 @@ function MeetingCanvasBody({ meetingId, meetingRecord, onDeleteMeeting, deleting
   const [override, setOverride] = useState<boolean | null>(null);
   const [retryBusy, setRetryBusy] = useState(false);
   const [retryError, setRetryError] = useState(false);
-  const [detailsOpen, setDetailsOpen] = useState(true);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [speakerFilter, setSpeakerFilter] = useState("");
   const [audioFragments, setAudioFragments] = useState<MeetingAudioFragment[]>([]);
@@ -143,6 +153,9 @@ function MeetingCanvasBody({ meetingId, meetingRecord, onDeleteMeeting, deleting
   const speakersOpen = useRef<(() => void) | null>(null);
   const reviewOpen = useRef<(() => void) | null>(null);
   const dialogMeetingId = meetingRecord?.id ?? meetingId ?? "";
+  const [language, setLanguage] = useState<TranscriptLanguage>("bilingual");
+  const translation = useMeetingTranslation(dialogMeetingId, language,
+    transcript.segments.filter(segment => segment.completed !== false && !!segment.id).map(segment => segment.id!));
   const speakerOptions = Array.from(new Set(transcript.segments.map((segment) => segment.speaker?.trim()).filter((speaker): speaker is string => !!speaker)));
   const processing = deriveProcessingView({ override, live, hasNotes, durableTerminal });
 
@@ -327,13 +340,16 @@ function MeetingCanvasBody({ meetingId, meetingRecord, onDeleteMeeting, deleting
               type="button"
               className={dossierStyles.transcriptSource}
               onClick={toggleProcessing}
-              aria-pressed={processing}
+              disabled={language !== "vi"}
+              aria-pressed={language === "vi" && processing}
               title={processing ? "Showing the cleaned, copilot-processed view. Switch to original ASR." : (effectiveLive ? "Showing original ASR. Switch to processed view." : "Showing original ASR. Switch to processed view.")}
             >
-              {processing ? "Processed view" : "Original ASR"}
+              {language !== "vi" ? "Original ASR" : processing ? "Processed view" : "Original ASR"}
             </button>
             {(meetingRecord?.has_recording || (canPlayMeetingAudio && audioFragments.length > 0)) && <span className={dossierStyles.transcriptMeta}>Recording available</span>}
           </div>
+          <TranslationControls language={language} onChange={setLanguage} snapshot={translation.snapshot}
+            error={translation.error} onRetry={translation.retry} disabled={!translation.valid} />
           <input className={dossierStyles.searchInput} aria-label="Search transcript" placeholder="Search this transcript…" value={searchQuery} onChange={(event) => setSearchQuery(event.currentTarget.value)} />
           <select className={dossierStyles.speakerSelect} aria-label="Filter transcript by speaker" value={speakerFilter} onChange={(event) => setSpeakerFilter(event.currentTarget.value)} disabled={!speakerOptions.length}>
             <option value="">All speakers</option>
@@ -350,11 +366,12 @@ function MeetingCanvasBody({ meetingId, meetingRecord, onDeleteMeeting, deleting
         </header>
         <main className={dossierStyles.transcriptBody}>
           <div style={{ padding: MEETING_CANVAS_CONTENT_INSET }}>
-            {processing
+            {processing && language === "vi"
               ? <ProcessedTranscript searchQuery={searchQuery} speakerFilter={speakerFilter}
                   onSegmentClick={canPlayMeetingAudio && audioFragments.length ? handleSegmentClick : undefined}
                   playableSegmentIds={playableSegmentIds} activeSegmentId={activeSegmentId} />
               : <RawTranscript searchQuery={searchQuery} speakerFilter={speakerFilter}
+                  language={language} translationGroups={translation.snapshot?.groups} translationPaused={!!translation.error || translation.snapshot?.status === "paused"}
                   onSegmentClick={canPlayMeetingAudio && audioFragments.length ? handleSegmentClick : undefined}
                   playableSegmentIds={playableSegmentIds} activeSegmentId={activeSegmentId} />}
           </div>

@@ -1,6 +1,7 @@
 import { groupSegments, type TranscriptSegment } from './transcript-rendering';
+import { translationSegments, type TranscriptLanguage, type TranslationGroup, type PhraseTranslation } from './translation';
 
-type Segment = TranscriptSegment & { speaker_key?: string };
+type Segment = TranscriptSegment & { speaker_key?: string; translation?: PhraseTranslation };
 const identity = (s: Segment): string => s.segment_id || `${s.speaker_key || s.speaker || ''}:${s.absolute_start_time}`;
 function element<K extends keyof HTMLElementTagNameMap>(tag: K, className: string): HTMLElementTagNameMap[K] {
   const el = document.createElement(tag); el.className = className; return el;
@@ -15,6 +16,8 @@ function reconcile(parent: HTMLElement, children: HTMLElement[]): void {
 export function createTranscriptFeed(feed: HTMLElement, root: HTMLElement, latest: HTMLButtonElement) {
   const rows = new Map<string, ReturnType<typeof createTurn>>();
   const spans = new Map<string, HTMLSpanElement>();
+  const translations = new Map<string, HTMLSpanElement>();
+  const originals = new Map<string, HTMLSpanElement>();
   let following = true;
   function createTurn() {
     const row = element('article', 'transcript-turn'); row.setAttribute('role', 'listitem');
@@ -34,16 +37,17 @@ export function createTranscriptFeed(feed: HTMLElement, root: HTMLElement, lates
   }, { passive: true });
   latest.addEventListener('click', scrollToLatest);
   return {
-    reset() { rows.clear(); spans.clear(); root.replaceChildren(); following = true; latest.hidden = true; feed.scrollTop = 0; },
+    reset() { rows.clear(); spans.clear(); translations.clear(); originals.clear(); root.replaceChildren(); following = true; latest.hidden = true; feed.scrollTop = 0; },
     reveal() { if (following) scrollToLatest(); },
-    render(segments: Segment[], draftLabel: string) {
+    render(segments: Segment[], draftLabel: string, language: TranscriptLanguage = 'vi', translationGroups: TranslationGroup[] = [], paused = false) {
       const selection = document.getSelection?.();
       const selected = selection?.rangeCount && feed.contains(selection.anchorNode) && feed.contains(selection.focusNode)
         ? { anchor: selection.anchorNode!, anchorOffset: selection.anchorOffset, focus: selection.focusNode!, focusOffset: selection.focusOffset } : null;
       const oldTop = feed.scrollTop;
       const anchor = !following && feed.clientHeight ? Array.from(root.children).find(row => row.getBoundingClientRect().bottom > feed.getBoundingClientRect().top) : undefined;
       const anchorTop = anchor?.getBoundingClientRect().top;
-      const groups = groupSegments(segments, { getGroupKey: s => (s as Segment).speaker_key || s.speaker || 'unknown' });
+      const displayed = language === 'vi' ? segments : translationSegments(segments, translationGroups);
+      const groups = groupSegments(displayed, { getGroupKey: s => (s as Segment).speaker_key || s.speaker || 'unknown' });
       const activeRows = new Set<string>(), activeSpans = new Set<string>();
       const ordered = groups.map(group => {
         const key = identity(group.segments[0]); activeRows.add(key);
@@ -57,7 +61,21 @@ export function createTranscriptFeed(feed: HTMLElement, root: HTMLElement, lates
         for (const segment of group.segments) {
           const id = identity(segment); activeSpans.add(id);
           let span = spans.get(id); if (!span) { span = element('span', 'transcript-segment'); spans.set(id, span); }
-          text(span, segment.text.trim() + ' ');
+          if (language === 'vi') {
+            text(span, segment.text.trim() + ' ');
+            originals.delete(id); translations.delete(id);
+            span.classList.remove('segment-bilingual');
+          } else {
+            let original = originals.get(id), english = translations.get(id);
+            if (!original || !english) {
+              original = element('span', 'segment-original'); english = element('span', 'segment-english'); english.lang = 'en';
+              originals.set(id, original); translations.set(id, english); span.replaceChildren(original, english);
+            }
+            span.classList.add('segment-bilingual');
+            const result = segment.translation?.text;
+            text(original, segment.text.trim()); original.hidden = language === 'en' && !!result;
+            text(english, `EN  ${result || (segment.completed === false ? 'Chờ đoạn nói hoàn tất…' : paused ? 'Chưa dịch được · bản gốc vẫn được giữ' : segment.translation?.ready ? 'Đang dịch…' : 'Đang gom câu…')}`);
+          }
           (segment.completed === false ? pending : confirmed).push(span);
         }
         reconcile(turn.confirmed, confirmed); reconcile(turn.pending, pending);
@@ -67,7 +85,7 @@ export function createTranscriptFeed(feed: HTMLElement, root: HTMLElement, lates
       });
       reconcile(root, ordered);
       for (const key of rows.keys()) if (!activeRows.has(key)) rows.delete(key);
-      for (const key of spans.keys()) if (!activeSpans.has(key)) spans.delete(key);
+      for (const key of spans.keys()) if (!activeSpans.has(key)) { spans.delete(key); originals.delete(key); translations.delete(key); }
       updateLatest();
       const anchoredTop = anchor?.isConnected && anchorTop !== undefined ? oldTop + anchor.getBoundingClientRect().top - anchorTop : oldTop;
       // Moving an unchanged span between paragraph groups clears Chrome's selection.

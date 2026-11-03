@@ -18,6 +18,22 @@ Run the complete system on infrastructure you control. TINA has no hosted API or
 
 ---
 
+## Transcript translation
+
+Meeting Bot transcripts in Terminal and the Chrome extension share a language dropdown:
+**Tiếng Việt**, **English**, and **Song ngữ** (the default). English/bilingual views use the
+saved **Meeting model** in Settings → Models. Provider credentials remain on the server.
+
+The backend groups consecutive finalized ASR fragments of the same speaker before translating.
+Vietnamese remains visible while a phrase is forming or the model API is unavailable. Translation
+results are cached for both clients; editing source text invalidates the affected phrase. New
+translation calls pause when no English/bilingual view remains open. Desktop archive rows in
+the extension currently retain their original-only view.
+
+See the [extension guide](clients/extension/README.md),
+[Terminal canvas guide](clients/terminal/src/canvas/README.md), and
+[grouped translation contract](core/agent/contracts/meeting-translation.v2/README.md).
+
 ## ⚡ Quickstart
 
 This checkout starts the configured `tina-production` deployment with Gipformer 1.5. On macOS,

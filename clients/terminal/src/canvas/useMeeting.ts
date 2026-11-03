@@ -134,6 +134,7 @@ function normalizeSegments(segments: TranscriptSegment[] | null | undefined): Tr
       speaker: textOf(segment.speaker, "Speaker"),
       speakerId: segment.speakerId,
       text: cleanTranscriptText(textOf(segment.text)),
+      sourceText: segment.sourceText ?? textOf(segment.text),
       ts: segment.ts,
       tsMs: segment.tsMs,
       endTsMs: segment.endTsMs,
@@ -407,9 +408,10 @@ function useLiveMeetingState(meetingId?: string): MeetingState {
     const liveSegments = safeArray(live.transcript).map((s) => {
       const canonical = s.id ? accepted.get(s.id) : undefined;
       return { id: s.id, speakerId: canonical?.speakerId ?? s.speakerId, speaker: canonical && (canonical.speakerRevision ?? 0) >= (s.speakerRevision ?? 0) ? canonical.speaker : s.speaker,
+        sourceText: canonical && (canonical.revision ?? 0) > 0 ? canonical.text : s.text,
         text: cleanTranscriptText(canonical && (canonical.revision ?? 0) > 0 ? canonical.text : s.text), ts: s.t, tsMs: s.tsMs, completed: canonical && (canonical.revision ?? 0) > 0 ? true : s.completed };
     });
-    const recordedSegments = safeArray(durable.lines).map((s) => ({ id: s.id, speaker: s.speaker, speakerId: s.speakerId, text: cleanTranscriptText(s.text), ts: lineTs(s), tsMs: s.tsMs, endTsMs: s.endTsMs, sessionUid: s.sessionUid }));
+    const recordedSegments = safeArray(durable.lines).map((s) => ({ id: s.id, speaker: s.speaker, speakerId: s.speakerId, sourceText: s.text, text: cleanTranscriptText(s.text), ts: lineTs(s), tsMs: s.tsMs, endTsMs: s.endTsMs, sessionUid: s.sessionUid }));
     const fallbackSegments = normalizedSelected.transcript.map((s) => ({ speaker: s.speaker, speakerId: s.speakerId, text: cleanTranscriptText(s.text), ts: lineTs(s) }));
     const segments = selected.session_uid ? liveSegments : (recordedSegments.length ? recordedSegments : fallbackSegments);
     const copilotCards = safeArray(live.cards).filter(c => !c.stale).map((c, i) => ({ id: `live-${i}-${c.kind}-${c.title}`, kind: c.kind, title: cleanTranscriptText(c.title), body: c.body ? cleanTranscriptText(c.body) : c.body }));

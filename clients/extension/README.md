@@ -1,6 +1,23 @@
 # TINA Transcript Viewer
 
-The Chrome extension is a read-only transcript reader. It does not record audio, request microphone or tab-audio access, open the Desktop ingest WebSocket, or auto-start in meetings.
+The Chrome extension reads transcripts and can request a saved English translation overlay for Meeting Bot rows. It does not record audio, request microphone or tab-audio access, open the Desktop ingest WebSocket, or auto-start in meetings.
+
+## Vietnamese to English
+
+The language dropdown under the selected Bot meeting defaults to **Song ngữ** and offers
+**Tiếng Việt**, **English** and **Song ngữ**. The same owner-authorized
+agent cache serves Terminal and extension; provider credentials remain on the server and the
+saved Meeting model performs tool-less text translation. `meeting-translation.v2` groups
+consecutive finalized fragments of the same speaker into one phrase. The live tail shows
+**Đang gom câu…** until a sentence boundary or stable pause; stopping flushes it immediately.
+Both clients render the same backend boundaries with one English result per phrase.
+Existing Desktop archive rows keep the original-only view. Reload the extension after upgrading.
+
+The original transcript remains visible when an English phrase is pending or unavailable.
+Provider failures back off automatically; **Thử lại** explicitly retries. Edits invalidate only
+the corresponding phrase. Reading above the live edge preserves the scroll anchor.
+Translation inference advances while a translated view is open; closing all views pauses
+new calls. Reopening resumes missing segments without regenerating cached translations.
 
 ## Transcript sources
 

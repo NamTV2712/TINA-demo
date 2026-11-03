@@ -4,6 +4,7 @@ A thin FastAPI surface mirroring ``runtime_kernel/api.py``. Routes (the gateway 
   POST /invocations          — the dispatcher sink: a unit.v1 dispatch → a runtime.v1 agent spawn
   POST /api/dictation/polish — a tool-less CompletionPort call for a final voice transcript
   POST /api/dictation/translate — a tool-less CompletionPort call for one confirmed caption
+  GET/POST /api/meeting-translations/{id} — cached, owner-authorized English transcript overlay
   POST /api/chat             — a chat *now*-dispatch, streamed back as an SSE VIEW of its Stream
   POST /api/chat/reset       — drop a session
   GET  /api/sessions         — list a subject's sessions
@@ -1231,6 +1232,11 @@ def create_app(
             request, text=body.text, task="translate", target_language=body.target_language,
         )
         return {"translated_text": translated}
+
+    from control_plane.meeting_translation import register as register_meeting_translation
+    register_meeting_translation(app, subject_of, wsr.root, settings.meeting_api_url if settings else '',
+                                 lambda request, text: _transcript_completion(
+                                     request, text=text, task='translate', target_language='en'))
 
     @app.get("/api/models/openai/catalog")
     def openai_model_catalog(request: Request):

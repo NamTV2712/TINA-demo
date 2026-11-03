@@ -1,0 +1,82 @@
+"use client";
+import { useEffect, useRef, useState } from "react";
+import type { TranslationGroup } from "./translationGroups";
+
+export type TranscriptLanguage = "vi" | "en" | "bilingual";
+export interface TranslationSnapshot {
+  version: "meeting-translation.v2";
+  meeting_id: number; status: "pending" | "running" | "paused" | "complete";
+  total: number; completed: number; retry_after: number; groups: TranslationGroup[];
+}
+
+/** Poll independently of capture. POST advances one ready, server-grouped phrase. */
+export function useMeetingTranslation(meetingId: string, language: TranscriptLanguage, segmentIds: string[] = []) {
+  const [snapshot, setSnapshot] = useState<TranslationSnapshot | null>(null);
+  const [error, setError] = useState("");
+  const [retry, setRetry] = useState(0);
+  const retryRequested = useRef(false);
+  const priority = useRef(segmentIds);
+  priority.current = segmentIds;
+  const valid = /^[1-9]\d*$/.test(meetingId);
+  useEffect(() => {
+    setSnapshot(null); setError(""); retryRequested.current = false;
+  }, [meetingId]);
+  useEffect(() => {
+    if (!valid || language === "vi") return;
+    const abort = new AbortController();
+    let timer: ReturnType<typeof setTimeout>;
+    let advancing = false;
+    const url = `/api/meeting-translations/${meetingId}`;
+    const read = async (method = "GET", force = false): Promise<TranslationSnapshot> => {
+      const response = await fetch(url, { method, cache: "no-store", signal: abort.signal,
+        ...(method === "POST" ? { headers: { "Content-Type": "application/json" }, body: JSON.stringify({ retry: force, segment_ids: priority.current.slice(0, 128) }) } : {}) });
+      if (!response.ok) throw new Error("Translation unavailable. Vietnamese transcript is still available.");
+      const state = await response.json() as TranslationSnapshot;
+      if (state.version !== "meeting-translation.v2" || state.meeting_id !== Number(meetingId) || !Array.isArray(state.groups)) throw new Error("Translation unavailable.");
+      if (!abort.signal.aborted) { setSnapshot(state); setError(""); }
+      return state;
+    };
+    const poll = async () => {
+      let delay = 3000;
+      try {
+        const state = await read();
+        const force = retryRequested.current;
+        if (!advancing && state.status !== "complete" && (state.retry_after === 0 || force)) {
+          retryRequested.current = false;
+          advancing = true;
+          // Do not block GET polling while another client is waiting for the provider.
+          void read("POST", force).catch(() => {
+            if (!abort.signal.aborted) setError("Translation unavailable. Vietnamese transcript is still available.");
+          }).finally(() => { advancing = false; });
+        }
+      } catch {
+        if (!abort.signal.aborted) setError("Translation unavailable. Vietnamese transcript is still available.");
+        delay = 15000;
+      }
+      if (!abort.signal.aborted) timer = setTimeout(poll, delay);
+    };
+    void poll();
+    return () => { abort.abort(); clearTimeout(timer); };
+  }, [meetingId, language, valid, retry]);
+  return { snapshot: snapshot?.meeting_id === Number(meetingId) ? snapshot : null, error,
+    retry: () => { retryRequested.current = true; setRetry(n => n + 1); }, valid };
+}
+
+export function TranslationControls({ language, onChange, snapshot, error, onRetry, disabled }: {
+  language: TranscriptLanguage; onChange: (mode: TranscriptLanguage) => void;
+  snapshot: TranslationSnapshot | null; error: string; onRetry: () => void; disabled?: boolean;
+}) {
+  const paused = snapshot?.status === "paused";
+  return <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", gridColumn: "1 / -1" }}>
+    <select aria-label="Transcript language" value={language} disabled={disabled}
+      onChange={event => onChange(event.currentTarget.value as TranscriptLanguage)}
+      style={{ height: 29, minWidth: 130, padding: "0 8px", border: "1px solid var(--line2)", borderRadius: 5, background: "var(--bg)", color: "var(--t1)", font: "inherit", fontSize: 12 }}>
+      {([["vi", "Tiếng Việt"], ["en", "English"], ["bilingual", "Song ngữ"]] as const).map(([mode, label]) =>
+        <option key={mode} value={mode}>{label}</option>)}
+    </select>
+    {language !== "vi" && <>
+      <span role="status" style={{ color: "var(--t2)", fontSize: 12 }}>{error || (paused ? "Dịch tạm dừng · sẽ tự thử lại" : snapshot ? `VI → EN · ${snapshot.completed}/${snapshot.total} cụm${snapshot.groups.some(g => !g.ready) ? " · Đang gom câu…" : ""}` : "Đang tải bản dịch…")}</span>
+      {(paused || error) && <button type="button" onClick={onRetry}>Thử lại</button>}
+    </>}
+  </div>;
+}

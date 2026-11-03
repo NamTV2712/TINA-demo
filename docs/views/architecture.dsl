@@ -72,6 +72,9 @@ system agent  # the execution domain: a trigger becomes one governed agent turn 
   data-asset va-chat
   data-asset meeting-knowledge-pages
   data-asset workspace-human-documents
+  contract meeting-translation.v1
+  database meeting-translation-cache [writers: agent-api]
+  contract meeting-translation.v2
 
 system gateway-system  # the one public edge (api.v1, ws.v1)
   service conformance
@@ -217,6 +220,9 @@ edges:
   agent-api -write-> meeting-knowledge-pages  # Persist private answer/source snapshots and explicitly reviewed create-only Wiki pages; no overwrites.
   terminal -read-> meeting-knowledge-pages  # Through existing authenticated Gateway workspace proxy: related docs, bounded multi-meeting answers, source-meeting quotes/audio, freshness warnings and revision-guarded fact reviews.
   agent-api -write-> workspace-human-documents  # Authenticated explicit Markdown edit and optional selected-path local commit; owner and content preconditions are enforced in the control plane.
+  agent-api -write-> meeting-translation-cache  # Owner-scoped SQLite phrase cache, live-tail observations and job leases; every HTTP access first reauthorizes canonical transcript and meeting status.
+  terminal-app -call-> agent-api  # Authenticated English/bilingual view reads and advances the shared translation overlay; original ASR remains independent.
+  extension -call-> agent-api  # Meeting Bot viewer requests the same gateway-authorized translation cache; provider secrets remain server-side.
   bot, agent-worker deployed-in runtime
   gateway, meeting-api, agent-api, admin-api, runtime, redis, postgres, object-store, transcription deployed-in deploy
   flows-api, flows-worker deployed-in deploy

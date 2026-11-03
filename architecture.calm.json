@@ -1783,6 +1783,59 @@
    "node-type": "data-asset",
    "name": "Explicit private Markdown document edits",
    "description": "Owner-authorized content document PUT, no-overwrite move and explicit delete with expected SHA-256, existing workspace write lock, entity frontmatter validation and atomic file replacement. Reviewed moves preview source-preserving static backlinks and outgoing relative links in the same workspace; confirmation rechecks the full plan fingerprint, preserves code and aliases, reports ambiguous/uneditable references, rolls back ordinary write failures and removes the source last. Bounded Unicode Markdown content search excludes hidden paths and symlinks. Dashboard uses source-preserving formatting, a folder tree, wikilinks, history and per-account/workspace/file draft recovery across reloads via browser session storage retaining the original SHA-256; Terminal searches its authorized active mounts. Explicit per-path Git commit leaves unrelated staged paths and remotes untouched; shared workspaces remain read-only here. General harness writers retain their existing filesystem behavior."
+  },
+  {
+   "unique-id": "meeting-translation.v1",
+   "node-type": "contract",
+   "name": "meeting-translation.v1",
+   "description": "Owner-scoped English transcript overlay with progressive status, source validation and retry backoff.",
+   "metadata": [
+    {
+     "path": "core/agent/contracts/meeting-translation.v1",
+     "domain": "agent"
+    }
+   ]
+  },
+  {
+   "unique-id": "meeting-translation-cache",
+   "node-type": "database",
+   "name": "Private meeting translation SQLite cache",
+   "description": "Durable owner/meeting/phrase English translations, observed live-tail stability and atomic provider job leases. Exact member IDs/text invalidate edits. Legacy fragment cache is retained without reuse; no transcript mutation.",
+   "metadata": [
+    {
+     "contract": "meeting-translation.v2",
+     "stage": "derived"
+    }
+   ],
+   "controls": {
+    "ownership": {
+     "description": "single writer",
+     "requirements": [
+      {
+       "requirement-url": "urn:tina:calm:controls:single-writer",
+       "config": {
+        "writers": [
+         "agent-api"
+        ],
+        "match": ".meeting-translations/translations.sqlite3",
+        "op": "write"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "unique-id": "meeting-translation.v2",
+   "node-type": "contract",
+   "name": "meeting-translation.v2",
+   "description": "Backend-owned same-speaker phrase groups, source members, stable live-tail buffering and cached English overlay.",
+   "metadata": [
+    {
+     "path": "core/agent/contracts/meeting-translation.v2",
+     "domain": "agent"
+    }
+   ]
   }
  ],
  "relationships": [
@@ -1808,7 +1861,10 @@
       "unit-in",
       "va-chat",
       "meeting-knowledge-pages",
-      "workspace-human-documents"
+      "workspace-human-documents",
+      "meeting-translation.v1",
+      "meeting-translation-cache",
+      "meeting-translation.v2"
      ]
     }
    }
@@ -3902,6 +3958,63 @@
     }
    ],
    "description": "Authenticated explicit Markdown edit and optional selected-path local commit; owner and content preconditions are enforced in the control plane."
+  },
+  {
+   "unique-id": "translation-cache-write",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "agent-api"
+     },
+     "destination": {
+      "node": "meeting-translation-cache"
+     }
+    }
+   },
+   "description": "Owner-scoped SQLite phrase cache, live-tail observations and job leases; every HTTP access first reauthorizes canonical transcript and meeting status.",
+   "metadata": [
+    {
+     "access": "write"
+    }
+   ]
+  },
+  {
+   "unique-id": "terminal-meeting-translation",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "terminal-app"
+     },
+     "destination": {
+      "node": "agent-api"
+     }
+    }
+   },
+   "description": "Authenticated English/bilingual view reads and advances the shared translation overlay; original ASR remains independent.",
+   "metadata": [
+    {
+     "access": "call"
+    }
+   ]
+  },
+  {
+   "unique-id": "extension-meeting-translation",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "extension"
+     },
+     "destination": {
+      "node": "agent-api"
+     }
+    }
+   },
+   "description": "Meeting Bot viewer requests the same gateway-authorized translation cache; provider secrets remain server-side.",
+   "metadata": [
+    {
+     "access": "call"
+    }
+   ]
   }
  ],
  "flows": [
