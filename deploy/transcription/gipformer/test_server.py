@@ -153,9 +153,12 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.transcribe(response_format='text')).text, 'nội dung riêng tư')
         status = (await self.client.get('/status')).json()
         self.assertEqual(status['version'], 'asr-status.v1')
+        self.assertEqual(status['model']['device'], server.DEVICE)
+        self.assertEqual(status['model']['asr_model'], server.MODEL)
         self.assertNotIn('nội dung', json.dumps(status, ensure_ascii=False))
         self.assertNotIn('test-token', json.dumps(status))
         caps = (await self.client.get('/capabilities')).json()
+        self.assertEqual(caps['runtime'], server.DECODER)
         self.assertFalse(caps['word_timestamps']); self.assertFalse(caps['language_detection']); self.assertFalse(caps['prompt'])
 
     async def test_queue_and_model_failure(self):

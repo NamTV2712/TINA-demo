@@ -13,7 +13,10 @@ DEFAULT = HERE.parent / 'models' / 'gipformer-fsmn'
 
 
 def verified(path, digest):
-    return path.is_file() and hashlib.sha256(path.read_bytes()).hexdigest() == digest
+    if not path.is_file():
+        return False
+    with path.open('rb') as source:
+        return hashlib.file_digest(source, 'sha256').hexdigest() == digest
 
 
 def install(path, digest, url, cached=None):

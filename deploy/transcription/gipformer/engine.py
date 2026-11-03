@@ -54,6 +54,13 @@ def speech_ranges(result, count):
     return intervals
 
 
+def verify_assets(directory, files):
+    for name, expected in files.items():
+        with (Path(directory) / name).open('rb') as source:
+            if hashlib.file_digest(source, 'sha256').hexdigest() != expected:
+                raise ValueError(f'Model asset checksum mismatch: {name}')
+
+
 class GipformerEngine:
     def __init__(self, vad, recognizer):
         self.vad, self.recognizer = vad, recognizer
@@ -66,13 +73,12 @@ class GipformerEngine:
 
         directory = Path(directory)
         manifest = json.loads((HERE / 'model-assets.json').read_text())
-        for group, base in [('files', directory), ('vad_files', directory / 'fsmn-vad')]:
-            for name, expected in manifest[group].items():
-                if hashlib.sha256((base / name).read_bytes()).hexdigest() != expected:
-                    raise ValueError(f'Model asset checksum mismatch: {name}')
+        verify_assets(directory, manifest['files'])
+        verify_assets(directory / 'fsmn-vad', manifest['vad_files'])
         torch.set_num_threads(2)
         torch.set_num_interop_threads(1)
-        vad = AutoModel(model=str(directory / 'fsmn-vad'), device='cpu', disable_update=True, disable_pbar=True, disable_log=True)
+        vad = AutoModel(model=str(directory / 'fsmn-vad'), device='cpu', disable_update=True,
+                        disable_pbar=True, disable_log=True)
         recognizer = sherpa_onnx.OfflineRecognizer.from_transducer(
             encoder=str(directory / 'encoder.int8.onnx'), decoder=str(directory / 'decoder.int8.onnx'),
             joiner=str(directory / 'joiner.int8.onnx'), tokens=str(directory / 'tokens.txt'),

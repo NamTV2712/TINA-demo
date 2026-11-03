@@ -20,8 +20,9 @@ from starlette.datastructures import MutableHeaders
 from engine import AudioInputError, GipformerEngine, MODEL
 from telemetry import AsrMetrics, duration
 
-PORT = int(os.getenv('TINA_GIPFORMER_PORT', '18002'))
-HOST = os.getenv('TINA_GIPFORMER_HOST', '127.0.0.1')
+PREFIX, DEVICE, DECODER, NAME = 'TINA_GIPFORMER', 'cpu', 'sherpa-onnx', 'Gipformer 1.5'
+PORT = int(os.getenv(PREFIX + '_PORT', '18002'))
+HOST = os.getenv(PREFIX + '_HOST', '127.0.0.1')
 MAX_BYTES = 25 * 1024 * 1024
 CAPACITY = 4
 WAIT_SECONDS = 10.0
@@ -30,21 +31,21 @@ logger = logging.getLogger('tina.gipformer')
 
 @asynccontextmanager
 async def lifespan(app):
-    token = os.getenv('TINA_GIPFORMER_TOKEN', '')
+    token = os.getenv(PREFIX + '_TOKEN', '')
     if len(token) < 32:
-        raise RuntimeError('Set a private TINA_GIPFORMER_TOKEN of at least 32 characters')
+        raise RuntimeError(f'Set a private {PREFIX}_TOKEN of at least 32 characters')
     app.state.token = token
-    directory = Path(os.getenv('TINA_GIPFORMER_MODEL_DIR', str(Path(__file__).resolve().parent.parent / 'models/gipformer-fsmn')))
+    directory = Path(os.getenv(PREFIX + '_MODEL_DIR', str(Path(__file__).resolve().parent.parent / 'models' / 'gipformer-fsmn')))
     app.state.engine = await asyncio.to_thread(GipformerEngine.load, directory)
     app.state.lock = asyncio.Semaphore(1)
     app.state.requests = 0
     app.state.metrics = AsrMetrics()
-    logger.info('Gipformer INT8 + FSMN ready on CPU')
+    logger.info('%s + FSMN ready on %s', NAME, DEVICE)
     yield
     app.state.engine = None
 
 
-app = FastAPI(title='TINA Gipformer + FSMN', lifespan=lifespan)
+app = FastAPI(title=f'TINA {NAME} + FSMN', lifespan=lifespan)
 
 
 class RequestBoundary:
@@ -107,12 +108,12 @@ app.add_middleware(RequestBoundary)
 
 
 def model_status():
-    return {'asr_model': MODEL, 'alias': 'custom', 'vad_model': 'fsmn-vad', 'device': 'cpu', 'requested_device': 'cpu'}
+    return {'asr_model': MODEL, 'alias': 'custom', 'vad_model': 'fsmn-vad', 'device': DEVICE, 'requested_device': DEVICE}
 
 
 @app.get('/health')
 async def health():
-    return {'status': 'ok', 'device': 'cpu', 'models_loaded': [MODEL], 'vad_model': 'fsmn-vad'}
+    return {'status': 'ok', 'device': DEVICE, 'models_loaded': [MODEL], 'vad_model': 'fsmn-vad'}
 
 
 @app.get('/status')
@@ -125,7 +126,7 @@ async def status():
 
 @app.get('/capabilities')
 async def capabilities():
-    return {'model': MODEL, 'runtime': 'sherpa-onnx', 'vad_runtime': 'funasr', 'languages': ['vi'],
+    return {'model': MODEL, 'runtime': DECODER, 'vad_runtime': 'funasr', 'languages': ['vi'],
             'language_detection': False, 'prompt': False, 'word_timestamps': False, 'streaming': False,
             'timestamp_kind': 'vad-speech-interval', 'max_audio_seconds': 90}
 
@@ -187,9 +188,9 @@ async def transcribe(request: Request, file: UploadFile = File(...), model: str 
                      response_format: str = Form('json'), min_silence_duration_ms: int = Form(800, ge=100, le=2000)):
     # Legacy Custom endpoint callers send whisper-1; this is only a compatibility alias.
     if model not in ('custom', 'whisper-1', MODEL):
-        raise HTTPException(400, 'This endpoint serves Gipformer 1.5')
+        raise HTTPException(400, f'This endpoint serves {NAME}')
     if language and language.strip().lower() not in ('vi', 'vietnamese', 'auto'):
-        raise HTTPException(422, 'Gipformer is a Vietnamese model; forced language is unsupported')
+        raise HTTPException(422, f'{NAME} is a Vietnamese model; forced language is unsupported')
     if response_format not in ('json', 'verbose_json', 'text'):
         raise HTTPException(422, 'Unsupported response format')
     try:
@@ -207,8 +208,8 @@ async def transcribe(request: Request, file: UploadFile = File(...), model: str 
     except HTTPException:
         raise
     except Exception:
-        logger.error('Gipformer/FSMN inference failed')
-        raise HTTPException(502, 'Gipformer/FSMN inference failed')
+        logger.error('%s/FSMN inference failed', NAME)
+        raise HTTPException(502, f'{NAME}/FSMN inference failed')
     if response_format == 'text':
         return PlainTextResponse(result['text'])
     if response_format == 'verbose_json':
