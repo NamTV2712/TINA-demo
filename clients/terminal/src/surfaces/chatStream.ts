@@ -39,6 +39,8 @@ export type ChatPhase = "connecting" | "working" | "reconnecting" | "stalled";
 export type ChatStreamCallbacks = {
   /** an agent message-delta with non-empty text (the first one clears the "starting" placeholder) */
   onDelta: (text: string) => void;
+  /** Authoritative final text, including resolved citation links. */
+  onReply?: (text: string) => void;
   /** a tool-call step to show as an operation */
   onTool: (tool: string) => void;
   /** the turn committed to the workspace (terminal) */
@@ -71,6 +73,7 @@ export type ChatStreamRequest = {
   active: unknown;
   /** the terminal-state context bundle {tz, surface, focus, include}, or undefined */
   context?: unknown;
+  research?: boolean;
 };
 
 /** One nonce per user turn, constant across that turn's reconnect attempts. It lets agent-api tell a
@@ -140,7 +143,7 @@ export async function streamChatTurn(
   const fetchImpl = opts.fetchImpl ?? fetch;
   const now = opts.now ?? (() => Date.now());
   const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-  const hardTimeoutMs = opts.hardTimeoutMs ?? DEFAULT_HARD_TIMEOUT_MS;
+  const hardTimeoutMs = opts.hardTimeoutMs ?? (req.research ? 600000 : DEFAULT_HARD_TIMEOUT_MS);
   const approvalWaitMs = opts.approvalWaitMs ?? DEFAULT_APPROVAL_WAIT_MS;
   const backoffMs = opts.reconnectBackoffMs ?? DEFAULT_RECONNECT_BACKOFF_MS;
   const heartbeatMs = opts.heartbeatMs ?? DEFAULT_HEARTBEAT_MS;
@@ -187,7 +190,7 @@ export async function streamChatTurn(
       r = await fetchImpl("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json", ...(lastEventId ? { "Last-Event-ID": lastEventId } : {}) },
-        body: JSON.stringify({ prompt: req.prompt, session: req.session, active: req.active, context: req.context, turn_id: turnId }),
+        body: JSON.stringify({ prompt: req.prompt, session: req.session, active: req.active, context: req.context, research: req.research, turn_id: turnId }),
         signal,
       });
     } catch (e) {
@@ -275,6 +278,7 @@ export async function streamChatTurn(
           case "done":
             terminal = true;
             if (ev.ok === false) { sawVisibleOutput = true; cb.onModelFailure(ev.reply); }
+            else if (typeof ev.reply === "string") { sawVisibleOutput = true; cb.onReply?.(ev.reply); }
             break;
           // A hard upstream error the proxy folded into the stream: the turn genuinely failed — surface
           // it (do NOT treat as a cold-start close to resume).

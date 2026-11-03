@@ -627,6 +627,8 @@ export function Chat({ params = {}, variant = "rail" }: ChatProps) {
     : focusRef;
   const [uploading, setUploading] = useState(false);
   const [value, setValue] = useState("");
+  const [research, setResearch] = useState(false);
+  useEffect(() => { setResearch(false); }, [chatKey]);
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -892,11 +894,12 @@ export function Chat({ params = {}, variant = "rail" }: ChatProps) {
     });
     try {
       const result = await streamChatTurn(
-        { prompt: p, session: sessionForSend, active, context },
+        { prompt: p, session: sessionForSend, active, context, ...(opts.research ? { research: true } : {}) },
         {
           onStarting: () => {},  // visual is driven by onStatus (below); the stream still signals cold-start here
           onStatus: (phase) => setStatus(phase),
           onDelta: (text) => patchAgentTurn(key, agentId, (t) => ({ ...t, status: null, text: (t.text ?? "") + text })),
+          onReply: (text) => patchAgentTurn(key, agentId, (t) => ({ ...t, status: null, text })),
           onTool: (tool) => patchAgentTurn(key, agentId, (t) => ({ ...t, status: null, ops: [...t.ops, toolOp(tool)] })),
           onCommit: (sha) => patchAgentTurn(key, agentId, (t) => ({ ...t, commit: sha })),
           onRejected: () => patchAgentTurn(key, agentId, (t) => ({ ...t, status: null, rejected: "workspace.v1 violation — reverted" })),
@@ -1054,7 +1057,7 @@ export function Chat({ params = {}, variant = "rail" }: ChatProps) {
       onboardingArmedRef.current = false;
       prompt = ONBOARDING_GROUNDING + ONBOARDING_REPLY_SEP + prompt;
     }
-    void send(displayText, prompt, referenceSource);
+    void send(displayText, prompt, referenceSource, { research });
     setValue("");
     setMicRestore(null);
   };
@@ -1090,6 +1093,10 @@ export function Chat({ params = {}, variant = "rail" }: ChatProps) {
         onDrop={onDrop}
         style={{ border: "1px solid var(--line2)", borderRadius: 12, background: "var(--panel)", padding: "9px 12px", display: "flex", flexDirection: "column", gap: 7 }}
       >
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "var(--t2)" }}>
+          <input type="checkbox" checked={research} disabled={busy || uploading} onChange={e => setResearch(e.target.checked)} />
+          Nghiên cứu &amp; lưu ghi chú
+        </label>
         {(contextRef || ambientEligible || includeSchedule === true || (bundleFocus && (bundleFocus.kind === "workspace" || bundleFocus.kind === "today"))) && (
           <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, flexWrap: "wrap" }}>
             {/* ambient schedule chip — the context bundle's always-visible half: on = the agent

@@ -2,6 +2,12 @@
 
 The agent control plane: the FastAPI app (`api.py`) and orchestration that dispatches work to workers and reconciles routine/meeting lifecycle. Owns request handling, routine bookkeeping, transcription watching, and event relay — distinct from the `worker/` that runs a single agent workload.
 
+Explicit chat `research: true` uses `knowledge_research.py` to select an active private writable
+destination and instruct the existing agent to save a new sourced note. Meeting/repo/web rows carry
+evidence versions and verification dates; absent evidence and partial failures remain visible.
+The server does not treat the agent's synthesis as independently verified facts. Private Codex chat
+history restores source URLs from the matching turn's metadata, never from another shared mount.
+
 ChatGPT plan credentials live in the private `openai-auth` volume. Terminal completes OAuth;
 `/internal/openai-auth/{subject}` requires the internal secret and owns generation reads, credential
 saves and disconnect. Saves and refresh share a file lock with disconnect. Disconnect rotates the

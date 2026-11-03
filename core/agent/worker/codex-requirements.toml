@@ -1,0 +1,19 @@
+# Deployment-owned: workspace config and per-domain approvals cannot widen this allowlist.
+allowed_sandbox_modes = ["read-only", "workspace-write"]
+
+[experimental_network]
+# Keep enabled unset: each turn selects its online/offline permissions profile.
+managed_allowed_domains_only = true
+allow_local_binding = false
+allow_upstream_proxy = false
+dangerously_allow_non_loopback_proxy = false
+dangerously_allow_all_unix_sockets = false
+allow_unix_sockets = []
+allowed_domains = [
+  "github.com",
+  "api.github.com",
+  "raw.githubusercontent.com",
+  "codeload.github.com",
+  "objects.githubusercontent.com",
+  "release-assets.githubusercontent.com",
+]

@@ -25,7 +25,7 @@ fakes.
   slower per beat; for subscription-only deployments).
 - **Harnesses**: `claude_code.py` (the `claude` CLI — argv build, stream-json parsing, `.claude/`
   continuity + skills wiring, credential preflight) · `codex.py` (Codex app-server over JSONL with
-  a workspace-write, network-disabled sandbox) · `antigravity.py` (the `agy` CLI — headless
+  per-turn filesystem permissions, managed shell networking and explicit web-search grants) · `antigravity.py` (the `agy` CLI — headless
   stream-json parsing, scoped TINA mount permissions, and governed workspace skills).
 
 HTTP completion adapters use raw `httpx`; CLI harnesses use the provider's supported local process
@@ -75,3 +75,41 @@ prompted for every selected tool to avoid promoting a gated sibling. The app-ser
 elicitation is bridged through the owner-scoped chat stream; allow/deny is one-shot and expires
 fail-closed. The scoped TINA identity token is passed to selected MCP servers only through their
 configured environment/bearer references and is explicitly excluded from Codex shell-tool environments.
+
+## Codex web and command networking
+
+Web-enabled turns request direct Markdown source links. The adapter also normalizes explicit
+native web citation metadata into a final Markdown reply and records up to 50 sources per turn in
+private `.codex/tina-sources/<thread>/<turn>.json`. The history reader uses the matching turn's
+metadata and original opened-page URLs after reload. A missing reference mapping stays unresolved;
+it is never guessed from result order. Both clients replace partial streamed text with the final
+reply, preserving links. These are recorded sources, not an independent fact-verification verdict.
+
+The adapter pins named online/offline permission profiles for each new or resumed turn. Filesystem
+writes are limited to the TINA mounts carrying `write: true`; `.git`, `.codex` and `.agents` remain
+read-only to tool processes. Event/transcription/unknown triggers are read-only and offline even if
+a caller supplies write/web tools. The platform still commits validated changes after a normal turn.
+
+For message/scheduled turns, `WebSearch` grants cached hosted search; `WebSearch` plus `WebFetch`
+grants live search/open. With neither search grant, the hosted tool is disabled. Hosted search is a
+provider-side capability, separate from command networking: the command domain allowlist does not
+filter search queries/results. Never put private content or credentials in a public research query.
+See [OpenAI web search](https://learn.chatgpt.com/docs/web-search) and
+[network permissions](https://learn.chatgpt.com/docs/permissions).
+
+Shell networking requires `Bash` and `WebFetch`, a writable trusted turn, and the restrictive
+administrator policy installed at `/etc/codex/requirements.toml`. The worker image copies this from
+`worker/codex-requirements.toml`; only the operator can change it by rebuilding the image. Its exclusive
+allowlist permits the named GitHub API, Git and content hosts. Other domains, private/loopback
+addresses, upstream proxies and Unix-socket forwarding are blocked. This is a domain restriction,
+not an HTTP-method restriction. Provider and MCP connections have their own existing grants and are
+outside this command proxy. GitHub credentials are not granted to shell tools by this change.
+
+The managed policy deliberately leaves `enabled` unset: forcing it globally in Codex 0.149 overrides
+offline turns. TINA enables the proxy feature and selects an explicit named offline/online profile;
+it never combines these profiles with the legacy `sandboxPolicy`. A missing restrictive policy
+keeps shell networking offline; a globally forced proxy is rejected before starting a turn.
+
+The real CLI smoke probes in `tests/codex_network_smoke.py` and `tests/codex_web_smoke.py` verify
+network/filesystem isolation and web-tool request construction without a provider account. Their
+fixture responses do not establish live search availability, provider quota, or account access.

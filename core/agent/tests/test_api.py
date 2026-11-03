@@ -1975,3 +1975,63 @@ def test_redis_stream_reader_yields_keepalive_ticks(monkeypatch):
     reader = RedisStreamReader("redis://test", block_ms=10, idle_giveup_ms=30)
     out = list(reader.read("u1"))
     assert out == [None, None]                  # ticks until the giveup, then a clean end
+
+
+@pytest.mark.parametrize('native_turn', [False, True])
+def test_codex_history_keeps_recorded_citation_links_and_opened_sources(tmp_path, native_turn):
+    from control_plane.workspace_reader import WorkspaceReader
+    system = tmp_path / '.system/u_jane'
+    pointer = system / '.claude/sessions/main.session'
+    pointer.parent.mkdir(parents=True)
+    pointer.write_text('thread-sources')
+    _write_codex_rollout(system, 'thread-sources', [
+        {'type': 'event_msg', 'payload': {'type': 'task_started', 'turn_id': 'turn-sources' if native_turn else None}},
+        {'type': 'event_msg', 'payload': {'type': 'user_message', 'message': 'Research Python'}},
+        {'type': 'response_item', 'payload': {'type': 'web_search_call', 'action': {
+            'type': 'open_page', 'url': 'https://docs.python.org/3/library/pathlib.html'}}},
+        {'type': 'response_item', 'payload': {'type': 'message', 'role': 'assistant',
+            'internal_chat_message_metadata_passthrough': {} if native_turn else {'turn_id': 'turn-sources'},
+            'content': [{'type': 'output_text', 'text': 'Verified. citeturn0search0'}]}},
+        {'type': 'event_msg', 'payload': {'type': 'task_started', 'turn_id': 'turn-other'}},
+        {'type': 'event_msg', 'payload': {'type': 'user_message', 'message': 'Another question'}},
+        {'type': 'response_item', 'payload': {'type': 'message', 'role': 'assistant',
+            'content': [{'type': 'output_text', 'text': 'Different turn. citeturn0search0'}]}},
+    ])
+    cache = system / '.codex/tina-sources/thread-sources/turn-sources.json'
+    cache.parent.mkdir(parents=True)
+    cache.write_text(json.dumps([{'url': 'https://docs.python.org/3/library/pathlib.html',
+                                 'title': 'Python pathlib', 'refs': ['turn0search0']}]))
+    turns = WorkspaceReader(str(tmp_path)).history('u_jane', 'main')
+    assert '[Python pathlib](https://docs.python.org/3/library/pathlib.html)' in turns[1]['text']
+    assert 'cite' not in turns[1]['text']
+    assert 'Nguồn chưa có liên kết' in turns[3]['text']
+    assert 'https://' not in turns[3]['text']
+    cache.unlink()
+    legacy = WorkspaceReader(str(tmp_path)).history('u_jane', 'main')
+    assert 'Nguồn chưa có liên kết' in legacy[1]['text']
+    assert 'https://docs.python.org/3/library/pathlib.html' in legacy[1]['text']
+
+
+def test_research_chat_is_opt_in_and_dispatches_private_provenance_instructions(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    import control_plane.api as api_module
+    from control_plane.workspace_reader import WorkspaceReader
+    mounts = [SimpleNamespace(slug='personal', path=str(tmp_path / 'u_jane'), role='private', write=True)]
+    monkeypatch.setattr(api_module, 'active_workspaces', lambda root, subject: mounts if subject == 'u_jane' else [])
+    runtime = _FakeRuntime()
+    client = TestClient(create_app(Dispatcher(load_settings(), runtime, _FakeIdentity()),
+                                   stream_reader=_FakeReader(), reader=WorkspaceReader(str(tmp_path))))
+    response = client.post('/api/chat', headers={'X-User-Id': 'u_jane'},
+                           json={'prompt': 'Research this project', 'session': 'research-1', 'research': True})
+    assert response.status_code == 200
+    prompt = json.loads(runtime.spawned[0][2]['TINA_START'])['entrypoint']['inline']
+    assert str(tmp_path / 'u_jane/notes/research') in prompt
+    assert 'source_type (meeting | repo | web)' in prompt
+    assert 'verified_at' in prompt and '<!--tina:user-input-below-->Research this project' in prompt
+    ordinary = client.post('/api/chat', headers={'X-User-Id': 'u_jane'},
+                           json={'prompt': 'Ordinary chat', 'session': 'ordinary-1'})
+    assert ordinary.status_code == 200
+    assert 'Explicit Knowledge research' not in json.loads(runtime.spawned[-1][2]['TINA_START'])['entrypoint']['inline']
+    denied = client.post('/api/chat', headers={'X-User-Id': 'u_other'},
+                         json={'prompt': 'Research', 'research': True})
+    assert denied.status_code == 409

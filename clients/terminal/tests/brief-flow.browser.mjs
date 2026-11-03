@@ -47,12 +47,14 @@ try {
   const page = await browser.newPage();
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
-  let own = null, shared = null, failShared = false;
+  let own = null, shared = null, failShared = false, researchSaved = false;
+  const citedReply = 'Verified. [Python pathlib](https://docs.python.org/3/library/pathlib.html)';
   const requests = [];
   await page.route('http://brief.test/**', async route => {
     const request = route.request(), url = new URL(request.url());
     if (url.pathname === '/ui.js') return route.fulfill({ contentType: 'text/javascript; charset=utf-8', body: code });
     if (!url.pathname.startsWith('/api/')) return route.fulfill({ contentType: 'text/html; charset=utf-8', body: '<meta charset="utf-8"><div id="root"></div><script src="/ui.js"></script>' });
+    if (url.pathname.endsWith('/history')) return route.fulfill({ json: { turns: researchSaved ? [{role:'user',text:'Research Python'}, {role:'agent',text:citedReply}] : [] } });
     if (url.pathname.endsWith('/active')) return route.fulfill({ json: { active: [{ slug: 'private-home', path: '/workspaces/owner', primary: true, role: 'private', write: true }] } });
     if (url.pathname.endsWith('/tree')) return route.fulfill({ json: { files: own ? ['kg/entities/meeting/brief-row-77.md'] : [] } });
     if (url.pathname.endsWith('/file')) {
@@ -62,6 +64,11 @@ try {
     }
     if (url.pathname === '/api/chat') {
       requests.push(request.postDataJSON()); own = '# Private brief ready';
+      if (requests.at(-1).research) {
+        researchSaved = true;
+        const events = [{type:'message-delta',text:'Verified. citeturn0search0'},{type:'done',ok:true,reply:citedReply},{type:'turn-complete'}];
+        return route.fulfill({contentType:'text/event-stream',body:events.map(event=>'data: '+JSON.stringify(event)+'\n\n').join('')});
+      }
       return route.fulfill({ contentType: 'text/event-stream', body: 'data: {"type":"message-delta","text":"Your brief is ready."}\n\ndata: {"type":"turn-complete"}\n\n' });
     }
     return route.fulfill({ json: { sessions: [], memberships: [] } });
@@ -86,6 +93,16 @@ try {
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
   await page.getByRole('alert').filter({ hasText: 'Could not read the shared brief' }).waitFor();
   assert.equal(await page.getByText('Shared brief ready', { exact: true }).isVisible(), true);
+  await page.getByLabel('Nghiên cứu & lưu ghi chú').check();
+  await page.locator('textarea').last().fill('Research Python');
+  await page.getByRole('button', {name:'Send',exact:true}).click();
+  await page.getByRole('link', {name:'Python pathlib',exact:true}).waitFor();
+  assert.equal(requests.at(-1).research, true);
+  assert.equal(await page.getByText(/turn0search0/).count(), 0);
+  await page.reload();
+  const source = page.getByRole('link', {name:'Python pathlib',exact:true});
+  await source.waitFor();
+  assert.equal(await source.getAttribute('href'), 'https://docs.python.org/3/library/pathlib.html');
   assert.deepEqual(errors, []);
   console.log('PASS: Start brief delivery, explicit meeting/private path, same-file reload recovery, shared polling and stale-good render during a read failure.');
 } finally { await browser.close(); }
