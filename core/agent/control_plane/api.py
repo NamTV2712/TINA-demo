@@ -2257,7 +2257,9 @@ def create_app(
                             "text": seg.get("text"), "t": seg.get("start"),
                             "tsMs": seg.get("abs_start_ms"),
                             "completed": seg.get("completed", True),
-                            "id": seg.get("segment_id"), **({"speakerId": seg["speaker_id"], "speakerRevision": seg.get("speaker_revision")} if seg.get("speaker_id") else {})}, cursor())
+                            "id": seg.get("segment_id"), **({"speakerKey": seg["speaker_key"]} if seg.get("speaker_key") else {}),
+                            **({"speakerStatus": seg["speaker_status"]} if seg.get("speaker_status") else {}),
+                            **({"speakerId": seg["speaker_id"], "speakerRevision": seg.get("speaker_revision")} if seg.get("speaker_id") else {})}, cursor())
 
             def retract_event(payload):
                 """A `retract` marker (the collector withdrew superseded/over-extended pending drafts) →
