@@ -1,0 +1,27 @@
+name: tina-tts
+services:
+  tts:
+    image: tina/tts:dev
+    build:
+      context: .
+    environment:
+      TTS_API_TOKEN: ${TTS_API_TOKEN:?Set a private TTS_API_TOKEN}
+    volumes:
+      - ${TINA_TTS_MODELS:?Set the absolute model cache path}:/models:ro
+    ports:
+      - "127.0.0.1:${TINA_TTS_HOST_PORT:-18004}:8000"
+    networks: [tina-main]
+    restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs: [/tmp]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 120s
+networks:
+  tina-main:
+    external: true
+    name: ${TINA_MAIN_NETWORK:-tina-local_tina}

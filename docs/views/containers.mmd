@@ -12,6 +12,7 @@ flowchart LR
     desktop_journal["Desktop transcript journal"]
     transcript_sync["Owner transcript synchronization CLI"]
     diarization_worker["Local speaker diarization worker"]
+    tts_sidecar["Optional Vietnamese TTS sidecar"]
   end
   subgraph agent["agent"]
     agent_api["agent-api"]
@@ -93,3 +94,4 @@ flowchart LR
   meeting_api -->|"HTTP"| diarization_worker
   desktop -->|"HTTP"| alignment_worker
   agent_api -->|"HTTP"| meeting_api
+  bot -->|"HTTP"| tts_sidecar

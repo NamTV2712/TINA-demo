@@ -30,6 +30,7 @@ flowchart LR
     desktop_journal["Desktop transcript journal"]
     transcript_sync["Owner transcript synchronization CLI"]
     diarization_worker["Local speaker diarization worker"]
+    tts_sidecar["Optional Vietnamese TTS sidecar"]
   end
   transcription["transcription"]
   bot ==>|"audio -> tenant-hosted"| transcription

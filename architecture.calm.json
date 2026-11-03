@@ -1783,6 +1783,23 @@
    "node-type": "data-asset",
    "name": "Explicit private Markdown document edits",
    "description": "Owner-authorized content document PUT, no-overwrite move and explicit delete with expected SHA-256, existing workspace write lock, entity frontmatter validation and atomic file replacement. Reviewed moves preview source-preserving static backlinks and outgoing relative links in the same workspace; confirmation rechecks the full plan fingerprint, preserves code and aliases, reports ambiguous/uneditable references, rolls back ordinary write failures and removes the source last. Bounded Unicode Markdown content search excludes hidden paths and symlinks. Dashboard uses source-preserving formatting, a folder tree, wikilinks, history and per-account/workspace/file draft recovery across reloads via browser session storage retaining the original SHA-256; Terminal searches its authorized active mounts. Explicit per-path Git commit leaves unrelated staged paths and remotes untouched; shared workspaces remain read-only here. General harness writers retain their existing filesystem behavior."
+  },
+  {
+   "unique-id": "tts-sidecar",
+   "node-type": "service",
+   "name": "Optional Vietnamese TTS sidecar",
+   "description": "Optional separate Compose service under deploy/tts: one preset VieNeu v3 Turbo ONNX CPU voice. Authenticated OpenAI-compatible /v1/audio/speech consumes bounded text and returns headerless mono PCM16 at 24 kHz. Pinned model/codec snapshots are operator-downloaded, hash-verified and read-only; runtime hub access is offline. One synthesis at a time; no transcript writes, agent imports or speech text logging. Native synthesis is not preemptible; existing bot Stop cancels its HTTP request/playback.",
+   "metadata": [
+    {
+     "path": "deploy/tts"
+    }
+   ],
+   "interfaces": [
+    {
+     "unique-id": "tts-sidecar-http",
+     "type": "api"
+    }
+   ]
   }
  ],
  "relationships": [
@@ -1898,7 +1915,8 @@
       "stt-foundation.v1",
       "stt-metrics.v1",
       "transcript-sync",
-      "diarization-worker"
+      "diarization-worker",
+      "tts-sidecar"
      ]
     }
    }
@@ -3902,6 +3920,27 @@
     }
    ],
    "description": "Authenticated explicit Markdown edit and optional selected-path local commit; owner and content preconditions are enforced in the control plane."
+  },
+  {
+   "unique-id": "bot-tts-sidecar",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "bot"
+     },
+     "destination": {
+      "node": "tts-sidecar",
+      "interface": "tts-sidecar-http"
+     }
+    }
+   },
+   "protocol": "HTTP",
+   "description": "Existing owner-authorized Speak commands make the voice-enabled browser bot send text to TTS_SERVICE_URL/v1/audio/speech with X-API-Key. PCM is resampled by the optional sidecar to 24 kHz and played by the unchanged PulseAudio virtual microphone path; speak_stop aborts request and playback.",
+   "metadata": [
+    {
+     "access": "call"
+    }
+   ]
   }
  ],
  "flows": [

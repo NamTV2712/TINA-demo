@@ -53,6 +53,7 @@ system meetings  # capture → transcribe → record; owns the raw transcript
   data-asset stt-metrics.v1
   service transcript-sync
   service diarization-worker
+  service tts-sidecar
 
 system agent  # the execution domain: a trigger becomes one governed agent turn over a workspace.v1 git repo; owns no transcript
   service agent-api
@@ -217,6 +218,7 @@ edges:
   agent-api -write-> meeting-knowledge-pages  # Persist private answer/source snapshots and explicitly reviewed create-only Wiki pages; no overwrites.
   terminal -read-> meeting-knowledge-pages  # Through existing authenticated Gateway workspace proxy: related docs, bounded multi-meeting answers, source-meeting quotes/audio, freshness warnings and revision-guarded fact reviews.
   agent-api -write-> workspace-human-documents  # Authenticated explicit Markdown edit and optional selected-path local commit; owner and content preconditions are enforced in the control plane.
+  bot -call-> tts-sidecar  # Existing owner-authorized Speak commands make the voice-enabled browser bot send text to TTS_SERVICE_URL/v1/audio/speech with X-API-Key. PCM is resampled by the optional sidecar to 24 kHz and played by the unchanged PulseAudio virtual microphone path; speak_stop aborts request and playback.
   bot, agent-worker deployed-in runtime
   gateway, meeting-api, agent-api, admin-api, runtime, redis, postgres, object-store, transcription deployed-in deploy
   flows-api, flows-worker deployed-in deploy
