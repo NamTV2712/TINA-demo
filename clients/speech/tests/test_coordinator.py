@@ -126,6 +126,14 @@ def test_empty_claims_get_only_fixed_insufficient_information_reply():
     assert text.startswith('Mình chưa có đủ thông tin') and ids == []
 
 
+def test_older_single_meeting_sources_are_bound_to_the_fixed_endpoint():
+    value = answer()
+    del value['sources'][0]['meeting_id']
+    assert spoken_answer(value, room())[0] == 'The synthetic review is Friday.'
+    value['sources'][0]['meeting_id'] = 99
+    with pytest.raises(ValueError): spoken_answer(value, room())
+
+
 def test_wake_removal_is_anchored_and_empty_transcript_never_dispatches():
     assert question_text('Hey Tina, is Tina ready?') == 'is Tina ready?'
     for invalid in ('', 'ordinary speech Hey Tina', 'Hey Tina.'):

@@ -76,7 +76,9 @@ def spoken_answer(answer, room):
         raise ValueError("Malformed answer")
     ids = set()
     for source in sources:
-        if not isinstance(source, dict) or source.get('meeting_id') != room.meeting_id:
+        # Older single-meeting Knowledge endpoints omit this additive source field.
+        # Bind absent IDs to the fixed authenticated endpoint, never accept another ID.
+        if not isinstance(source, dict) or source.get('meeting_id', room.meeting_id) != room.meeting_id:
             raise ValueError("Unapproved source meeting")
         if (source.get('kind') == 'document' and source.get('path') in room.documents
                 or source.get('kind') == 'transcript' and room.include_transcript):
@@ -257,7 +259,7 @@ class Coordinator:
             question = question_text(response.json().get('text'))
             if turn.cancelled: return
             answer = await self.gateway('POST', f'/agent/workspace/meeting-knowledge/{self.room.meeting_id}/ask',
-                json={'question': question, 'documents': self.room.documents, 'meeting_ids': []}, timeout=90)
+                json={'question': question, 'documents': self.room.documents}, timeout=90)
             identifier = answer.get('id')
             if not isinstance(identifier, str) or not re.fullmatch('[0-9a-f]{32}', identifier):
                 raise ValueError("Malformed answer identity")

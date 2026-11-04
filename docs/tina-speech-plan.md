@@ -11,6 +11,21 @@ checks. Native KWS + Silero captured the synthetic question into a bounded WAV. 
 LLM -> shared meeting playback has NOT been verified; new service images are not deployed.
 See [the speech client README](../clients/speech/README.md#authorized-voice-turns). Do not treat this checkpoint as the phase 3 acceptance gate.
 
+Live synthetic integration evidence (2026-11-04): a paced WAV passed native KWS/Silero capture,
+real self-hosted STT, the existing meeting Knowledge LLM endpoint with an explicitly created
+synthetic Markdown source, and actual bot playback in an admitted Meet session. The turn and
+bot receipt both reached completed; the participant controller returned to ARMED. The supported
+answer was "The synthetic review is Friday." No real transcript sources were approved for this run.
+Stop during a separate long playback reached stopped in 138 ms. Native negative replay made
+zero turn requests. Evidence is under ignored `output/speech-stage3/e2e-proof.json` and
+`live-turn.log`. Remote audibility/Stop listening confirmation is still pending the user;
+real-human microphone/accent validation remains deferred as explicitly requested.
+
+Compatibility fix from the live run: omit the unused empty meeting_ids request field for older
+single-meeting Agent APIs, and bind absent per-source meeting IDs to the fixed authenticated
+Knowledge endpoint. Explicit different meeting IDs and unapproved document paths still fail.
+The focused speech suite now has 37 passing tests. This does not add cross-meeting retrieval.
+
 Resource constraint after the Windows virtual-memory incident: run builds/tests sequentially,
 limit Node heap to 2 GiB, and apply the operator's WSL resource cap before container integration
 builds. The default shared voice remains the approved Trúc Ly / "ti na".

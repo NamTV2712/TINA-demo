@@ -194,6 +194,10 @@ Retry explicit Stop. If receipts have expired or services cannot recover, the op
 the bot, confirm it has left, then restart/reconfigure the coordinator with a new active bot.
 The single-process pilot has volatile state; restart does not resume/replay turns.
 
+Older single-meeting Agent APIs are supported without requesting the unused `meeting_ids`
+field. If a source omits its additive meeting ID, it is bound to the fixed authenticated
+Knowledge endpoint; an explicit different meeting ID or unapproved path is still rejected.
+
 ### Synthetic fixtures and focused checks
 
 `fixtures/` contains clearly labeled fake source material. It does not itself insert anything
