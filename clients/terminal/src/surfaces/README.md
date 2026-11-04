@@ -58,6 +58,9 @@ disconnected → indeterminate/disabled, never an actionable control derived fro
 
 ## Meeting dialogs
 
+Dialog backdrops blend the semantic background token with transparency, so they follow
+the active theme and satisfy the palette guard without component-level hex colors.
+
 `meetingDialogs.module.css` scopes the shared native-dialog presentation used by
 `MeetingMemory.tsx`, `SpeakerRegistry.tsx` and `TranscriptReview.tsx`. Dialogs center in the
 viewport, keep the title and Close action visible, and scroll only their bounded content area.
