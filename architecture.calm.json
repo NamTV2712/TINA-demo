@@ -203,7 +203,7 @@
    "unique-id": "transcription",
    "node-type": "service",
    "name": "transcription",
-   "description": "transcription — OpenAI-compatible /v1/audio/transcriptions boundary with selectable backends: faster-whisper/CTranslate2, Apple MLX/Metal, and loopback FunASR Qwen3-ASR with FSMN-VAD. Clients send bounded audio windows, continuity prompts and content-free capture-lag metadata. FunASR exposes asr-status.v1 with actual device, bounded request timing samples, queue and model percentiles; Terminal reads it through a verified admin proxy. Browser render timings remain local. Does not write any redis carrier (the bot XADDs segments). Optional native Rust backend runs Silero VAD and Qwen3-ASR-0.6B INT8 through sherpa-onnx on CPU at host loopback :18001; it preserves VAD segment offsets and the same ASR status contract. The FunASR adapter forwards min_silence_duration_ms to FSMN max_end_silence_time (100-2000 ms, default 800 ms, explicitly pinned), preserving per-VAD sentence offsets for downstream alignment. An isolated single-source Apple Silicon PoC under deploy/transcription/streaming-poc validates real Qwen Transformers decoder token callbacks and paced growing-window hypotheses on cached VI/EN evaluation clips. It is not a selected production endpoint, does not claim an incremental audio encoder, and never changes/restarts production services; private external artifacts record token timing, accuracy, RAM and before/after listener identities. Sub-200 ms FunASR inputs receive trailing silence only in the temporary inference file to avoid incomplete FSMN frames; source PCM, reported duration and sentence bounds retain the original source interval. Empty input and inference failures remain errors. Optional authenticated loopback :18002 backend composes FunASR FSMN-VAD CPU with hash-pinned Gipformer 1.5 INT8 via Sherpa-ONNX OfflineRecognizer. The root Compose asr profile runs that same CPU service, mounts the pinned model directory and owns host port 18002 while enabled; unload the host LaunchAgent to avoid a port conflict. Existing Custom endpoint settings select it for Desktop/Bot without altering the Qwen platform default. Original VAD sample offsets survive speech slicing; no word timing, prompt conditioning, language detection or token streaming is claimed. One inference plus three bounded waiters, no audio/text in diagnostics.",
+   "description": "transcription — OpenAI-compatible /v1/audio/transcriptions boundary with selectable backends: faster-whisper/CTranslate2, Apple MLX/Metal, and loopback FunASR Qwen3-ASR with FSMN-VAD. Clients send bounded audio windows, continuity prompts and content-free capture-lag metadata. FunASR exposes asr-status.v1 with actual device, bounded request timing samples, queue and model percentiles; Terminal reads it through a verified admin proxy. Browser render timings remain local. Does not write any redis carrier (the bot XADDs segments). Optional native Rust backend runs Silero VAD and Qwen3-ASR-0.6B INT8 through sherpa-onnx on CPU at host loopback :18001; it preserves VAD segment offsets and the same ASR status contract. The FunASR adapter forwards min_silence_duration_ms to FSMN max_end_silence_time (100-2000 ms, default 800 ms, explicitly pinned), preserving per-VAD sentence offsets for downstream alignment. An isolated single-source Apple Silicon PoC under deploy/transcription/streaming-poc validates real Qwen Transformers decoder token callbacks and paced growing-window hypotheses on cached VI/EN evaluation clips. It is not a selected production endpoint, does not claim an incremental audio encoder, and never changes/restarts production services; private external artifacts record token timing, accuracy, RAM and before/after listener identities. Sub-200 ms FunASR inputs receive trailing silence only in the temporary inference file to avoid incomplete FSMN frames; source PCM, reported duration and sentence bounds retain the original source interval. Empty input and inference failures remain errors. Optional authenticated loopback :18002 backend composes FunASR FSMN-VAD CPU with hash-pinned Gipformer 1.5 INT8 via Sherpa-ONNX OfflineRecognizer. The root Compose asr profile runs that same CPU service, mounts the pinned model directory and owns host port 18002 while enabled; unload the host LaunchAgent to avoid a port conflict. Existing Custom endpoint settings select it for Desktop/Bot without altering the Qwen platform default. Original VAD sample offsets survive speech slicing; no word timing, prompt conditioning, language detection or token streaming is claimed. One inference plus three bounded waiters, no audio/text in diagnostics. Optional native VieGem-ASR + KenLM endpoint at loopback :18005 uses separately pinned VieGem and EmbeddingGemma 2 assets, PyTorch FP32 on explicit MPS/CPU/CUDA, FSMN on CPU and upstream 4-gram CTC prefix beam decoding. It shares the authenticated bounded HTTP worker with Gipformer; inference is serialized and source VAD offsets stay on the original timeline. Installation does not select the endpoint globally. No incremental streaming, word alignment or automatic transcript polish is claimed; VieGem use is restricted by its non-commercial research license and Gemma terms. Identity also exposes the named viegem backend: administrators configure viegem_url in the platform transcription registry and a dotenvx-encrypted TINA_VIEGEM_TOKEN is injected at deployment startup (legacy database token supported only without that env); native startup decrypts its separate private env file strictly, user preferences select the backend name, and internal Bot/Desktop/dictation resolution carries only its registry-owned endpoint credential. Custom endpoints do not inherit the VieGem platform token; the browser-facing admin settings edge treats that credential as write-only. The source-build entrypoint resolves TINA_VIEGEM_DEVICE=auto to native MPS on Apple Silicon or Docker CUDA on Linux/Windows WSL2. Only the CTC model/encoder uses the GPU; FSMN and KenLM remain CPU. Actual MPS/CUDA compute and authenticated audio must pass before deployment succeeds; no silent CPU fallback. CUDA adds an owned Compose overlay with pinned cu130 wheels and one GPU reservation for inference only. MPS excludes the Docker VieGem profile and stops only the old owned CPU service before binding the same host endpoint; native startup failure attempts to restore that prior service while reporting failure. Explicit cpu remains available. Gipformer and token-free Docker model-install jobs are independent; native setup prepares the same pinned cache before activation. Inference mounts cached weights read-only, runtime tokens come from dotenvx and private keys are not mounted. make-down also removes/stops the owned MPS LaunchAgent. Only a fresh registry receives a VieGem default; existing preferences and foreign worker ownership are preserved. Per-account ASR runtime control keeps shared workers alive while any enabled account requests them. A derived-key authenticated drain fence refuses new requests and cannot stop a worker with active inference. CUDA hardware validation remains pending on a real NVIDIA host.",
    "metadata": [
     {
      "path": "core/meetings/services/transcription"
@@ -225,6 +225,12 @@
     },
     {
      "path": "deploy/transcription/gipformer"
+    },
+    {
+     "path": "deploy/transcription/viegem"
+    },
+    {
+     "path": "deploy/transcription/http_worker.py"
     }
    ],
    "interfaces": [
@@ -1783,6 +1789,23 @@
    "node-type": "data-asset",
    "name": "Explicit private Markdown document edits",
    "description": "Owner-authorized content document PUT, no-overwrite move and explicit delete with expected SHA-256, existing workspace write lock, entity frontmatter validation and atomic file replacement. Reviewed moves preview source-preserving static backlinks and outgoing relative links in the same workspace; confirmation rechecks the full plan fingerprint, preserves code and aliases, reports ambiguous/uneditable references, rolls back ordinary write failures and removes the source last. Bounded Unicode Markdown content search excludes hidden paths and symlinks. Dashboard uses source-preserving formatting, a folder tree, wikilinks, history and per-account/workspace/file draft recovery across reloads via browser session storage retaining the original SHA-256; Terminal searches its authorized active mounts. Explicit per-path Git commit leaves unrelated staged paths and remotes untouched; shared workspaces remain read-only here. General harness writers retain their existing filesystem behavior."
+  },
+  {
+   "unique-id": "asr-control",
+   "node-type": "service",
+   "name": "ASR host controller",
+   "description": "Local host lifecycle bridge installed by make-all as an owned LaunchAgent on Mac or detached process on WSL2. Terminal verifies its auth cookie and forwards only the current user id with a derived control key. Identity owns per-account enabled/backend/revision preferences and aggregate demand; the controller starts and audio-tests known ASR workers before CAS preference commits. It serializes changes, waits ten idle seconds, conservatively retains both workers while any meeting bot or local Desktop capture exists, drains only with a distinct derived worker key and rechecks demand before stopping an owned Docker service or native MPS LaunchAgent. No arbitrary commands, endpoints, secret values or other user records reach the browser. A private state file records desired backend names and is rebuilt from Identity after restart. make-down stops the controller before shutting down services. Unavailable health or drain checks retain workers rather than force-stop.",
+   "metadata": [
+    {
+     "path": "deploy/compose/bin/asr_control.py"
+    }
+   ],
+   "interfaces": [
+    {
+     "unique-id": "asr-control-rest",
+     "type": "api"
+    }
+   ]
   }
  ],
  "relationships": [
@@ -1898,7 +1921,8 @@
       "stt-foundation.v1",
       "stt-metrics.v1",
       "transcript-sync",
-      "diarization-worker"
+      "diarization-worker",
+      "asr-control"
      ]
     }
    }
@@ -3103,7 +3127,8 @@
       "redis",
       "postgres",
       "object-store",
-      "transcription"
+      "transcription",
+      "asr-control"
      ]
     }
    }
@@ -3902,6 +3927,69 @@
     }
    ],
    "description": "Authenticated explicit Markdown edit and optional selected-path local commit; owner and content preconditions are enforced in the control plane."
+  },
+  {
+   "unique-id": "terminal-asr-control",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "terminal-app"
+     },
+     "destination": {
+      "node": "asr-control",
+      "interface": "asr-control-rest"
+     }
+    }
+   },
+   "description": "Authenticated account-only ASR start/stop and safe resource status through Terminal proxy; private derived host key.",
+   "protocol": "HTTP",
+   "metadata": [
+    {
+     "access": "call"
+    }
+   ]
+  },
+  {
+   "unique-id": "asr-control-identity",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "asr-control"
+     },
+     "destination": {
+      "node": "admin-api",
+      "interface": "admin-api-rest"
+     }
+    }
+   },
+   "description": "Internal account preference CAS and aggregate enabled demand; no user list or credential projection.",
+   "protocol": "HTTP",
+   "metadata": [
+    {
+     "access": "call"
+    }
+   ]
+  },
+  {
+   "unique-id": "asr-control-workers",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "asr-control"
+     },
+     "destination": {
+      "node": "transcription",
+      "interface": "stt-endpoint"
+     }
+    }
+   },
+   "description": "Authenticated real audio readiness and derived-key drain fencing before owned process/container stop.",
+   "protocol": "HTTP",
+   "metadata": [
+    {
+     "access": "call"
+    }
+   ]
   }
  ],
  "flows": [

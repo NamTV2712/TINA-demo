@@ -2688,7 +2688,9 @@ def create_app(
                                            settings.internal_api_secret.get_secret_value()})
                 with _ur.urlopen(req, timeout=5) as r:
                     t = json.loads(r.read())
-                if t.get("backend") in ("apple", "nvidia", "custom", "funasr", "sherpa"):
+                if t.get("disabled"):
+                    return {"ok": False, "source": "settings", "summary": "Transcription is stopped for this account; start it in Settings"}
+                if t.get("backend") in ("apple", "nvidia", "custom", "funasr", "sherpa", "gipformer", "viegem"):
                     # An explicitly selected backend must be the one tested. Never green the
                     # selection by falling back to a different env endpoint when it is absent.
                     url, token, source = t.get("url") or "", t.get("token") or "", "settings"

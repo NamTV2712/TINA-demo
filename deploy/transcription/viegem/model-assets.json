@@ -1,0 +1,31 @@
+{
+  "viegem": {
+    "repo": "5CD-AI/VieGem-ASR",
+    "revision": "95eae70b21fb0ef640e3ac4ea8cfa2380872ed20",
+    "files": {
+      "README.md": "96da36700a70208b27bcda0fc2e067a87951448747cf4f644edccc1b4be79b6a",
+      "asr/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "asr/features.py": "8e3904f6104c95876629fa4535878d5a40ca0688e9bec03a62fd5bf03be4719c",
+      "asr/model.py": "d6585bdac3348a344203606ee6ed4f85ce303e806c9ee2787c095a4fab0dbb6e",
+      "asr/lm_decode.py": "0af655e0da774d5fbdd14b46ab1d8ade1086a08e90f2741aa0c3530ef35c00f7",
+      "asr/text.py": "b315a90310285684b2141749d7cb09e4c4d50c2770621044ea04e9513852a2bf",
+      "viegem_asr.pt": "18104f4551f48c23e0e3b76433747f6fca7d4a3069a4330e691a1bba2df8cfa6",
+      "lm/viegem_lm.bin": "4416f163f6801e91c240716f016301eba8924688a5e9ad8b30652c255e75b510",
+      "lm/viegem_lm.unigrams.txt": "7145a85a63da07521ee7204607a7eb0a82d9e5e590d77535234e6b74d1d9f3d8"
+    }
+  },
+  "base": {
+    "repo": "google/embeddinggemma-2",
+    "revision": "f9972ac22e696a105c482202646979e33e4b5a1e",
+    "files": {
+      "README.md": "2c058c304c68221f1de80979594036eff3972b2bce686bb7b0f43621a6b0b011",
+      "config.json": "b8f1e9931b57fbc054acdb445c41765d55b0074c58d145fa82839941ad1b5bb3",
+      "preprocessor_config.json": "ea2ae257e901064abdd98dceb19f2b0da06af600bed15e0f99f5c85c37ee9d78",
+      "processor_config.json": "168f6a08522f3ce5dea596d94d003af2fd691742d4f41fe1f9d8cce76bfbf69c",
+      "tokenizer_config.json": "17bd5d6e9364ca49a534e1502076593317c298d4a663623091ed45388f004874",
+      "tokenizer.json": "4d777ef5bdc1aa36227abdfb77c3e49e7b9c892d16e1b6bda41c393504828be4",
+      "tokenizer.model": "e594c8a90eb08d8bda498ff4747977dc827ae0c3c56b5c0d41a605a22d02ef03",
+      "model.safetensors": "197a32965d4b1105faf060417baa899e193fb73cd401f42ec9295234d5553d79"
+    }
+  }
+}

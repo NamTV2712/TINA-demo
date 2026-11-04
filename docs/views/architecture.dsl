@@ -53,6 +53,7 @@ system meetings  # capture → transcribe → record; owns the raw transcript
   data-asset stt-metrics.v1
   service transcript-sync
   service diarization-worker
+  service asr-control
 
 system agent  # the execution domain: a trigger becomes one governed agent turn over a workspace.v1 git repo; owns no transcript
   service agent-api
@@ -217,8 +218,11 @@ edges:
   agent-api -write-> meeting-knowledge-pages  # Persist private answer/source snapshots and explicitly reviewed create-only Wiki pages; no overwrites.
   terminal -read-> meeting-knowledge-pages  # Through existing authenticated Gateway workspace proxy: related docs, bounded multi-meeting answers, source-meeting quotes/audio, freshness warnings and revision-guarded fact reviews.
   agent-api -write-> workspace-human-documents  # Authenticated explicit Markdown edit and optional selected-path local commit; owner and content preconditions are enforced in the control plane.
+  terminal-app -call-> asr-control  # Authenticated account-only ASR start/stop and safe resource status through Terminal proxy; private derived host key.
+  asr-control -call-> admin-api  # Internal account preference CAS and aggregate enabled demand; no user list or credential projection.
+  asr-control -call-> transcription  # Authenticated real audio readiness and derived-key drain fencing before owned process/container stop.
   bot, agent-worker deployed-in runtime
-  gateway, meeting-api, agent-api, admin-api, runtime, redis, postgres, object-store, transcription deployed-in deploy
+  gateway, meeting-api, agent-api, admin-api, runtime, redis, postgres, object-store, transcription, asr-control deployed-in deploy
   flows-api, flows-worker deployed-in deploy
 
 flows:

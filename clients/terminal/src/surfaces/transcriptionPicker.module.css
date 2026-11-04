@@ -1,0 +1,47 @@
+.picker { display: flex; flex-direction: column; gap: 16px; max-width: 600px; color: var(--t1); }
+.header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.header h2 { font-size: 14px; line-height: 1.5; font-weight: 650; margin: 0; }
+.header p, .footer p, .note { font-size: 12px; line-height: 1.5; color: var(--t3); margin: 2px 0 0; }
+.power { display: flex; align-items: center; gap: 8px; flex-shrink: 0; font-size: 12px; color: var(--t2); }
+.toggle { width: 36px; height: 22px; padding: 3px; border: 1px solid var(--line2); border-radius: 12px; background: var(--panel2); cursor: pointer; flex: none; }
+.toggle > span { display: block; width: 14px; height: 14px; border-radius: 50%; background: var(--t3); transition: transform .15s ease; }
+.toggle[aria-checked="true"] { background: var(--accent); border-color: var(--accent); }
+.toggle[aria-checked="true"] > span { transform: translateX(14px); background: var(--bg); }
+.toggle:disabled, .test:disabled { opacity: .5; cursor: default; }
+.toggle:focus-visible, .test:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.models { display: flex; flex-direction: column; gap: 8px; border: 0; padding: 0; margin: 0; min-width: 0; }
+.model { position: relative; display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 16px; border: 1px solid var(--line); border-radius: 9px; cursor: pointer; background: var(--panel); transition: border-color .15s, background .15s; }
+.model:hover { background: var(--panel2); border-color: var(--line2); }
+.model[data-selected="true"] { border-color: color-mix(in srgb, var(--accent) 60%, var(--line)); background: color-mix(in srgb, var(--accent) 5%, var(--panel)); }
+.model[data-available="false"], .models:disabled .model { cursor: default; opacity: .6; }
+.model:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 3px; }
+.model input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.selection { display: flex; align-items: center; justify-content: center; width: 18px; height: 18px; border: 1px solid var(--line2); border-radius: 50%; box-sizing: border-box; color: var(--bg); }
+.model[data-selected="true"] .selection { border-color: var(--accent); background: var(--accent); }
+.description { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.modelName { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; font-weight: 600; line-height: 1.4; }
+.selected { font-size: 10px; font-weight: 500; color: var(--accent); }
+.detail { font-size: 11.5px; color: var(--t3); line-height: 1.5; }
+.device { font-variant-numeric: tabular-nums; }
+.state { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--t3); white-space: nowrap; }
+.state > span { width: 5px; height: 5px; border-radius: 50%; background: var(--t3); flex: none; }
+.state[data-running="true"] { color: var(--green); }
+.state[data-running="true"] > span { background: var(--green); }
+.footer { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.footer p { margin: 0; font-size: 11.5px; }
+.test { display: inline-flex; align-items: center; gap: 5px; padding: 1px 0; flex: none; border: 0; background: transparent; color: var(--t2); font: inherit; font-size: 11.5px; cursor: pointer; }
+.test:hover:not(:disabled) { color: var(--accent); }
+.note { margin: -4px 0 0; }
+.error, .success { margin: 0; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.error { color: var(--danger); }
+.success { color: var(--green); }
+.advanced { max-width: 600px; margin-top: 20px; border-top: 1px solid var(--line); padding-top: 12px; }
+.advanced > summary { display: flex; align-items: center; gap: 6px; list-style: none; cursor: pointer; color: var(--t3); font-size: 12px; width: fit-content; }
+.advanced > summary::-webkit-details-marker { display: none; }
+.advanced > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+.advanced > summary:hover { color: var(--t1); }
+.advanced[open] > summary > svg { transform: rotate(90deg); }
+.advanced[open] > summary { margin-bottom: 12px; }
+.srOnly { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+@media (max-width: 480px) { .model { padding: 12px; gap: 8px; } .header { gap: 8px; align-items: flex-start; } .modelName { gap: 4px; } .footer { flex-wrap: wrap; } .detail { font-size: 11px; } }
+@media (prefers-reduced-motion: reduce) { .toggle > span, .model { transition: none; } }

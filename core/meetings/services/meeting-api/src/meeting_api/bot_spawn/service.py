@@ -501,7 +501,9 @@ async def request_bot(
         bot_name = _bot_name_from_context(bot_context)
     transcription_provider: Optional[str] = "none" if not transcribe_enabled else None
     configured_backend = configured.get("backend")
-    if transcribe_enabled and configured_backend in ("apple", "nvidia", "funasr", "sherpa", "custom"):
+    if configured.get("disabled") and transcribe_enabled:
+        raise TranscriptionNotConfigured("transcription is stopped for this account — start it in Settings")
+    if transcribe_enabled and configured_backend in ("apple", "nvidia", "funasr", "sherpa", "gipformer", "viegem", "custom"):
         if not configured.get("url"):
             raise TranscriptionNotConfigured(
                 f"the selected {configured_backend} transcription backend is not configured "
