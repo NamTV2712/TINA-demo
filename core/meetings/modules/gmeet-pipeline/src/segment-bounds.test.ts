@@ -34,7 +34,7 @@ for (const [name, create] of factories) {
     m.onSegmentConfirmed = () => {};
     m.onSegmentPending = (_i, _n, t, a) => { if (t) drafts.set(a, t); else drafts.delete(a); };
     m.feedAudio(SID, new Float32Array(SR * 4).fill(.1), START);
-    const prefix = name.startsWith('gmeet') ? '理智。' : 'bad prefix';
+    const prefix = name.startsWith('gmeet') ? '...' : 'bad prefix';
     m.handleTranscriptionResult(SID, `${prefix} other words`, 3, [{text:prefix,start:0,end:1},{text:'other words',start:1,end:3}]);
     m.handleTranscriptionResult(SID, `${prefix} other words grow`, 4, [{text:prefix,start:0,end:1},{text:'other words grow',start:1,end:4}]);
     assert.equal(drafts.has(START), false, 'the filtered prefix must not leave a zero-duration durable draft');
@@ -137,4 +137,18 @@ assert.equal(failures, 0, `${failures} segment bound regressions`);
   assert.ok(finals.every(s=>s.end>s.start && s.end-s.start<=30));
   assert.equal(new Set(finals.map(s=>s.segment_id)).size,finals.length);
   console.log('PASS pipeline: rotation drains the old turn without losing or duplicating its words');
+}
+
+for (const reply of ['Có', 'Không', 'Được', 'Ừ']) {
+  const finals: TranscriptSegment[] = [];
+  const pipeline = createGmeetPipeline({
+    transcribe: async pcm => ({ text: reply, duration: pcm.length / 16000,
+      segments: [{ text: reply, start: 0, end: pcm.length / 16000 }] }),
+    sink: { segment: s => finals.push(s), finalize() {} },
+  });
+  pipeline.feedAudio(0, 'Alice', new Float32Array(32000).fill(.1), START, 'alice', 0);
+  await pipeline.dispose();
+  assert.deepEqual(finals.map(s => s.text), [reply]);
+  assert.ok(finals.every(s => s.completed && s.end > s.start));
+  console.log(`PASS pipeline: short reply reaches confirmed transcript: ${reply}`);
 }

@@ -54,9 +54,9 @@ export function isHallucination(text: string): boolean {
   if (stripped !== lower && db.has(stripped + '...')) return true;
   if (stripped !== lower && db.has(stripped + '.')) return true;
 
-  // Too short (single word < 10 chars)
+  // Length alone cannot distinguish a real short reply from ASR junk.
+  if (!/[\p{L}\p{N}]/u.test(trimmed)) return true;
   const words = trimmed.split(/\s+/);
-  if (words.length <= 1 && trimmed.length < 10) return true;
 
   // Repetition loop: same 3-6 word phrase repeated 3+ times
   if (words.length >= 9) {
