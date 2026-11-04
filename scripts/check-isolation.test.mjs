@@ -48,6 +48,22 @@ test("vacuity control: the committed tree is green (a red here invalidates every
   assert.equal(r.green, true, r.out);
 });
 
+test("bot accepts prefix-only Node builtins and still rejects undeclared imports", () => {
+  const fixture = join(ROOT, "core/meetings/services/bot/src/zzPlantedIsolation.ts");
+  const checker = join(ROOT, "core/meetings/services/bot/scripts/check-isolation.js");
+  try {
+    writeFileSync(fixture, 'import { test } from "node:test";\n');
+    assert.match(execFileSync("node", [checker], { cwd: ROOT, encoding: "utf8" }), /ISOLATION VERIFIED/);
+    for (const spec of ["node:zz-not-a-builtin", UNDECLARED]) {
+      writeFileSync(fixture, `import thing from "${spec}";\n`);
+      assert.throws(() => execFileSync("node", [checker], { cwd: ROOT, encoding: "utf8", stdio: "pipe" }),
+        (error) => error.status === 1 && error.stderr.includes(`zzPlantedIsolation.ts → ${spec}`));
+    }
+  } finally {
+    rmSync(fixture, { force: true });
+  }
+});
+
 test("RED: a real undeclared import IS reported (the gate still does its job)", () => {
   const r = withPlanted(`import thing from "${UNDECLARED}";\nexport const x = thing;\n`, runIsolation);
   assert.equal(r.green, false, r.out);
