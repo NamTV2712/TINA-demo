@@ -4,8 +4,12 @@ import importlib.util
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 import json
+import importlib.util
+import os
 import threading
+from types import SimpleNamespace
 import urllib.request
 import urllib.error
 from http.server import ThreadingHTTPServer
@@ -97,3 +101,17 @@ class ControlTests(unittest.TestCase):
         self.assertEqual(code, 200)
         self.assertEqual(body["account"]["backend"], "gipformer")
         self.assertNotIn("control-private", str(body))
+
+    def test_discord_sessions_hold_workers_and_unavailable_connector_fails_safe(self):
+        root = Path(__file__).resolve().parents[3]
+        spec = importlib.util.spec_from_file_location("deployment_stack", root / "deploy/compose/bin/stack.py")
+        stack = importlib.util.module_from_spec(spec); spec.loader.exec_module(stack)
+        selected = SimpleNamespace(config={"networks": {"tina": {"name": "test-net"}}}, env={},
+            services={"discord-connector": {}, "admin-api": {"environment": {}}}, endpoint=lambda *_: "http://127.0.0.1:18101")
+        workers = control.Workers(selected)
+        with patch.dict("sys.modules", {"stack": stack}), patch.object(stack, "run", return_value=SimpleNamespace(returncode=0, stdout="")), \
+             patch.object(control, "request_json", return_value={"sessions": 1}):
+            self.assertTrue(workers.busy())
+        with patch.dict("sys.modules", {"stack": stack}), patch.object(stack, "run", return_value=SimpleNamespace(returncode=0, stdout="")), \
+             patch.object(control, "request_json", side_effect=control.ControlError(503, "unavailable")):
+            self.assertTrue(workers.busy())

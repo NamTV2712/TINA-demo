@@ -28,10 +28,26 @@ async function proxy(req: NextRequest, write: boolean) {
   try {
     let body: string | undefined;
     if (write) {
-      const raw = await req.text();
-      if (raw.length > 1024) return NextResponse.json({ detail: "Request too large" }, { status: 413, headers });
+      const length = Number(req.headers.get("content-length") || 0);
+      if (Number.isFinite(length) && length > 1024) return NextResponse.json({ detail: "Request too large" }, { status: 413, headers });
+      if (!req.body) return NextResponse.json({ detail: "Invalid request" }, { status: 422, headers });
+      const reader = req.body.getReader(), chunks: Uint8Array[] = [];
+      let size = 0;
+      while (true) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        size += chunk.value.byteLength;
+        if (size > 1024) {
+          await reader.cancel();
+          return NextResponse.json({ detail: "Request too large" }, { status: 413, headers });
+        }
+        chunks.push(chunk.value);
+      }
+      const bytes = new Uint8Array(size);
+      let offset = 0;
+      for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
       let value;
-      try { value = JSON.parse(raw); } catch { return NextResponse.json({ detail: "Invalid request" }, { status: 422, headers }); }
+      try { value = JSON.parse(new TextDecoder().decode(bytes)); } catch { return NextResponse.json({ detail: "Invalid request" }, { status: 422, headers }); }
       if (!value || typeof value !== "object" || Object.keys(value).sort().join(",") !== "backend,enabled,revision"
           || !["gipformer", "viegem"].includes(value.backend) || typeof value.enabled !== "boolean"
           || !Number.isSafeInteger(value.revision) || value.revision < 0) {

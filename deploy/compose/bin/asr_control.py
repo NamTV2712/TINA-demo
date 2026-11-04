@@ -126,6 +126,13 @@ class Workers:
                             "--filter", "name=tina-mtg"], env=self.selected.env, capture=True, check=False)
         if result.returncode or result.stdout.strip():
             return True
+        if "discord-connector" in self.selected.services:
+            try:
+                connector = request_json(self.selected.endpoint("discord-connector", 8091) + "/healthz", timeout=1)
+                if type(connector.get("sessions")) is not int or connector["sessions"] > 0:
+                    return True
+            except ControlError:
+                return True
         try:
             # shortcut: any local capture protects both workers; narrow per-session holds when Desktop exposes them.
             info = request_json("http://127.0.0.1:8056/health", timeout=1)

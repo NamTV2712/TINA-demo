@@ -37,3 +37,12 @@ it("accepts the browser's public loopback port behind Docker while refusing a di
   expect((await POST(make("http://localhost:23000"))).status).toBe(200);
   expect((await POST(make("http://127.0.0.1:23001"))).status).toBe(403);
 });
+it("bounds streamed request bodies before parsing them", async () => {
+  const fetch = vi.fn(); vi.stubGlobal("fetch", fetch);
+  const request = new NextRequest("http://terminal.test/api/transcription/runtime", { method: "POST",
+    headers: { origin: "http://terminal.test", "content-type": "application/json" },
+    body: JSON.stringify({ backend: "viegem", enabled: true, revision: 0 }).repeat(100) });
+  request.headers.delete("content-length");
+  const response = await POST(request);
+  expect(response.status).toBe(413); expect(fetch).not.toHaveBeenCalled();
+});
