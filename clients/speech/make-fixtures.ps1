@@ -10,7 +10,7 @@ $synth = New-Object System.Speech.Synthesis.SpeechSynthesizer
 try {
     # Synthetic ENGLISH KWS fixtures only; this does not change TINA's shared TTS voice.
     $synth.SelectVoice("Microsoft Zira Desktop")
-    foreach ($name in @("hey-tina", "negative")) {
+    foreach ($name in @("hey-tina", "negative", "question")) {
         $prompt = New-Object System.Speech.Synthesis.PromptBuilder
         $prompt.AppendBreak([TimeSpan]::FromSeconds(1))
         if ($name -eq "hey-tina") {
@@ -18,6 +18,11 @@ try {
                 $prompt.AppendText("Hey Tina.")
                 $prompt.AppendBreak([TimeSpan]::FromSeconds(3))
             }
+        } elseif ($name -eq "question") {
+            $prompt.AppendText("Hey Tina.")
+            $prompt.AppendBreak([TimeSpan]::FromMilliseconds(200))
+            $prompt.AppendText("When is the synthetic review?")
+            $prompt.AppendBreak([TimeSpan]::FromSeconds(2))
         } else {
             foreach ($phrase in @("Hey Nina.", "Hey Gina.", "Hey Tim.",
                 "The meeting starts at nine.", "Please read the document.", "Thank you.")) {

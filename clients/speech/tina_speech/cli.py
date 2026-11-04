@@ -76,13 +76,16 @@ def parser():
     root = argparse.ArgumentParser(description="Local-only Hey TINA wake-word pilot; Ctrl+C stops microphone capture")
     sub = root.add_subparsers(dest="command", required=True)
     sub.add_parser("devices", help="List input devices without recording")
-    for command in ("setup", "listen", "file"):
+    server = sub.add_parser("serve", help="Run the single-room authorized coordinator on loopback")
+    server.add_argument("--config", type=Path, required=True)
+    server.add_argument("--port", type=int, default=18005)
+    for command in ("setup", "listen", "file", "run", "run-file"):
         p = sub.add_parser(command)
         p.add_argument("--model-dir", type=Path, default=default_directory())
-        if command == "listen":
+        if command in ("listen", "run"):
             p.add_argument("--device", type=int, required=True, help="Explicit input index from devices")
             p.add_argument("--seconds", type=float, default=0, help="0: run until Ctrl+C")
-        elif command == "file":
+        elif command in ("file", "run-file"):
             p.add_argument("wav", type=Path)
     return root
 
@@ -91,6 +94,11 @@ def main(argv=None):
     args = parser().parse_args(argv)
     detector = None
     try:
+        if args.command == 'serve':
+            from .coordinator import from_config
+            import uvicorn
+            uvicorn.run(from_config(args.config), host='127.0.0.1', port=args.port, access_log=False)
+            return 0
         if args.command == "devices":
             import sounddevice as sd
             for index, device in enumerate(sd.query_devices()):
@@ -102,8 +110,28 @@ def main(argv=None):
             install(args.model_dir)
             emit({"event": "model_ready", "directory": str(args.model_dir)})
             return 0
-        if args.command == "listen" and (args.seconds < 0 or not np.isfinite(args.seconds)):
+        if args.command in ("listen", "run") and (args.seconds < 0 or not np.isfinite(args.seconds)):
             raise ValueError("--seconds must be a finite non-negative number")
+        if args.command in ('run', 'run-file'):
+            from .session import SpeechSession, configured_client
+            session = SpeechSession(args.model_dir, configured_client(), emit)
+            try:
+                if args.command == 'run':
+                    listen(session, args.device, args.seconds)
+                else:
+                    for block in wav_blocks(args.wav):
+                        session.feed(block)
+                        # Replay one synthetic voice turn at capture speed; no microphone is opened.
+                        time.sleep(len(block) / SAMPLE_RATE)
+                    if session.state == 'CAPTURING':
+                        raise ValueError('WAV ended before question endpoint; include at least one second trailing silence')
+                    deadline = time.monotonic() + 330
+                    while session.state not in ('ARMED', 'ERROR') and time.monotonic() < deadline:
+                        session.tick(); time.sleep(.1)
+                    if session.state != 'ARMED': return 1
+                return 0
+            finally:
+                session.close()
         detector = WakeDetector(SherpaKws(args.model_dir))
         start, cpu = time.perf_counter(), time.process_time()
         count = listen(detector, args.device, args.seconds) if args.command == "listen" else detect(detector, wav_blocks(args.wav))

@@ -73,3 +73,26 @@ def install(directory):
                     temporary.unlink(missing_ok=True)
     (directory / "keywords.txt").write_text(keyword_line(directory), encoding="utf-8")
     verify(directory)
+    install_vad(directory)
+
+
+def install_vad(directory):
+    data = manifest()["vad"]
+    with urllib.request.urlopen(data["url"], timeout=60) as response:
+        content = response.read(data["bytes"] + 1)
+    if len(content) != data["bytes"] or hashlib.sha256(content).hexdigest() != data["sha256"]:
+        raise ValueError("VAD model checksum mismatch")
+    with tempfile.NamedTemporaryFile(dir=directory, delete=False) as out:
+        temporary = Path(out.name)
+        out.write(content)
+    try:
+        temporary.replace(directory / "silero_vad.onnx")
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def verify_vad(directory):
+    path = directory / "silero_vad.onnx"
+    if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != manifest()["vad"]["sha256"]:
+        raise ValueError("Missing or modified VAD model; run tina-speech setup")
+    return path
