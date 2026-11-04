@@ -24,7 +24,6 @@ function Chat({ meetingId, platform }: { meetingId?: string; platform?: string }
   const [session, setSession] = useState(() => meetingId ? `dashboard-meeting-${meetingId}` : `dashboard-${crypto.randomUUID()}`);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
-  const [research, setResearch] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const controller = useRef<AbortController | null>(null);
@@ -51,7 +50,6 @@ function Chat({ meetingId, platform }: { meetingId?: string; platform?: string }
       .finally(() => { if (alive && ticket === generation.current) setBusy(false); });
     return () => { alive = false; generation.current++; controller.current?.abort(); };
   }, []);
-  useEffect(() => { setResearch(false); }, [session]);
   useEffect(() => { scroller.current?.scrollTo?.(0, scroller.current.scrollHeight); }, [messages]);
   async function select(id: string) {
     const ticket = ++generation.current;
@@ -67,6 +65,11 @@ function Chat({ meetingId, platform }: { meetingId?: string; platform?: string }
   }
   async function send() {
     if (busy || !input.trim()) return;
+    const research = /^\/research(?:\s|$)/i.test(input.trim());
+    if (research && !input.trim().slice('/research'.length).trim()) {
+      setError('Nhập chủ đề sau /research, ví dụ: /research So sánh tài liệu repo với nguồn web.');
+      return;
+    }
     const text = input.trim(), ticket = ++generation.current;
     setInput(''); setError(''); setBusy(true);
     setMessages(current => [...current, { role: 'user', text }, { role: 'assistant', text: '' }]);
@@ -106,7 +109,6 @@ function Chat({ meetingId, platform }: { meetingId?: string; platform?: string }
     </div>
     {error && <p role="alert" className="px-4 text-sm text-destructive">{error}</p>}
     <form className="flex flex-col gap-2 border-t p-3" onSubmit={e => { e.preventDefault(); void send(); }}>
-      <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={research} disabled={busy} onChange={e => setResearch(e.target.checked)} />Nghiên cứu &amp; lưu ghi chú</label>
       <div className="flex gap-2"><Input aria-label="Tin nhắn cho agent" value={input} onChange={e => setInput(e.target.value)} placeholder="Nhập tin nhắn…" disabled={busy} />
         {busy ? <Button type="button" variant="outline" onClick={() => controller.current?.abort()}>Dừng xem</Button> : <Button disabled={!input.trim()}>Gửi</Button>}
       </div>

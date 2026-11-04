@@ -2,7 +2,7 @@
 
 The agent control plane: the FastAPI app (`api.py`) and orchestration that dispatches work to workers and reconciles routine/meeting lifecycle. Owns request handling, routine bookkeeping, transcription watching, and event relay — distinct from the `worker/` that runs a single agent workload.
 
-Explicit chat `research: true` uses `knowledge_research.py` to select an active private writable
+A leading chat `/research <topic>` (or explicit `research: true` from document actions) uses `knowledge_research.py` to select an active private writable
 destination and instruct the existing agent to save a new sourced note. Meeting/repo/web rows carry
 evidence versions and verification dates; absent evidence and partial failures remain visible.
 The server does not treat the agent's synthesis as independently verified facts. Private Codex chat

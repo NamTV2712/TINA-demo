@@ -2012,7 +2012,8 @@ def test_codex_history_keeps_recorded_citation_links_and_opened_sources(tmp_path
     assert 'https://docs.python.org/3/library/pathlib.html' in legacy[1]['text']
 
 
-def test_research_chat_is_opt_in_and_dispatches_private_provenance_instructions(monkeypatch, tmp_path):
+@pytest.mark.parametrize('prompt, research', [('Research this project', True), ('/research Research this project', False), ('/RESEARCH\nResearch this project', False)])
+def test_research_chat_is_opt_in_and_dispatches_private_provenance_instructions(monkeypatch, tmp_path, prompt, research):
     from types import SimpleNamespace
     import control_plane.api as api_module
     from control_plane.workspace_reader import WorkspaceReader
@@ -2022,12 +2023,12 @@ def test_research_chat_is_opt_in_and_dispatches_private_provenance_instructions(
     client = TestClient(create_app(Dispatcher(load_settings(), runtime, _FakeIdentity()),
                                    stream_reader=_FakeReader(), reader=WorkspaceReader(str(tmp_path))))
     response = client.post('/api/chat', headers={'X-User-Id': 'u_jane'},
-                           json={'prompt': 'Research this project', 'session': 'research-1', 'research': True})
+                           json={'prompt': prompt, 'session': 'research-1', 'research': research})
     assert response.status_code == 200
     prompt = json.loads(runtime.spawned[0][2]['TINA_START'])['entrypoint']['inline']
     assert str(tmp_path / 'u_jane/notes/research') in prompt
     assert 'source_type (meeting | repo | web)' in prompt
-    assert 'verified_at' in prompt and '<!--tina:user-input-below-->Research this project' in prompt
+    assert 'verified_at' in prompt and '<!--tina:user-input-below-->' in prompt
     ordinary = client.post('/api/chat', headers={'X-User-Id': 'u_jane'},
                            json={'prompt': 'Ordinary chat', 'session': 'ordinary-1'})
     assert ordinary.status_code == 200
@@ -2035,3 +2036,12 @@ def test_research_chat_is_opt_in_and_dispatches_private_provenance_instructions(
     denied = client.post('/api/chat', headers={'X-User-Id': 'u_other'},
                          json={'prompt': 'Research', 'research': True})
     assert denied.status_code == 409
+
+
+def test_empty_research_command_requests_a_topic_without_dispatch():
+    runtime = _FakeRuntime()
+    client = TestClient(create_app(Dispatcher(load_settings(), runtime, _FakeIdentity()), stream_reader=_FakeReader()))
+    response = client.post('/api/chat', headers={'X-User-Id': 'u_jane'}, json={'prompt': '/research  '})
+    assert response.status_code == 422
+    assert '/research' in response.json()['detail']
+    assert runtime.spawned == []

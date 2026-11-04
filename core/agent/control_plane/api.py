@@ -1465,6 +1465,9 @@ def create_app(
         if stream_reader is None:
             raise HTTPException(status_code=501, detail="stream relay not wired")
         subject = subject_of(request)  # server-derived (P20); body.subject is ignored
+        research_command = re.match(r'^/research(?:\s|$)', body.prompt.strip(), re.IGNORECASE)
+        if research_command and not body.prompt.strip()[research_command.end():].strip():
+            raise HTTPException(422, 'Nhập chủ đề sau /research.')
         session = body.session or units.DEFAULT_CHAT_SESSION
         # A reconnect carries Last-Event-ID (the last Stream cursor the client rendered). On resume we
         # DON'T re-dispatch — we re-attach to the existing warm unit and read from the cursor onward.
@@ -1480,7 +1483,7 @@ def create_app(
                                       + shared_active_mounts(wsr.root, subject, mindex.list(subject))),
         )
         tools = list(dict.fromkeys([*tools, *_configured_chat_toolbelt()]))
-        if body.research:
+        if body.research or research_command:
             from control_plane.knowledge_research import research_instructions
             prompt = research_instructions(active_workspaces(wsr.root, subject)) + prompt
         # Mark the grounding→user boundary so the terminal strips ALL folded context in one cut. Every

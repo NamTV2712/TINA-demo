@@ -627,8 +627,6 @@ export function Chat({ params = {}, variant = "rail" }: ChatProps) {
     : focusRef;
   const [uploading, setUploading] = useState(false);
   const [value, setValue] = useState("");
-  const [research, setResearch] = useState(false);
-  useEffect(() => { setResearch(false); }, [chatKey]);
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -1027,10 +1025,16 @@ export function Chat({ params = {}, variant = "rail" }: ChatProps) {
     const v = value.trim();
     const hasAttachments = attachments.length > 0;
     if ((!v && !hasAttachments) || busy || uploading) return;
+    setUploadError(null);
+    const research = /^\/research(?:\s|$)/i.test(v);
+    if (research && !v.slice('/research'.length).trim()) {
+      setUploadError('Nhập chủ đề sau /research, ví dụ: /research So sánh tài liệu repo với nguồn web.');
+      return;
+    }
     stickToBottomRef.current = true;  // sending re-attaches follow-the-stream
     window.setTimeout(() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight }), 0);
     if (!hasAttachments && isRoutineCommand(v)) { void send(v, routineCreationPrompt(v)); setValue(""); setMicRestore(null); return; }
-    if (!hasAttachments && v.startsWith("/")) { const sk = commands.querySkills(v)[0]; if (sk) { void commands.execute(sk.id, v); setValue(""); setMicRestore(null); return; } }
+    if (!hasAttachments && !research && v.startsWith("/")) { const sk = commands.querySkills(v)[0]; if (sk) { void commands.execute(sk.id, v); setValue(""); setMicRestore(null); return; } }
     let prompt = isRoutineCommand(v) ? routineCreationPrompt(v) : v;
     let displayText = v;
     let referenceSource = v;
@@ -1093,10 +1097,6 @@ export function Chat({ params = {}, variant = "rail" }: ChatProps) {
         onDrop={onDrop}
         style={{ border: "1px solid var(--line2)", borderRadius: 12, background: "var(--panel)", padding: "9px 12px", display: "flex", flexDirection: "column", gap: 7 }}
       >
-        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: "var(--t2)" }}>
-          <input type="checkbox" checked={research} disabled={busy || uploading} onChange={e => setResearch(e.target.checked)} />
-          Nghiên cứu &amp; lưu ghi chú
-        </label>
         {(contextRef || ambientEligible || includeSchedule === true || (bundleFocus && (bundleFocus.kind === "workspace" || bundleFocus.kind === "today"))) && (
           <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, flexWrap: "wrap" }}>
             {/* ambient schedule chip — the context bundle's always-visible half: on = the agent

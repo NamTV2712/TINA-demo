@@ -52,8 +52,8 @@ try {
     return json({});
   });
   await page.goto('https://research.test/');
-  await page.getByLabel('Nghiên cứu & lưu ghi chú').check();
-  await page.getByLabel('Tin nhắn cho agent').fill('Research Python with workspace and web evidence');
+  assert.equal(await page.getByLabel('Nghiên cứu & lưu ghi chú').count(), 0);
+  await page.getByLabel('Tin nhắn cho agent').fill('/research Research Python with workspace and web evidence');
   await page.getByRole('button', { name: 'Gửi', exact: true }).click();
   await page.getByRole('link', { name: 'Python pathlib', exact: true }).waitFor();
   assert.equal(requests[0].research, true);
@@ -64,7 +64,15 @@ try {
   await source.waitFor();
   assert.equal(await source.getAttribute('href'), 'https://docs.python.org/3/library/pathlib.html');
   assert.equal(historyReads.at(-1), `/api/agent/sessions/${session}/history`);
-  assert.equal(await page.getByLabel('Nghiên cứu & lưu ghi chú').isChecked(), false);
+  assert.equal(await page.getByLabel('Nghiên cứu & lưu ghi chú').count(), 0);
+  await page.getByLabel('Tin nhắn cho agent').fill('Ordinary follow-up');
+  await page.getByRole('button', { name: 'Gửi', exact: true }).click();
+  await page.getByRole('link', { name: 'Python pathlib', exact: true }).last().waitFor();
+  assert.equal(requests.at(-1).research, undefined);
+  await page.getByLabel('Tin nhắn cho agent').fill('/research');
+  await page.getByRole('button', { name: 'Gửi', exact: true }).click();
+  await page.getByRole('alert').filter({ hasText: 'Nhập chủ đề sau /research' }).waitFor();
+  assert.equal(requests.length, 2);
   await page.getByRole('button', { name: 'Open Knowledge', exact: true }).click();
   await page.locator('summary').filter({ hasText: /^research$/ }).click();
   await page.getByRole('button', { name: 'research-proof.md', exact: true }).click();
@@ -72,5 +80,5 @@ try {
   for (const kind of ['meeting', 'repo', 'web']) assert.equal(await page.getByRole('cell', { name: kind, exact: true }).count(), 1);
   assert.equal(await page.getByRole('link', { name: 'Python pathlib', exact: true }).count(), 1);
   assert.deepEqual(errors, []);
-  console.log('PASS: research opt-in, final source links, Dashboard session/reload persistence, and Knowledge source-type/version/date table.');
+  console.log('PASS: /research command without a checkbox, final source links, Dashboard session/reload persistence, and Knowledge source-type/version/date table.');
 } finally { await browser.close(); }

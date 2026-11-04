@@ -90,9 +90,12 @@ Chrome, the real prep/chat UI and fixture API/SSE responses, not a live provider
 
 ## Codex research from Knowledge
 
-Terminal and Dashboard chat offer an explicit **Nghiên cứu & lưu ghi chú** toggle. A document in
+Terminal and Dashboard chat use **`/research <topic>`** to explicitly research and save a sourced note.
+The command applies only to that turn; ordinary follow-ups stay ordinary chat. No research checkbox
+is shown in the composer. An empty `/research` asks for a topic without dispatching work. A document in
 Terminal Knowledge also offers **Nghiên cứu & lưu**, addressing the selected file by its actual
-active workspace path. `POST /api/chat` accepts optional `research: true`; the authenticated server
+active workspace path. `POST /api/chat` recognizes a leading `/research` command and also accepts
+optional `research: true` for document actions and older clients; the authenticated server
 chooses an active private writable destination under `notes/research/<UTC-date>-<unique-id>.md`.
 Without that private mount it refuses the request. Other files and canonical transcript/audio are
 preserved. Ordinary chat and Start brief remain unchanged unless explicitly requested as research.

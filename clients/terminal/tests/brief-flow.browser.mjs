@@ -93,8 +93,8 @@ try {
   await page.evaluate(() => window.dispatchEvent(new Event('focus')));
   await page.getByRole('alert').filter({ hasText: 'Could not read the shared brief' }).waitFor();
   assert.equal(await page.getByText('Shared brief ready', { exact: true }).isVisible(), true);
-  await page.getByLabel('Nghiên cứu & lưu ghi chú').check();
-  await page.locator('textarea').last().fill('Research Python');
+  assert.equal(await page.getByLabel('Nghiên cứu & lưu ghi chú').count(), 0);
+  await page.locator('textarea').last().fill('/research Research Python');
   await page.getByRole('button', {name:'Send',exact:true}).click();
   await page.getByRole('link', {name:'Python pathlib',exact:true}).waitFor();
   assert.equal(requests.at(-1).research, true);
