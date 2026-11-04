@@ -35,3 +35,19 @@ it('shows exact evidence and ignores a response from the previous meeting',async
   expect(screen.getByText(/text revision 2/)).toBeTruthy();
   expect(screen.getAllByText(evidence.quote).length).toBeGreaterThan(0);
 });
+
+it('filters suggestion-free windows without changing the memory request',async()=>{
+  const evidence={segment_id:'s1',revision:1,start_ms:1792522376000,end_ms:1792522378000,speaker_name:'Alice',quote:'We decided to ship.'};
+  const fact={id:'f1',type:'decision',text:evidence.quote,evidence:[evidence]};
+  fetchMock.mockResolvedValue({ok:true,json:async()=>({meeting_id:42,canonical_revision:1,windows:[{id:'w1',evidence:[evidence],facts:[fact]},{id:'w2',evidence:[evidence],facts:[]}],facts:[fact]})});
+  render(<MeetingMemory meetingId="42"/>);
+  fireEvent.click(screen.getByRole('button',{name:'Meeting memory'}));
+  const toggle=await screen.findByRole('checkbox',{name:'Only windows with suggestions'});
+  expect(screen.getByText(/Window 2/)).toBeTruthy();
+  fireEvent.click(toggle);
+  expect(screen.queryByText(/Window 2/)).toBeNull();
+  expect(screen.getByText(/Window 1/)).toBeTruthy();
+  fireEvent.click(toggle);
+  expect(screen.getByText(/Window 2/)).toBeTruthy();
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+});

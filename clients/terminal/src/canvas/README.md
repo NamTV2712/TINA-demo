@@ -31,3 +31,29 @@ Public surface:
 
 This folder may depend on terminal surfaces for existing meeting/workspace data seams, but generated
 views may only use the injected harness globals and `ui.*` kit.
+
+Meeting memory, speaker identities and transcript review use their native dialogs directly,
+without an `aria-hidden` clipped ancestor. Their triggers still use the existing open refs;
+centering, bounded scrolling and shared controls are scoped in
+`../surfaces/meetingDialogs.module.css`. No meeting-data or API behavior changes.
+
+## Transcript reading layout
+
+`MeetingTranscript.module.css` scopes the reading toolbar, status notices and bilingual phrases.
+The toolbar separates heading/meeting info, search/speaker/language controls, translation status
+and the existing memory/speaker/review actions. Its query-container class is defined in the
+same CSS module as the queries so scoped container names agree across builds. Container queries follow the canvas pane width,
+including a resized Workbench pane, instead of relying only on browser width. Long transcript
+lines use a bounded reading width; English overlays have a quiet tinted block. Original text,
+backend grouping, filtering, playback targets, translation polling and retry payloads are unchanged.
+`MeetingHealthBanner.tsx` keeps the health headline visible and places the underlying issue in a
+native Details disclosure; existing error dismissal and health predicates remain unchanged.
+
+For ended meetings, recording playback sits inside the transcript toolbar, and **Tools**
+expands the existing memory, speaker-identity and transcript-review actions on demand.
+Search, speaker filtering and language selection remain visible. When the meeting page's
+recap header already displays the end state, the canvas omits the duplicate ended banner;
+live connection and error notices are retained. Recording loading/failure messages use
+the same playback area. Audio loading, seek targets and all action payloads are unchanged.
+An empty ended meeting says no transcript is available rather than waiting for new speech;
+the live waiting state and empty search results keep their separate messages.

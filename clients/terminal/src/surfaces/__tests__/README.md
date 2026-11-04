@@ -8,3 +8,13 @@ the language selector and phrase-overlay UI are covered by the [canvas tests](..
 
 From the repository root, run `pnpm --dir clients/terminal test src/surfaces/__tests__/settingsModels.test.tsx`
 for the settings regression or `pnpm --dir clients/terminal test src/surfaces/__tests__` for this suite.
+
+`meetingMemory.test.tsx` also checks that the suggestions-only window filter hides/restores
+conversation evidence locally without issuing additional API requests.
+
+`meetingDialogs.test.tsx` checks all three native meeting dialogs consume Escape while open,
+then release the workbench navigation shortcut after closing, including the real window-capture
+keybinding service that attaches before the dialog handler.
+
+`meetingHeaderControls.test.tsx` also checks recap metadata: a cached live-only time label
+is removed after the meeting ends, or replaced with the recorded start time when available.

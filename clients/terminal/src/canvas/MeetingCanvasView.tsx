@@ -1,14 +1,15 @@
 "use client";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { CanvasActionsProvider, useActions, OPEN_ENTITY_EVENT } from "./actions";
 import { MeetingHealthBanner } from "./MeetingHealthBanner";
 import { LiveTranscriptEngine, type EngineActions, type EngineEntity, type EngineSignal } from "./LiveTranscriptEngine";
 import { useMeetingNotes } from "./notes";
 import { deriveProcessingView } from "./processingView";
 import { MeetingScopeProvider, MeetingSourceProvider, useEntities, useMeeting, useSignals } from "./useMeeting";
-import type { MeetingMock } from "../surfaces/meetingModel";
+import { meetingPhase, type MeetingMock } from "../surfaces/meetingModel";
 import { MeetingDetailsRail } from "./MeetingDetailsRail";
 import dossierStyles from "./MeetingDetailsRail.module.css";
+import transcriptStyles from "./MeetingTranscript.module.css";
 import { MeetingMemory } from "../surfaces/MeetingMemory";
 import { SpeakerRegistry } from "../surfaces/SpeakerRegistry";
 import { TranscriptReview } from "../surfaces/TranscriptReview";
@@ -30,7 +31,7 @@ function filterSegments<T extends { speaker?: string; text: string }>(segments: 
 
 /** ONE render engine for both modes (P23: the terminal RENDERS, it does not re-derive). The toggle picks
  *  the SOURCE — raw segments vs the cleaned processed mirror — not a different renderer. */
-function RawTranscript({ searchQuery, speakerFilter, onSegmentClick, playableSegmentIds, activeSegmentId, language, translationGroups = [], translationPaused }: {
+function RawTranscript({ searchQuery, speakerFilter, onSegmentClick, playableSegmentIds, activeSegmentId, language, translationGroups = [], translationPaused, ended = false }: {
   searchQuery: string;
   speakerFilter: string;
   onSegmentClick?: (segmentId: string) => void;
@@ -39,6 +40,7 @@ function RawTranscript({ searchQuery, speakerFilter, onSegmentClick, playableSeg
   language?: TranscriptLanguage;
   translationGroups?: TranslationGroup[];
   translationPaused?: boolean;
+  ended?: boolean;
 }) {
   const { transcript } = useMeeting();
   const source = language && language !== "vi" ? transcript.segments.map(segment => ({ ...segment, text: segment.sourceText ?? segment.text })) : transcript.segments;
@@ -46,7 +48,7 @@ function RawTranscript({ searchQuery, speakerFilter, onSegmentClick, playableSeg
   const searchable = paired.filter(segment => !searchQuery.trim() ||
     `${segment.speaker ?? ''} ${segment.text} ${segment.translation?.text ?? ''}`.toLocaleLowerCase().includes(searchQuery.trim().toLocaleLowerCase()));
   const segments = filterSegments(searchable, "", speakerFilter);
-  return <LiveTranscriptEngine segments={segments} emptyLabel={searchQuery || speakerFilter ? "No transcript segments match these filters." : "Waiting for transcript…"}
+  return <LiveTranscriptEngine segments={segments} emptyLabel={searchQuery || speakerFilter ? "No transcript segments match these filters." : ended ? "No transcript is available for this meeting." : "Waiting for transcript…"}
     onSegmentClick={onSegmentClick} playableSegmentIds={playableSegmentIds} activeSegmentId={activeSegmentId}
     language={language} translationPaused={translationPaused} />;
 }
@@ -64,12 +66,13 @@ function signalKind(raw: string | undefined): string {
 
 /** PROCESSED v2 = the cleaned mirror with INLINE entity highlights (clickable → research / open entity
  *  doc) and actionable copilot SIGNAL badges, all through the SAME engine. */
-function ProcessedTranscript({ searchQuery, speakerFilter, onSegmentClick, playableSegmentIds, activeSegmentId }: {
+function ProcessedTranscript({ searchQuery, speakerFilter, onSegmentClick, playableSegmentIds, activeSegmentId, ended = false }: {
   searchQuery: string;
   speakerFilter: string;
   onSegmentClick?: (segmentId: string) => void;
   playableSegmentIds?: ReadonlySet<string>;
   activeSegmentId?: string | null;
+  ended?: boolean;
 }) {
   const notes = useMeetingNotes();
   const entityItems = useEntities();
@@ -101,7 +104,7 @@ function ProcessedTranscript({ searchQuery, speakerFilter, onSegmentClick, playa
   return (
     <LiveTranscriptEngine
       segments={segments}
-      emptyLabel={searchQuery || speakerFilter ? "No transcript segments match these filters." : "Processing transcript…"}
+      emptyLabel={searchQuery || speakerFilter ? "No transcript segments match these filters." : ended ? "No processed transcript is available. Switch to Original ASR." : "Processing transcript…"}
       entities={entities}
       signals={signals}
       actions={engineActions}
@@ -133,6 +136,8 @@ function MeetingCanvasBody({ meetingId, meetingRecord, onDeleteMeeting, deleting
   const [retryBusy, setRetryBusy] = useState(false);
   const [retryError, setRetryError] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [toolsOpen, setToolsOpen] = useState(false);
+  const toolsId = useId();
   const [searchQuery, setSearchQuery] = useState("");
   const [speakerFilter, setSpeakerFilter] = useState("");
   const [audioFragments, setAudioFragments] = useState<MeetingAudioFragment[]>([]);
@@ -321,24 +326,21 @@ function MeetingCanvasBody({ meetingId, meetingRecord, onDeleteMeeting, deleting
 
   return (
     <div className={dossierStyles.layout + (meetingRecord && detailsOpen ? " " + dossierStyles.layoutWithRail : "")}>
-      <div className={dossierStyles.canvas}>
-      {dialogMeetingId && <div aria-hidden="true" style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" }}>
+      <div className={`${dossierStyles.canvas} ${transcriptStyles.canvas}`}>
+      {dialogMeetingId && <>
         <MeetingMemory hideTrigger meetingId={dialogMeetingId} openRef={memoryOpen} />
         <SpeakerRegistry hideTrigger meetingId={dialogMeetingId} openRef={speakersOpen} />
         <TranscriptReview hideTrigger meetingId={dialogMeetingId} openRef={reviewOpen} />
-      </div>}
-      <MeetingHealthBanner />
-      {canPlayMeetingAudio && (audioLoading || audioMessage) && <div className={dossierStyles.recordingMessage} role="status">{audioLoading ? "Preparing recording…" : audioMessage}</div>}
-      {canPlayMeetingAudio && audioFragments.length > 0 && <div className={dossierStyles.recordingPlayer}>
-        <MeetingAudioPlayer ref={audioPlayerRef} fragments={audioFragments} onPositionChange={handleAudioPosition} />
-      </div>}
+      </>}
+      <MeetingHealthBanner hideEnded={!!meetingRecord && meetingPhase(meetingRecord) === "post"} />
       <section className={dossierStyles.transcriptPanel}>
-        <header className={dossierStyles.transcriptHeader}>
-          <div className={dossierStyles.transcriptHeading}>
-            <strong className={dossierStyles.transcriptTitle}>Transcript</strong>
+        <header className={transcriptStyles.toolbar} data-recap={durableTerminal}>
+          <div className={transcriptStyles.headingRow}>
+          <div className={transcriptStyles.heading}>
+            <strong>Transcript</strong>
             <button
               type="button"
-              className={dossierStyles.transcriptSource}
+              className={transcriptStyles.source}
               onClick={toggleProcessing}
               disabled={language !== "vi"}
               aria-pressed={language === "vi" && processing}
@@ -346,31 +348,52 @@ function MeetingCanvasBody({ meetingId, meetingRecord, onDeleteMeeting, deleting
             >
               {language !== "vi" ? "Original ASR" : processing ? "Processed view" : "Original ASR"}
             </button>
-            {(meetingRecord?.has_recording || (canPlayMeetingAudio && audioFragments.length > 0)) && <span className={dossierStyles.transcriptMeta}>Recording available</span>}
+            {!canPlayMeetingAudio && meetingRecord?.has_recording && <span className={transcriptStyles.meta}>Recording available</span>}
           </div>
-          <TranslationControls language={language} onChange={setLanguage} snapshot={translation.snapshot}
-            error={translation.error} onRetry={translation.retry} disabled={!translation.valid} />
-          <input className={dossierStyles.searchInput} aria-label="Search transcript" placeholder="Search this transcript…" value={searchQuery} onChange={(event) => setSearchQuery(event.currentTarget.value)} />
-          <select className={dossierStyles.speakerSelect} aria-label="Filter transcript by speaker" value={speakerFilter} onChange={(event) => setSpeakerFilter(event.currentTarget.value)} disabled={!speakerOptions.length}>
-            <option value="">All speakers</option>
-            {speakerOptions.map((speaker) => <option key={speaker} value={speaker}>{speaker}</option>)}
-          </select>
-          {dialogMeetingId && <div className={dossierStyles.transcriptActions}>
-            <button type="button" className={dossierStyles.actionButton} onClick={() => memoryOpen.current?.()}>Meeting memory</button>
-            <button type="button" className={dossierStyles.actionButton} onClick={() => speakersOpen.current?.()}>Speaker identities</button>
-            <button type="button" className={dossierStyles.actionButton} onClick={() => reviewOpen.current?.()}>Review transcript</button>
-            {meetingRecord && <button type="button" className={dossierStyles.detailsToggle} aria-expanded={detailsOpen} onClick={() => setDetailsOpen((open) => !open)}>
-              {detailsOpen ? "Hide meeting info" : "Meeting info"}
-            </button>}
+          {meetingRecord && <button type="button" className={transcriptStyles.info} aria-expanded={detailsOpen} onClick={() => setDetailsOpen((open) => !open)}>
+            {detailsOpen ? "Hide meeting info" : "Meeting info"}
+          </button>}
+          {durableTerminal && dialogMeetingId && <button type="button" className={transcriptStyles.toolToggle} aria-label="Meeting tools" title="Meeting tools" aria-expanded={toolsOpen} aria-controls={toolsId} onClick={() => setToolsOpen((open) => !open)}>
+            Tools <span aria-hidden="true">{toolsOpen ? "⌃" : "⌄"}</span>
+          </button>}
+          {!durableTerminal && dialogMeetingId && <div className={transcriptStyles.tools} role="group" aria-label="Meeting tools">
+            <button type="button" className={transcriptStyles.tool} onClick={() => memoryOpen.current?.()}>Meeting memory</button>
+            <button type="button" className={transcriptStyles.tool} onClick={() => speakersOpen.current?.()}>Speaker identities</button>
+            <button type="button" className={transcriptStyles.tool} onClick={() => reviewOpen.current?.()}>Review transcript</button>
           </div>}
+          </div>
+          {durableTerminal && dialogMeetingId && <div id={toolsId} className={transcriptStyles.recapTools} role="group" aria-label="Meeting tools" hidden={!toolsOpen}>
+            <button type="button" className={transcriptStyles.tool} onClick={() => memoryOpen.current?.()}>Meeting memory</button>
+            <button type="button" className={transcriptStyles.tool} onClick={() => speakersOpen.current?.()}>Speaker identities</button>
+            <button type="button" className={transcriptStyles.tool} onClick={() => reviewOpen.current?.()}>Review transcript</button>
+          </div>}
+          {canPlayMeetingAudio && (audioLoading || audioMessage || audioFragments.length > 0) && <div className={transcriptStyles.recordingRow} aria-label="Meeting recording">
+            <span className={transcriptStyles.recordingLabel}>Recording</span>
+            {audioFragments.length > 0
+              ? <div className={dossierStyles.recordingPlayer}><MeetingAudioPlayer ref={audioPlayerRef} fragments={audioFragments} onPositionChange={handleAudioPosition} /></div>
+              : <div className={dossierStyles.recordingMessage} role="status">{audioLoading ? "Preparing recording…" : audioMessage}</div>}
+          </div>}
+          <div className={transcriptStyles.filters}>
+            <div className={transcriptStyles.search}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/></svg>
+              <input className={transcriptStyles.input} aria-label="Search transcript" placeholder="Search transcript…" value={searchQuery} onChange={(event) => setSearchQuery(event.currentTarget.value)} />
+            </div>
+            <select className={transcriptStyles.select} aria-label="Filter transcript by speaker" value={speakerFilter} onChange={(event) => setSpeakerFilter(event.currentTarget.value)} disabled={!speakerOptions.length}>
+              <option value="">All speakers</option>
+              {speakerOptions.map((speaker) => <option key={speaker} value={speaker}>{speaker}</option>)}
+            </select>
+            <TranslationControls language={language} onChange={setLanguage} snapshot={translation.snapshot}
+              error={translation.error} onRetry={translation.retry} disabled={!translation.valid} />
+          </div>
+
         </header>
-        <main className={dossierStyles.transcriptBody}>
-          <div style={{ padding: MEETING_CANVAS_CONTENT_INSET }}>
+        <main className={transcriptStyles.body}>
+          <div className={transcriptStyles.bodyContent}>
             {processing && language === "vi"
-              ? <ProcessedTranscript searchQuery={searchQuery} speakerFilter={speakerFilter}
+              ? <ProcessedTranscript searchQuery={searchQuery} speakerFilter={speakerFilter} ended={durableTerminal}
                   onSegmentClick={canPlayMeetingAudio && audioFragments.length ? handleSegmentClick : undefined}
                   playableSegmentIds={playableSegmentIds} activeSegmentId={activeSegmentId} />
-              : <RawTranscript searchQuery={searchQuery} speakerFilter={speakerFilter}
+              : <RawTranscript searchQuery={searchQuery} speakerFilter={speakerFilter} ended={durableTerminal}
                   language={language} translationGroups={translation.snapshot?.groups} translationPaused={!!translation.error || translation.snapshot?.status === "paused"}
                   onSegmentClick={canPlayMeetingAudio && audioFragments.length ? handleSegmentClick : undefined}
                   playableSegmentIds={playableSegmentIds} activeSegmentId={activeSegmentId} />}

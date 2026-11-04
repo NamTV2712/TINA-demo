@@ -14,3 +14,10 @@ From the repository root:
 ```bash
 pnpm --dir clients/terminal test src/canvas/__tests__
 ```
+
+`meetingHealthBanner.test.tsx` checks compact notice disclosure, retained issue dismissal and
+no notice for a healthy feed. Existing canvas/translation/playback tests protect the original
+filtering, model-request and audio-target behavior while the reading layout changes.
+The banner tests also cover hiding a duplicate ended notice without hiding live disconnects.
+`meetingCanvasDefaultView.test.tsx` verifies that recap tools open and close without starting
+processing or losing the transcript, and distinguishes empty ended meetings from waiting live feeds.

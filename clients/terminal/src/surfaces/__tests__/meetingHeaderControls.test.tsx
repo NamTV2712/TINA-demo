@@ -7,7 +7,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
-import { BotControls, meetingHeaderState } from "../meeting";
+import { BotControls, meetingHeaderState, meetingWhenLabel } from "../meeting";
 import type { MeetingMock } from "../meetingModel";
 
 const NATIVE = "abc-defg-hij";
@@ -57,5 +57,25 @@ describe("BotControls — enabled-ness follows WS connectivity", () => {
     render(<BotControls m={row("completed")} connected={true} />);
     expect(screen.queryByRole("button", { name: "Stop bot" })).toBeNull();
     expect(screen.getByRole("button", { name: "Send bot again" })).toBeTruthy();
+  });
+});
+
+describe("recap time — cached live labels never imply the meeting is still running", () => {
+  it("retains the live label while the meeting is active", () => {
+    expect(meetingWhenLabel({ ...row("active"), when: "Now · live" })).toBe("Now · live");
+  });
+  it("removes an in-progress placeholder when the meeting has ended without a start time", () => {
+    for (const when of ["Bot session in progress", "Now · live", "now"]) {
+      expect(meetingWhenLabel({ ...row("stopped"), when })).toBe("");
+    }
+  });
+  it("uses the saved start time when replacing a cached live label", () => {
+    const start_time = "2026-11-04T11:00:00Z";
+    expect(meetingWhenLabel({ ...row("completed"), when: "Bot session in progress", start_time }))
+      .toBe(new Date(start_time).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }));
+  });
+  it("retains an existing date and does not invent one for an invalid timestamp", () => {
+    expect(meetingWhenLabel({ ...row("completed"), when: "Nov 4, 6:00 PM" })).toBe("Nov 4, 6:00 PM");
+    expect(meetingWhenLabel({ ...row("failed"), when: "Bot session in progress", start_time: "invalid" })).toBe("");
   });
 });

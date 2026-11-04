@@ -1,5 +1,7 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import styles from "./meetingDialogs.module.css";
+import { useMeetingDialogEscape } from "./useMeetingDialogEscape";
+import { useEffect, useId, useRef, useState } from "react";
 import { transcriptDiff } from "./transcript-diff";
 
 interface Segment {
@@ -28,10 +30,12 @@ const activeAlignment = (job: AlignmentJob | null) => !!job && ["running", "paus
 
 export function TranscriptReview({ meetingId, openRef, hideTrigger = false }: { meetingId: string; openRef?: { current: (() => void) | null }; hideTrigger?: boolean }) {
   const dialog = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
   const audioRef = useRef<HTMLAudioElement>(null);
   const stopAt = useRef<number | null>(null);
   const playRequest = useRef(0);
   const [opened, setOpened] = useState(false);
+  useMeetingDialogEscape(dialog, opened);
   const [doc, setDoc] = useState<ReviewDocument | null>(null);
   const [job, setJob] = useState<Job | null>(null);
   const [alignment, setAlignment] = useState<AlignmentView | null>(null);
@@ -167,14 +171,12 @@ export function TranscriptReview({ meetingId, openRef, hideTrigger = false }: { 
     if (audio.readyState < 1) { audio.addEventListener("loadedmetadata", play, { once: true }); audio.load(); }
     else play();
   }
-  const field = { width: "100%", background: "var(--panel2)", color: "var(--t1)", border: "1px solid var(--line)", borderRadius: 6, padding: 8 } as const;
-  const content = <div style={{ display: "grid", gap: 12 }}>
-    <p>Review changes with the audio. The original stays available through Restore.</p>
+  const content = <div className={styles.content}>
     {error && <p role="alert">{error} <button disabled={busy} onClick={() => void load()}>Reload</button></p>}
     {busy && <p role="status">Working…</p>}
-    <details><summary>Vocabulary hints (optional)</summary><label>Vocabulary hints (comma separated)<textarea style={field} value={glossary} disabled={busy || active} maxLength={700} rows={2} placeholder="TINA, Qwen, tên người, tên dự án" onChange={e => setGlossary(e.target.value)} /></label></details>
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-      <button disabled={busy || active || !editable || !doc?.segments.some(s => s.audio?.length === 1)} onClick={() => void refine("start")}>Refine after meeting</button>
+    <details><summary>Vocabulary hints (optional)</summary><label>Vocabulary hints (comma separated)<textarea value={glossary} disabled={busy || active} maxLength={700} rows={2} placeholder="TINA, Qwen, tên người, tên dự án" onChange={e => setGlossary(e.target.value)} /></label></details>
+      <div className={styles.actions}>
+      <button className={styles.primary} disabled={busy || active || !editable || !doc?.segments.some(s => s.audio?.length === 1)} onClick={() => void refine("start")}>Refine after meeting</button>
       {active && <button disabled={busy || job?.status === "cancelling"} onClick={() => void refine("cancel")}>Cancel refinement</button>}
         <button disabled={busy || active || activeAlignment(alignmentJob) || !editable || !alignment?.available || !doc?.segments.some(s => s.audio?.length === 1)} onClick={() => void align("start")}>Align words & speakers</button>
         {activeAlignment(alignmentJob) && <button disabled={busy || alignmentJob?.status === "cancelling"} onClick={() => void align("cancel")}>Cancel alignment</button>}
@@ -184,11 +186,11 @@ export function TranscriptReview({ meetingId, openRef, hideTrigger = false }: { 
     <label><input type="checkbox" checked={changedOnly} disabled={busy} onChange={e => { setChangedOnly(e.target.checked); if (e.target.checked && segment && !changed(segment)) pick(doc?.segments.find(changed)); }} /> Only changed segments</label>
     <p>{visible.length} / {doc?.segments.length ?? 0} segments</p>
     {doc && visible.length === 0 && <p>{changedOnly ? "No changed segments." : "No confirmed transcript yet."}</p>}
-    {visible.length > 0 && <label>Segment<select style={field} value={visible.some(s => s.segment_id === selected) ? selected : ""} disabled={busy} onChange={e => pick(doc?.segments.find(s => s.segment_id === e.target.value))}>
+    {visible.length > 0 && <label>Segment<select value={visible.some(s => s.segment_id === selected) ? selected : ""} disabled={busy} onChange={e => pick(doc?.segments.find(s => s.segment_id === e.target.value))}>
       <option value="" disabled>Choose a segment</option>{visible.map(s => <option key={s.segment_id} value={s.segment_id}>{s.speaker || "Speaker"} · {s.text.slice(0, 90)}</option>)}
     </select></label>}
     {segment && visible.some(s => s.segment_id === selected) && <>
-      <section aria-label="Refinement suggestion" style={{ padding: 14, border: "1px solid var(--line)", borderRadius: 8 }}>
+      <section aria-label="Refinement suggestion" className={styles.card}>
         {segment.audio?.length === 1 ? <audio ref={audioRef} key={`${meetingId}/${selected}/${alignmentItem?.audio_sha256 ?? "source"}`} controls preload="metadata" src={audioUrl} style={{ width: "100%" }} aria-label="Segment audio" onError={() => setError("Saved audio no longer matches this alignment; rerun alignment before playback.")} onTimeUpdate={e => { if (stopAt.current != null && e.currentTarget.currentTime >= stopAt.current) { e.currentTarget.pause(); stopAt.current = null; } }} /> : <p>Source audio is unavailable or ambiguous. Older recordings may lack capture timing.</p>}
         {alignmentItem?.state === "aligned" && alignmentItem.phrases?.length ? <div aria-label="Aligned words and speakers" style={{ display: "grid", gap: 8, marginTop: 12 }}>
           <h3>Word timing · raw ASR</h3>
@@ -205,11 +207,11 @@ export function TranscriptReview({ meetingId, openRef, hideTrigger = false }: { 
         {item && <p>{stale ? "Transcript changed. Run refinement again." : item.reason || (item.text === segment.text ? "No text changes." : "Suggestions may contain mistakes. Listen before applying.")}</p>}
         {item?.state === "ready" && <button disabled={busy || active || !editable || draftConflict || stale || draft !== segment.text || item.text === segment.text} onClick={() => void refine("apply")}>Apply refinement</button>}
       </section>
-      <label>Original transcript<textarea style={field} readOnly value={segment.raw_text} rows={3} /></label>
-      <label>Corrected transcript · revision {edit?.revision}<textarea style={field} value={draft} disabled={busy} maxLength={10000} onChange={e => { const text = e.target.value; setEdit(current => current ? { ...current, text } : null); }} rows={4} /></label>
+      <label>Original transcript<textarea readOnly value={segment.raw_text} rows={3} /></label>
+      <label>Corrected transcript · revision {edit?.revision}<textarea value={draft} disabled={busy} maxLength={10000} onChange={e => { const text = e.target.value; setEdit(current => current ? { ...current, text } : null); }} rows={4} /></label>
       {draftConflict && <div role="alert"><p>This segment changed elsewhere. Your draft is kept.</p><p>Latest transcript: {segment.text}</p><button disabled={busy} onClick={() => pick(segment)}>Discard draft and use latest</button></div>}
-      <div style={{ display: "flex", gap: 10 }}>
-        <button disabled={busy || !editable || draftConflict || !draft.trim()} onClick={() => void save(draft)}>Save revision</button>
+      <div className={styles.actions}>
+        <button className={styles.primary} disabled={busy || !editable || draftConflict || !draft.trim()} onClick={() => void save(draft)}>Save revision</button>
         <button disabled={busy || !editable || draftConflict || segment.revision === 0} onClick={() => void save(null)}>Restore original</button>
       </div>
       {!editable && <p>Stop the meeting before making corrections.</p>}
@@ -219,9 +221,12 @@ export function TranscriptReview({ meetingId, openRef, hideTrigger = false }: { 
   </div>;
     return <>
     {!openRef && <button id={hideTrigger ? "tina-tr-open" : undefined} onClick={open} style={{ background: "transparent", color: "var(--t2)", border: "1px solid var(--line2)", borderRadius: 6, padding: "3px 8px", cursor: "pointer" }}>Review transcript</button>}
-    <dialog ref={dialog} onClose={() => setOpened(false)} aria-labelledby="transcript-review-title" style={{ width: 720, maxWidth: "90vw", maxHeight: "85vh", overflow: "auto", background: "var(--panel)", color: "var(--t1)", border: "1px solid var(--line2)", borderRadius: 12, padding: 24 }}>
-      <h2 id="transcript-review-title">Review transcript</h2>{content}
-      <form method="dialog" style={{ marginTop: 20 }}><button>Close</button></form>
+    <dialog className={styles.dialog} ref={dialog} onClose={() => setOpened(false)} aria-labelledby={titleId}>
+      <header className={styles.header}>
+        <div><h2 id={titleId}>Review transcript</h2><p className={styles.description}>Review changes with the audio. The original stays available through Restore.</p></div>
+        <button type="button" className={styles.close} onClick={() => dialog.current?.close()}>Close</button>
+      </header>
+      <div className={styles.body}>{content}</div>
     </dialog>
   </>;
 }

@@ -36,6 +36,7 @@ function renderTranslationControls(): void {
   selector.disabled = !supported;
   selector.value = language;
   const displayLanguage = source === 'desktop' ? 'vi' : language;
+  ($('displayLanguage') as HTMLButtonElement).disabled = !supported;
   $('displayLanguage').textContent = { vi: 'Tiếng Việt', en: 'English', bilingual: 'VI + EN' }[displayLanguage];
   $('translationControls').dataset.state = translationError ? 'error' : translation?.status || 'pending';
   $('translationStatus').textContent = !selected ? '' : source === 'desktop' ? 'Dịch hiện hỗ trợ Meeting Bot.' : language === 'vi' ? ''
@@ -64,6 +65,12 @@ $('transcriptLanguage').addEventListener('change', () => {
   renderTranscript(); startTranslation();
 });
 $('retryTranslation').addEventListener('click', () => startTranslation(true));
+$('displayLanguage').addEventListener('click', () => {
+  const selector = $('transcriptLanguage') as HTMLSelectElement;
+  if (selector.disabled) return;
+  ($('meetingControls') as HTMLDetailsElement).open = true;
+  selector.focus();
+});
 
 function currentKey(meeting: BotMeeting): string {
   return `${meeting.id}|${meeting.platform}|${meeting.nativeMeetingId}`;

@@ -55,3 +55,28 @@ raw idiom `e instanceof Error ? e.message : String(e)` is banned from surface fi
 `__tests__/errorPresentation.guard.test.ts`. State-bearing controls (the meeting header's
 Stop/Send bot) additionally follow the live ws.v1 connection (`useLiveMeetingsConnection`):
 disconnected → indeterminate/disabled, never an actionable control derived from a stale snapshot.
+
+## Meeting dialogs
+
+`meetingDialogs.module.css` scopes the shared native-dialog presentation used by
+`MeetingMemory.tsx`, `SpeakerRegistry.tsx` and `TranscriptReview.tsx`. Dialogs center in the
+viewport, keep the title and Close action visible, and scroll only their bounded content area.
+Labels stack above full-width controls; buttons, disabled states, evidence disclosures and
+long source identifiers follow the Terminal theme in light and dark mode.
+`useMeetingDialogEscape.ts` captures Escape while a dialog is open so closing it cannot
+also trigger workbench Back navigation; native focus handling is retained. Speaker identity
+editing appears before optional recording analysis. Meeting memory can filter out windows without suggestions; turning the filter off
+restores all conversation evidence. Fetching, polling, save/refinement/analysis payloads and permission rules are unchanged.
+
+Verify with `pnpm --dir clients/terminal exec tsc --noEmit` and the existing
+`meetingMemory.test.tsx`, `meetingDialogs.test.tsx` and `transcriptReview.test.tsx` suites. Visually check all three dialogs at
+wide and narrow viewport sizes, including long evidence lists, empty/error/loading states,
+Close/Escape, speaker selection and transcript filtering/editing.
+
+`meetingPage.module.css` lays out the existing meeting title, metadata and lifecycle actions,
+using container queries so the header wraps within a resized Workbench pane. `meeting.tsx`
+retains the same status derivation, permissions and Ask/Stop/Share handlers.
+Ended meetings show a compact end status in the metadata row. `meetingWhenLabel` replaces
+cached live-only labels with the saved start time when available, and otherwise omits that
+placeholder; it does not invent a timestamp. The existing recap badge and lifecycle actions
+remain available, with recording playback presented in the canvas toolbar.

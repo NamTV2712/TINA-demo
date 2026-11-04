@@ -100,6 +100,34 @@ describe("defaultProcessingView (pure)", () => {
 });
 
 describe("MeetingCanvasView — default view + toggle semantics", () => {
+  it("does not tell readers to wait for new speech in an empty ended meeting", async () => {
+    meetingsState = [meetingRow(false)]; durableState.lines = []; durableState.notes = [];
+    await renderCanvas();
+    expect(container.textContent).toContain("No transcript is available for this meeting.");
+    expect(container.textContent).not.toContain("Waiting for transcript…");
+    expect(processCalls()).toBe(0);
+  });
+  it("continues waiting for speech while an empty meeting is live", async () => {
+    meetingsState = [meetingRow(true)]; durableState.lines = []; durableState.notes = [];
+    await renderCanvas();
+    expect(container.textContent).toContain("Waiting for transcript…");
+  });
+  it("keeps recap tools collapsed until requested, without starting processing", async () => {
+    meetingsState = [meetingRow(false)]; durableState.lines = [LINE]; durableState.notes = [];
+    await renderCanvas();
+    const tools = container.querySelector<HTMLButtonElement>('button[aria-label="Meeting tools"]')!;
+    const group = document.getElementById(tools.getAttribute("aria-controls")!)!;
+    expect(tools.getAttribute("aria-expanded")).toBe("false");
+    expect(group.hidden).toBe(true);
+    await act(async () => { tools.click(); });
+    expect(group.hidden).toBe(false);
+    expect(tools.getAttribute("aria-expanded")).toBe("true");
+    expect([...group.querySelectorAll("button")].map(button => button.textContent)).toEqual(["Meeting memory", "Speaker identities", "Review transcript"]);
+    await act(async () => { tools.click(); });
+    expect(group.hidden).toBe(true);
+    expect(container.textContent).toContain(LINE.text);
+    expect(processCalls()).toBe(0);
+  });
   it('generates AI notes for an existing completed transcript only after the explicit action', async () => {
     meetingsState = [meetingRow(false)]; durableState.lines = [LINE]; durableState.notes = [];
     await renderCanvas();

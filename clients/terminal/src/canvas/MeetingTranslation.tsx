@@ -1,4 +1,5 @@
 "use client";
+import styles from "./MeetingTranscript.module.css";
 import { useEffect, useRef, useState } from "react";
 import type { TranslationGroup } from "./translationGroups";
 
@@ -67,16 +68,15 @@ export function TranslationControls({ language, onChange, snapshot, error, onRet
   snapshot: TranslationSnapshot | null; error: string; onRetry: () => void; disabled?: boolean;
 }) {
   const paused = snapshot?.status === "paused";
-  return <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", gridColumn: "1 / -1" }}>
-    <select aria-label="Transcript language" value={language} disabled={disabled}
-      onChange={event => onChange(event.currentTarget.value as TranscriptLanguage)}
-      style={{ height: 29, minWidth: 130, padding: "0 8px", border: "1px solid var(--line2)", borderRadius: 5, background: "var(--bg)", color: "var(--t1)", font: "inherit", fontSize: 12 }}>
+  return <>
+    <select className={styles.select} aria-label="Transcript language" title="Transcript language" value={language} disabled={disabled}
+      onChange={event => onChange(event.currentTarget.value as TranscriptLanguage)}>
       {([["vi", "Tiếng Việt"], ["en", "English"], ["bilingual", "Song ngữ"]] as const).map(([mode, label]) =>
         <option key={mode} value={mode}>{label}</option>)}
     </select>
-    {language !== "vi" && <>
-      <span role="status" style={{ color: "var(--t2)", fontSize: 12 }}>{error || (paused ? "Dịch tạm dừng · sẽ tự thử lại" : snapshot ? `VI → EN · ${snapshot.completed}/${snapshot.total} cụm${snapshot.groups.some(g => !g.ready) ? " · Đang gom câu…" : ""}` : "Đang tải bản dịch…")}</span>
-      {(paused || error) && <button type="button" onClick={onRetry}>Thử lại</button>}
-    </>}
-  </div>;
+    {language !== "vi" && <div className={styles.translationStatus} data-state={paused || error ? "attention" : "normal"}>
+      <span role="status">{error || (paused ? "Dịch tạm dừng · sẽ tự thử lại" : snapshot ? `VI → EN · ${snapshot.completed}/${snapshot.total} cụm${snapshot.groups.some(g => !g.ready) ? " · Đang gom câu…" : ""}` : "Đang tải bản dịch…")}</span>
+      {(paused || error) && <button className={styles.retry} type="button" onClick={onRetry}>Thử lại</button>}
+    </div>}
+  </>;
 }
