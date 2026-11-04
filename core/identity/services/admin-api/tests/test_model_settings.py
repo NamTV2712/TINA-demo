@@ -241,6 +241,9 @@ def test_asr_runtime_keeps_accounts_independent_and_fences_stale_updates(client)
         assert client.put("/user/transcription", headers={"X-API-Key": token}, json={"backend": "viegem"}).status_code == 200
     before = client.get(f"/internal/transcription/runtime?user_id={first}", headers=h).json()
     assert before["counts"] == {"gipformer": 0, "viegem": 2}
+    assert set(before) == {"counts", "account"}
+    assert set(before["account"]) == {"backend", "enabled", "revision"}
+    assert "token" not in str(before) and "email" not in str(before)
     revision = before["account"]["revision"]
     payload = {"backend": "gipformer", "enabled": "true", "expected_revision": revision}
     assert client.put(f"/internal/users/{first}/transcription-runtime", headers=h, json=payload).status_code == 200

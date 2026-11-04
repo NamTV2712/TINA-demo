@@ -1441,10 +1441,13 @@ def create_app() -> FastAPI:
         platform = await _platform_setting("transcription", db)
         counts = {"gipformer": 0, "viegem": 0}
         account = None
-        users = (await db.execute(select(User))).scalars().all()
+        users = (await db.execute(select(
+            User.id.label("user_id"),
+            User.data["transcription_prefs"].label("transcription_prefs"),
+            User.data["transcription_revision"].label("transcription_revision"),
+        ))).mappings()
         for user in users:
-            data = user.data if isinstance(user.data, dict) else {}
-            prefs = data.get("transcription_prefs") or {}
+            prefs = user["transcription_prefs"] or {}
             config = _effective_transcription({**prefs, "runtime_enabled": "true"}, platform)
             backend = config["backend"]
             if backend not in counts:
@@ -1455,9 +1458,8 @@ def create_app() -> FastAPI:
             enabled = prefs.get("runtime_enabled") != "false"
             if enabled and backend in counts:
                 counts[backend] += 1
-            if str(user.id) == user_id:
-                account = {"backend": backend, "enabled": enabled, "revision": int(data.get("transcription_revision", 0)),
-                           "stored_backend": prefs.get("backend") or "", "stored_enabled": prefs.get("runtime_enabled") or ""}
+            if str(user["user_id"]) == user_id:
+                account = {"backend": backend, "enabled": enabled, "revision": int(user["transcription_revision"] or 0)}
         if user_id and account is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, detail="User not found")
         return {"counts": counts, "account": account}
