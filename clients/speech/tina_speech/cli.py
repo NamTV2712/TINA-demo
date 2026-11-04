@@ -127,7 +127,8 @@ def main(argv=None):
                         raise ValueError('WAV ended before question endpoint; include at least one second trailing silence')
                     deadline = time.monotonic() + 330
                     while session.state not in ('ARMED', 'ERROR') and time.monotonic() < deadline:
-                        session.tick(); time.sleep(.1)
+                        session.feed(np.zeros(BLOCK_SIZE, dtype=np.float32))
+                        time.sleep(BLOCK_SIZE / SAMPLE_RATE)
                     if session.state != 'ARMED': return 1
                 return 0
             finally:

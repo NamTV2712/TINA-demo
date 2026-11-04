@@ -155,8 +155,13 @@ No default stack service, user table or agent prompt/retrieval pipeline is repla
 
 In a separate host process, set **only your own** `TINA_SPEECH_USER_KEY`. Shared operator/STT/TTS
 keys never go to participants. `TINA_SPEECH_COORDINATOR_URL` defaults to
-`http://127.0.0.1:18005`; non-loopback connections require HTTPS. Multi-machine hosting/TLS and
-room-wide suppression/arbitration remain later work.
+`http://127.0.0.1:18005`; non-loopback connections require HTTPS. Multi-machine hosting/TLS
+is operator-managed. Run one coordinator process/worker for the room, and install the
+same branch on every participant host. Set `participants` to each user's real TINA user ID;
+each host uses its own enrolled user's API key. The local example lists IDs 7 and 8 as placeholders.
+For separate machines, expose the loopback service through an authenticated-network HTTPS
+reverse proxy with caching disabled, or use an operator-configured SSH tunnel and keep the
+participant URL on loopback. Do not expose a plain HTTP coordinator on the LAN.
 
 ```powershell
 uv run --project clients/speech tina-speech devices
@@ -174,7 +179,7 @@ conversation or an empty/unrecognized wake/question fails closed instead of bein
 a different question. The pinned KWS Python result omits the absolute offset after native silence
 resets, so relative token timestamps are not used as a precise acoustic crop.
 
-State: ARMED -> CAPTURING -> WAITING -> SPEAKING -> ARMED. Wake dispatch stays disabled throughout
+State: ARMED -> CAPTURING -> WAITING -> SPEAKING -> QUIET -> ARMED. Wake dispatch stays disabled throughout
 capture/wait/playback. Only validated `claims[].text` with approved current sources is spoken;
 empty claims get one fixed insufficient-information reply. Errors never speak raw JSON, tool
 output or a personal-chat fallback. No Wiki Apply/document editing action is called.
@@ -193,6 +198,34 @@ ERROR keeps the room reserved and the client disarmed; do not automatically retr
 Retry explicit Stop. If receipts have expired or services cannot recover, the operator must stop
 the bot, confirm it has left, then restart/reconfigure the coordinator with a new active bot.
 The single-process pilot has volatile state; restart does not resume/replay turns.
+
+### Multiple enrolled hosts
+
+The core-owned [speech-room.v1](../../core/meetings/contracts/speech-room.v1/README.md)
+handshake adds authenticated `GET /room` snapshots. Every host polls every 250 ms independently
+of its turn worker. The room is busy from the winning capture grant through real terminal
+playback. Other hosts enter BUSY, discard pre-roll and do not feed KWS. If two microphones hear
+the same call, the central atomic grant admits one; the loser discards its local question and
+never uploads it. There is no queue of stale questions. This arbitration does not identify who
+actually spoke or promise the microphone with the best signal will win.
+
+Grant revisions reject delayed losing requests even after the room becomes idle. A boot UUID
+rejects old requests after coordinator restart. Upgrade coordinator and clients together; the
+phase 3 client without the handshake is no longer accepted for turn dispatch.
+
+After a turn or BUSY interval, each host waits for 800 ms continuous local quiet before ARMED,
+resetting KWS/pre-roll. A failed status poll, snapshot older than one second or changed boot UUID
+enters ERROR, drops capture and attempts Stop after pending HTTP. It stays disarmed after network
+recovery: Ctrl+C and explicitly run the participant again after the operator checks the room.
+An idle-status poll is advisory; the epoch/revision reservation check is the final atomic gate.
+Do not restart the coordinator to clear unknown playback until the old bot has been stopped and
+confirmed absent. A freshly started process cannot reconstruct old playback receipts on its own.
+
+To pilot two hosts, start the coordinator once, start `run --device <index>` on each host, then
+ask one question at a time and one simultaneous question. Check both clients pause while Tina
+answers, only one answer plays, and both return through QUIET to ARMED. Disconnect one client's
+network and verify ERROR; reconnect alone must not re-arm it. Repeat with headphones and speakers.
+These physical microphone/remote listening checks remain separate from simulated acceptance.
 
 Older single-meeting Agent APIs are supported without requesting the unused `meeting_ids`
 field. If a source omits its additive meeting ID, it is bound to the fixed authenticated
@@ -214,3 +247,11 @@ uv run --directory clients/speech pytest -q
 open a microphone. It needs the configured participant key and coordinator. Deterministic unit
 tests fake upstream HTTP; they do not establish real LLM, Meet admission or remote audibility.
 Keep those integration checks separate from unit-test counts and human wake-word accuracy.
+
+Phase 4 checks (2026-11-04): 51 deterministic speech tests pass. A separate native KWS/Silero
+smoke ran two independent clients through real loopback HTTP and simulated upstream services:
+one winner for a shared wake, zero extra Speak calls during a repeated busy-room wake, then
+a successful turn from the other host client. Both returned to ARMED. Evidence is under ignored
+`output/speech-stage4/native-proof.json`. No microphone, real LLM or Meet was used in that smoke.
+Phase 4 changes only the optional Python client/coordinator: existing phase 3 stack images do
+not need rebuilding. Restart the coordinator and all participant clients together after updating.

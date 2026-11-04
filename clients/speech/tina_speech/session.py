@@ -4,9 +4,10 @@ import os
 from queue import Queue
 import threading
 import time
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import httpx
+import numpy as np
 
 from .capture import QuestionCapture, SileroVad
 from .wakeword import SherpaKws, WakeDetector
@@ -22,8 +23,20 @@ class RoomClient:
         self.http = http or httpx.Client(headers={'X-API-Key': key}, timeout=8,
                                         follow_redirects=False, trust_env=False)
         self.http.headers['X-API-Key'] = key
+        self.epoch = None
+
+    def room(self):
+        response = self.http.get(self.url + '/room', timeout=1)
+        response.raise_for_status()
+        status = response.json()
+        if (set(status) != {'epoch', 'revision', 'busy'} or type(status['busy']) is not bool
+                or type(status['revision']) is not int or not 0 <= status['revision'] < 10**15
+                or str(UUID(status['epoch'])) != status['epoch']):
+            raise ValueError('Invalid room status')
+        return status
 
     def call(self, method, identifier, suffix='', **kwargs):
+        kwargs['headers'] = dict(kwargs.get('headers', {})) | {'X-Tina-Speech-Epoch': self.epoch}
         response = self.http.request(method, self.url + '/turns/' + identifier + suffix, **kwargs)
         response.raise_for_status()
         state = response.json()
@@ -31,8 +44,8 @@ class RoomClient:
             raise ValueError("Mismatched turn response")
         return state
 
-    def reserve(self, identifier):
-        state = self.call('POST', identifier)
+    def reserve(self, identifier, revision):
+        state = self.call('POST', identifier, headers={'X-Tina-Speech-Revision': str(revision)})
         if state['state'] != 'CAPTURING':
             raise ValueError("Turn grant is not fresh")
         return state
@@ -54,15 +67,50 @@ class RoomClient:
         return self.call('DELETE', identifier, timeout=15)
 
 
+class RoomMonitor:
+    """Independent bounded polling: a turn's HTTP worker may be waiting for playback."""
+    def __init__(self, client):
+        self.client = client
+        self.stop = threading.Event()
+        self.lock = threading.Lock()
+        self.value, self.updated = client.room(), time.monotonic()
+        client.epoch = self.value['epoch']
+        self.thread = threading.Thread(target=self.run, name='tina-speech-room', daemon=True)
+        self.thread.start()
+
+    def run(self):
+        while not self.stop.wait(.25):
+            try: value = self.client.room()
+            except Exception: value = None
+            with self.lock:
+                self.value, self.updated = value, time.monotonic()
+
+    def snapshot(self):
+        with self.lock:
+            return self.value if time.monotonic() - self.updated <= 1 else None
+
+    def close(self):
+        self.stop.set()
+        self.thread.join(timeout=1.5)
+
+
 class SpeechSession:
-    def __init__(self, directory, client, emit, *, detector=None, vad_factory=None):
+    def __init__(self, directory, client, emit, *, detector=None, vad_factory=None, monitor=None):
         self.detector = detector or WakeDetector(SherpaKws(directory))
         self.vad_factory = vad_factory or (lambda: SileroVad(directory))
         self.client, self.emit = client, emit
+        self.monitor = monitor or RoomMonitor(client)
+        initial = self.monitor.snapshot()
+        if initial is None:
+            self.monitor.close()
+            raise ValueError('Room status unavailable; participant remains disarmed')
+        self.epoch = initial['epoch']
+        self.revision = initial['revision']
         self.pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix='tina-speech-http')
         self.messages = Queue(maxsize=8)
         self.stopped = threading.Event()
-        self.state = 'ARMED'
+        self.state = 'BUSY' if initial['busy'] else 'ARMED'
+        self.quiet_samples = 0
         self.identifier = None
         self.capture = None
         self.audio = None
@@ -79,7 +127,31 @@ class SpeechSession:
         if state == 'SPEAKING' and self.messages.empty():
             self.messages.put_nowait(state)
 
+    def fail(self):
+        self.stopped.set()
+        self.capture, self.audio = None, None
+        self.detector.ring.clear()
+        if self.identifier:
+            # Best-effort Stop after the in-flight request; never replay audio/Speak.
+            self.pool.submit(self.client.cancel, self.identifier)
+        self.transition('ERROR')
+
     def tick(self):
+        if self.state in ('ERROR', 'OFF'): return
+        status = self.monitor.snapshot()
+        if status is None or status['epoch'] != self.epoch:
+            self.fail()
+            return
+        if self.state in ('ARMED', 'BUSY', 'QUIET'):
+            if status['busy']:
+                self.capture, self.audio = None, None
+                self.detector.ring.clear()
+                self.quiet_samples = 0
+                self.transition('BUSY')
+            elif self.state == 'BUSY' or status['revision'] != self.revision:
+                self.quiet_samples = 0
+                self.transition('QUIET')
+        self.revision = status['revision']
         while not self.messages.empty():
             state = self.messages.get_nowait()
             if self.state in ('WAITING', 'SPEAKING'): self.transition(state)
@@ -96,11 +168,21 @@ class SpeechSession:
                 return
             if isinstance(result, dict): result = result.get('state')
             if result not in ('COMPLETED', 'FAILED', 'STOPPED'):
-                self.transition('ERROR')
+                self.fail()
             else:
                 self.rearm()
+        except httpx.HTTPStatusError as exc:
+            self.capture, self.audio = None, None
+            try: detail = exc.response.json().get('detail')
+            except (ValueError, AttributeError): detail = None
+            if (self.state == 'CAPTURING' and exc.response.status_code == 409
+                    and detail == 'Room is busy or awaiting operator recovery'):
+                self.identifier = None
+                self.transition('BUSY')
+            else:
+                self.fail()
         except Exception:
-            self.transition('ERROR')
+            self.fail()
 
     def rearm(self):
         self.capture, self.audio = None, None
@@ -108,21 +190,30 @@ class SpeechSession:
         self.detector.ring.clear()
         self.detector.armed = True
         self.identifier = None
-        self.transition('ARMED')
+        self.quiet_samples = 0
+        self.transition('QUIET')
 
     def feed(self, block):
         self.tick()
+        if self.state == 'QUIET':
+            self.quiet_samples = self.quiet_samples + len(block) if np.sqrt(np.mean(block ** 2)) < .01 else 0
+            if self.quiet_samples >= 12800:
+                self.detector.kws.reset()
+                self.detector.ring.clear()
+                self.detector.armed = True
+                self.transition('ARMED')
+            return None
         if self.state == 'ARMED':
             event = self.detector.feed(block)
             if event:
                 try:
                     self.capture = QuestionCapture(event, self.vad_factory())
                 except ValueError:
-                    self.transition('ERROR')
+                    self.fail()
                     return
                 self.identifier = str(uuid4())
                 self.transition('CAPTURING')
-                self.future = self.pool.submit(self.client.reserve, self.identifier)
+                self.future = self.pool.submit(self.client.reserve, self.identifier, self.revision)
         elif self.state == 'CAPTURING' and self.audio is None:
             try:
                 self.audio = self.capture.feed(block)
@@ -134,14 +225,20 @@ class SpeechSession:
         return None
 
     def close(self):
+        if self.state == 'OFF': return
         self.stopped.set()
+        self.monitor.close()
         self.detector.close()
         self.capture, self.audio = None, None
-        self.pool.shutdown(wait=False, cancel_futures=True)
-        if self.identifier:
-            try: self.client.cancel(self.identifier)
-            except Exception: self.transition('ERROR')
-        self.client.http.close()
+        identifier = self.identifier
+        def cleanup():
+            # Ordered after reserve/upload, so a late grant cannot survive local Stop.
+            try:
+                if identifier: self.client.cancel(identifier)
+            finally:
+                self.client.http.close()
+        self.pool.submit(cleanup)
+        self.pool.shutdown(wait=False, cancel_futures=False)
         self.transition('OFF')
 
 

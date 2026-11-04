@@ -57,7 +57,8 @@ class Client:
         self.uploads = []
         self.release = threading.Event()
         self.cancelled = []
-    def reserve(self, identifier): return {'request_id': identifier, 'state': 'CAPTURING'}
+    def room(self): return {'epoch': '00000000-0000-4000-8000-000000000000', 'revision': 0, 'busy': False}
+    def reserve(self, identifier, revision): return {'request_id': identifier, 'state': 'CAPTURING'}
     def submit(self, identifier, audio, stopped, notify):
         self.uploads.append((identifier, audio))
         notify('SPEAKING')
@@ -85,8 +86,9 @@ def test_session_suppresses_new_wakes_until_confirmed_completion_and_stop_closes
         assert kws.accept.call_count == 1
         client.release.set()
         deadline = time.monotonic() + 1
-        while session.state != 'ARMED' and time.monotonic() < deadline:
+        while session.state != 'QUIET' and time.monotonic() < deadline:
             session.tick(); time.sleep(.001)
+        for _ in range(40): session.feed(QUIET)
         assert session.state == 'ARMED'
     finally:
         client.release.set(); session.close()
@@ -95,7 +97,7 @@ def test_session_suppresses_new_wakes_until_confirmed_completion_and_stop_closes
 
 def test_session_stop_during_pending_grant_never_uploads():
     client = Client(); entered = threading.Event(); release = threading.Event()
-    def reserve(identifier):
+    def reserve(identifier, revision):
         entered.set(); release.wait(2)
         return {'state': 'CAPTURING'}
     client.reserve = reserve
@@ -105,6 +107,9 @@ def test_session_stop_during_pending_grant_never_uploads():
         session.feed(VOICE)
         assert entered.wait(1)
         session.close()
+        release.set()
+        deadline = time.monotonic() + 1
+        while not client.cancelled and time.monotonic() < deadline: time.sleep(.001)
         assert client.cancelled and not client.uploads
     finally:
         release.set()
