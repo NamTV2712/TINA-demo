@@ -9,7 +9,7 @@ core-owned speech.v1 playback receipts are implemented in the working branch. Fo
 passed: 36 client/coordinator, 17 Meeting API/legacy stop, 5 bot speech and 23 Gateway/manifest
 checks. Native KWS + Silero captured the synthetic question into a bounded WAV. Live STT ->
 LLM -> shared meeting playback has NOT been verified; new service images are not deployed.
-See `clients/speech/PHASE3.md`. Do not treat this checkpoint as the phase 3 acceptance gate.
+See [the speech client README](../clients/speech/README.md#authorized-voice-turns). Do not treat this checkpoint as the phase 3 acceptance gate.
 
 Resource constraint after the Windows virtual-memory incident: run builds/tests sequentially,
 limit Node heap to 2 GiB, and apply the operator's WSL resource cap before container integration
