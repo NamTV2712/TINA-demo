@@ -1,15 +1,12 @@
 # Wake-word + TTS implementation plan
 
-Status: phase 1 TTS sidecar and phase 2 local wake-word pilot implemented. Remote meeting
-audibility and human wake-word validation remain open. Phase 3 has an experimental coordinator
-and participant turn controller; full live integration acceptance remains open.
+Status: phases 1–3 and the phase 4 multi-client arbitration/controller are implemented.
+Remote meeting audibility, two physical host/microphone acceptance and human wake-word
+validation remain open. Implementation and simulated checks are not the human release gate.
 
-Phase 3 development checkpoint: coordinator, bounded Silero capture, participant client and
-core-owned speech.v1 playback receipts are implemented in the working branch. Focused tests
-passed: 36 client/coordinator, 17 Meeting API/legacy stop, 5 bot speech and 23 Gateway/manifest
-checks. Native KWS + Silero captured the synthetic question into a bounded WAV. Live STT ->
-LLM -> shared meeting playback has NOT been verified; new service images are not deployed.
-See [the speech client README](../clients/speech/README.md#authorized-voice-turns). Do not treat this checkpoint as the phase 3 acceptance gate.
+Phase 3 implemented coordinator, bounded Silero capture, participant client and core-owned
+speech.v1 playback receipts. Focused checks passed for Meeting API/legacy Stop, bot speech and
+Gateway/manifest seams. See [the speech client README](../clients/speech/README.md#authorized-voice-turns).
 
 Live synthetic integration evidence (2026-11-04): a paced WAV passed native KWS/Silero capture,
 real self-hosted STT, the existing meeting Knowledge LLM endpoint with an explicitly created
@@ -24,7 +21,7 @@ real-human microphone/accent validation remains deferred as explicitly requested
 Compatibility fix from the live run: omit the unused empty meeting_ids request field for older
 single-meeting Agent APIs, and bind absent per-source meeting IDs to the fixed authenticated
 Knowledge endpoint. Explicit different meeting IDs and unapproved document paths still fail.
-The focused speech suite now has 37 passing tests. This does not add cross-meeting retrieval.
+The focused speech suite now has 51 passing tests including phase 4. This does not add cross-meeting retrieval.
 
 Resource constraint after the Windows virtual-memory incident: run builds/tests sequentially,
 limit Node heap to 2 GiB, and apply the operator's WSL resource cap before container integration
@@ -245,48 +242,63 @@ Phase 2 evidence (2026-11-04):
 
 ### 3. Connect one authorized participant end to end
 
-- [ ] Implement the coordinator and its narrow request/status contract. Proposed local state:
+- [x] Implement the coordinator and its narrow request/status contract. Proposed local state:
       `OFF -> ARMED -> CAPTURING -> WAITING -> SPEAKING -> ARMED`, with explicit error/cancel paths.
       Apply a bounded no-speech timeout, question duration and audio/text size limit.
-- [ ] Authenticate/enroll the participant and accept one bounded WAV with a stable request ID.
+- [x] Authenticate/enroll the participant and accept one bounded WAV with a stable request ID.
       The coordinator uses the already-running STT service with server-held credentials. Do not
       distribute the shared transcription token or use Terminal's cookie-based `/api/stt` as if it
       were a machine API accepting arbitrary `X-API-Key` headers.
-- [ ] Call `POST /agent/workspace/meeting-knowledge/{meeting_id}/ask` through Gateway using the
+- [x] Call `POST /agent/workspace/meeting-knowledge/{meeting_id}/ask` through Gateway using the
       configured operator identity and approved linked document paths. Reuse its existing
-      `{question, documents, meeting_ids}` body. Restrict the pilot to one meeting.
-- [ ] Check the returned answer/source IDs, approved source paths and `stale` state. Speak the
+      `{question, documents}` body, omitting unused empty cross-meeting fields for older APIs.
+      Restrict the pilot to one meeting.
+- [x] Check the returned answer/source IDs, approved source paths and `stale` state. Speak the
       validated `claims[].text` only. Empty claims produce a fixed "not enough information" reply.
       A network/model/source error never falls through to raw JSON, logs, tool output or an
       unrelated personal-chat answer. A read-only question may store an answer snapshot as the
       existing API does; it never calls Wiki Apply or document-edit endpoints automatically.
-- [ ] Tie the request lifecycle to real synthesis/playback outcome. The current bot Speak path
-      has no completion acknowledgement. Add the smallest correlated started/completed/failed/
+- [x] Tie the request lifecycle to real synthesis/playback outcome. The original bot Speak path
+      had no completion acknowledgement. Added the smallest correlated started/completed/failed/
       stopped status seam under meetings ownership, with existing Gateway authorization and
       optional command correlation for legacy callers. Define exact wire shape in the contract
       change, then update affected callers/goldens/seals. Do not infer playback completion from
       HTTP acceptance, a log string, or a character-count sleep.
-- [ ] Ignore a late result after cancellation and return to ARMED on bounded failure.
+- [x] Ignore a late result after cancellation and return to ARMED on bounded failure.
 
 Exit: one real microphone -> wake -> STT -> grounded answer -> audible shared TTS, including
 cancel/error recovery. No requirement for multi-turn LLM memory or automatic business actions.
 
 ### 4. Add the remaining enrolled participants
 
-- [ ] Maintain one active turn per room centrally, from question capture through playback completion.
+- [x] Maintain one active turn per room centrally, from question capture through playback completion.
       Use a bounded busy response first, rather than an unbounded queue of stale spoken questions.
-- [ ] Deduplicate a participant retry by authenticated identity + request ID; preserve the same ID
+- [x] Deduplicate a participant retry by authenticated identity + request ID; preserve the same ID
       on retry. Do not automatically repeat an ambiguously accepted Speak command.
-- [ ] Pause wake-triggered dispatch on **every enrolled client** during a shared reply. A missing
+- [x] Pause wake-triggered dispatch on **every enrolled client** during a shared reply. A missing
       coordinator/status connection disarms dispatch; microphone recording permission remains a
       local explicit choice. Re-arm only after terminal playback status or operator recovery.
 - [ ] Test one spoken call heard by two nearby microphones. Request IDs alone do not deduplicate
       physical cross-talk; the central capture grant must allow only one winning client.
-- [ ] Handle disconnect/restart explicitly. The first single-process coordinator may keep volatile
+- [x] Handle disconnect/restart explicitly. The first single-process coordinator may keep volatile
       state, but restart invalidates grants and requires re-arming; do not claim durable exactly-once
       playback or silently replay requests. Add persistent delivery state only if acceptance needs it.
-- [ ] Test with headphones and loudspeakers, simultaneous callers, a muted/disconnected bot and
-      STT/LLM/TTS failures. No automatic retry may produce a second shared answer.
+- [x] Simulated two-client simultaneous capture, disconnect/restart and STT/LLM/TTS/bot failures
+      with no second shared answer on retry.
+- [ ] Physical headphones/loudspeakers, two microphones and a truly muted/disconnected Meet bot.
+      Simulated tests cannot prove remote audibility or acoustic cross-talk behavior.
+
+Implemented handshake: [speech-room.v1](../core/meetings/contracts/speech-room.v1/README.md).
+All hosts independently poll occupancy; stale status/epoch change requires explicit participant
+restart. Capture revisions reject late losing wakes even after the previous turn finishes.
+BUSY/terminal release requires 800 ms local quiet and acoustic-history reset before ARMED.
+No main-stack image rebuild, new service/dependency or source/voice policy change is needed.
+
+Native smoke on 2026-11-04: two independent local KWS/Silero clients over real loopback
+HTTP, with simulated upstream services, admitted one shared call, suppressed a repeated wake WAV
+while busy, then admitted the other participant. Exactly two STT/Speak calls for two turns; both
+clients returned to ARMED. Evidence: ignored `output/speech-stage4/native-proof.json` (26.16 s).
+This used one physical machine and no microphone/Meet; it is not physical cross-talk acceptance.
 
 Exit: two separate host clients can ask in turn, only one answer plays, and room audio cannot
 cause repeated wake -> answer loops.
