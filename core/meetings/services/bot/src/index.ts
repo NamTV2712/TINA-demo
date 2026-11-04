@@ -27,6 +27,7 @@ import { loadInvocation, InvocationError, speakerStreamConfigFromEnv, type Invoc
 import type { Act, LifecycleEvent, TranscriptSegment } from './contracts.js';
 import { createOrchestrator } from './orchestrator.js';
 import { createHttpLifecycleSink } from './adapters/lifecycle-http.js';
+import { createSpeechHandler, createSpeechReporter } from './speech-status.js';
 import { createRedisTranscriptSink, redisClientFrom } from './adapters/transcript-redis.js';
 import { createRedisActsSource, redisActsClientFrom } from './adapters/acts-redis.js';
 import { createBrowserJoinDriver } from './join-driver.js';
@@ -118,13 +119,6 @@ function teeActs(source: ActsSource, voice: (act: Act) => void | Promise<void>):
 
 /** The bot's voice-act handler: route acts.v1 speak / speak_stop to the SpeakController. The
  *  other voice acts (chat/screen/avatar) are out of this increment's scope. */
-function voiceHandler(speak: SpeakController): (act: Act) => Promise<void> {
-  return async (act) => {
-    if (act.action === 'speak') await speak.speak(act.text, act.voice);
-    else if (act.action === 'speak_stop') await speak.stop();
-  };
-}
-
 /**
  * Probe the SECONDARY control-plane channel (redis) for the reachability gate (#530). A fresh,
  * short-lived connection with a bounded connect timeout and NO reconnection — a single yes/no on
@@ -327,7 +321,7 @@ export async function main(env: NodeJS.ProcessEnv = process.env): Promise<number
     });
     // Voice: tee acts so `speak`/`speak_stop` reach the SpeakController (gated on voiceAgentEnabled).
     const speak = createSpeakController(session.page, inv);
-    acts = teeActs(liveActs, voiceHandler(speak));
+    acts = teeActs(liveActs, createSpeechHandler(speak, createSpeechReporter(inv)));
   } catch (e) {
     console.error(`[bot] browser launch/capture wiring failed — falling back to clean terminal failed: ${String(e)}`);
     join = noBrowserJoinDriver(String(e));

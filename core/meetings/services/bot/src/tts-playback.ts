@@ -29,6 +29,7 @@ function setTtsMute(muted: boolean, log: (m: string) => void): void {
     execSync(`pactl set-source-mute virtual_mic ${v}`, { stdio: 'pipe' });
   } catch (err) {
     log(`[tts] pactl ${muted ? 'mute' : 'unmute'} failed: ${(err as Error).message}`);
+    throw new Error('TTS microphone control failed');
   }
 }
 
@@ -36,14 +37,18 @@ export interface TtsPlayback {
   /** Synthesize `text` (voice optional) and play it into the meeting via tts_sink. Resolves when
    *  playback finishes. Best-effort: a synthesis/playback failure logs + resolves (never throws out
    *  — the voice handler must not break the orchestrator). */
-  speak(text: string, voice?: string): Promise<void>;
+  speak(text: string, voice?: string, onStarted?: () => void): Promise<PlaybackOutcome | void>;
   /** Interrupt any in-flight playback (barge-in) + re-mute. */
   stop(): void;
 }
 
+export type PlaybackOutcome = 'completed' | 'failed' | 'stopped';
+
 export interface TtsPlaybackOptions {
   /** Injected by offline tests; production uses the PulseAudio mute helper. */
   setMute?: (muted: boolean) => void;
+  /** Deterministic process boundary for tests; production always spawns paplay. */
+  spawnProcess?: () => ChildProcess;
 }
 
 /** Build a TtsPlayback that streams the TTS service's PCM straight to paplay. */
@@ -51,7 +56,12 @@ export function createTtsPlayback(
   log: (m: string) => void = () => { /* */ },
   options: TtsPlaybackOptions = {},
 ): TtsPlayback {
-  const setMute = options.setMute ?? ((muted: boolean) => setTtsMute(muted, log));
+  const mute = options.setMute ?? ((muted: boolean) => setTtsMute(muted, log));
+  const setMute = (muted: boolean): boolean => {
+    try { mute(muted); return true; }
+    catch { log('[tts] microphone control failed'); return false; }
+  };
+  const spawnProcess = options.spawnProcess ?? (() => spawn('paplay', PAPLAY_ARGS, { stdio: ['pipe', 'pipe', 'pipe'] }));
   let proc: ChildProcess | null = null;
   let request: ClientRequest | null = null;
   let cancelActive: (() => void) | null = null;
@@ -76,16 +86,16 @@ export function createTtsPlayback(
     setMute(true);
   };
 
-  const speak = async (text: string, voice = 'auto'): Promise<void> => {
+  const speak = async (text: string, voice = 'auto', onStarted?: () => void): Promise<PlaybackOutcome> => {
     // A newer speech command supersedes any request or playback still in flight.
     if (request || proc) stop();
     const base = process.env.TTS_SERVICE_URL?.trim();
-    if (!base) { log('[tts] TTS_SERVICE_URL not set — speak is a no-op'); return; }
+    if (!base) { log('[tts] TTS_SERVICE_URL not set — speak is a no-op'); return 'failed'; }
     const speechGeneration = ++generation;
     const postData = JSON.stringify({ model: 'tts-1', input: text, voice, response_format: 'pcm' });
     let url: URL;
     try { url = new URL(`${base.replace(/\/$/, '')}/v1/audio/speech`); }
-    catch { log(`[tts] bad TTS_SERVICE_URL: ${base}`); return; }
+    catch { log('[tts] bad TTS_SERVICE_URL'); return 'failed'; }
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'Content-Length': String(Buffer.byteLength(postData)),
@@ -93,20 +103,20 @@ export function createTtsPlayback(
     const token = process.env.TTS_API_TOKEN?.trim();
     if (token) headers['X-API-Key'] = token;
 
-    await new Promise<void>((resolve) => {
+    return await new Promise<PlaybackOutcome>((resolve) => {
       let settled = false;
       let req: ClientRequest;
-      const finish = (): void => {
+      const finish = (outcome: PlaybackOutcome = 'failed'): void => {
         if (settled) return;
         settled = true;
         if (request === req) request = null;
         if (cancelActive === cancel) cancelActive = null;
-        resolve();
+        resolve(outcome);
       };
       const cancel = (): void => {
         if (settled) return;
         try { req.destroy(new Error('TTS playback stopped')); } catch { /* */ }
-        finish();
+        finish('stopped');
       };
       req = (url.protocol === 'https:' ? https : http).request({
         hostname: url.hostname,
@@ -117,7 +127,7 @@ export function createTtsPlayback(
       }, (res) => {
         if (speechGeneration !== generation) {
           res.resume();
-          finish();
+          finish('stopped');
           return;
         }
         if (res.statusCode !== 200) {
@@ -130,14 +140,32 @@ export function createTtsPlayback(
           res.on('aborted', finish);
           return;
         }
-        setMute(false);                               // open the mic only during playback
-        const p = spawn('paplay', PAPLAY_ARGS, { stdio: ['pipe', 'pipe', 'pipe'] });
+        if (!setMute(false)) { res.resume(); finish('failed'); return; }
+        const p = spawnProcess();
         proc = p;
         p.stderr?.on('data', (d: Buffer) => log(`[tts] paplay: ${d.toString().trim()}`));
-        const done = () => {
+        let bytes = 0;
+        let received = false;
+        res.on('data', (chunk: Buffer) => {
+          bytes += chunk.length;
+          if (bytes > 24000 * 2 * 120) {
+            res.destroy(); p.kill('SIGKILL');
+          }
+        });
+        res.on('end', () => { received = bytes > 0 && bytes % 2 === 0; });
+        res.on('aborted', () => { p.kill('SIGKILL'); });
+        res.on('error', () => { p.kill('SIGKILL'); });
+        p.stdin?.on('error', () => { p.kill('SIGKILL'); });
+        p.once('spawn', () => {
+          if (!settled && speechGeneration === generation) {
+            try { onStarted?.(); }
+            catch { p.kill('SIGKILL'); finish('failed'); }
+          }
+        });
+        const done = (code: number | null = null) => {
           if (proc === p) proc = null;
-          if (speechGeneration === generation) setMute(true);
-          finish();
+          const muted = speechGeneration !== generation || setMute(true);
+          finish(speechGeneration !== generation ? 'stopped' : code === 0 && received && muted ? 'completed' : 'failed');
         };
         p.on('exit', done);
         p.on('error', (e) => { log(`[tts] paplay error: ${String(e)}`); done(); });
