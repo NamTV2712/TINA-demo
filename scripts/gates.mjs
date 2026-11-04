@@ -91,11 +91,12 @@ const contractVersionDirs = () => walkDirs().filter(
   (d) => /(^|\/)contracts\/[^/]+\.v\d+$/.test(rel(d).replace(/\\/g, "/")) &&
          readdirSync(d).some((f) => f.endsWith(".schema.json"))
 );
-// the seal hash of a contract = sha256 over its (name-sorted) *.schema.json bytes
+// Hash name-sorted UTF-8 schemas with LF line endings, matching Git's sealed bytes.
+// A Windows autocrlf checkout must not look like a published contract change.
 function schemaHash(d) {
   const h = createHash("sha256");
   for (const f of readdirSync(d).filter((f) => f.endsWith(".schema.json")).sort())
-    h.update(f + "\0").update(readFileSync(join(d, f)));
+    h.update(f + "\0").update(readFileSync(join(d, f), "utf8").replace(/\r\n/g, "\n"));
   return h.digest("hex");
 }
 
@@ -167,7 +168,8 @@ function gateGraph() {
   if (!packageDirs().length) { console.log("  ✓ gate:graph — no packages yet (green-on-empty)"); return true; }
   const targets = ["core", "integrations", "clients", "sdks", "schemas", "tools"]
     .filter((d) => existsSync(join(ROOT, d)));
-  try { execFileSync("npx", ["depcruise", "--config", ".dependency-cruiser.cjs", "--no-progress", ...targets], { stdio: "pipe" }); }
+  // Invoke the installed JS entrypoint: npx is a .cmd shim on Windows, not an executable.
+  try { execFileSync(process.execPath, [join(ROOT, "node_modules/dependency-cruiser/bin/dependency-cruise.mjs"), "--config", ".dependency-cruiser.cjs", "--no-progress", ...targets], { stdio: "pipe" }); }
   catch (e) { return fail([`dependency-cruiser:\n${errText(e)}`]); }
   console.log("  ✓ gate:graph — acyclic + allowed-edges");
   return true;
@@ -821,6 +823,20 @@ function gateExecutionEnv() {
 // each carrier). Cross-language, var-indirected writes are not always statically attributable, so (c)
 // reports detected writers and hard-fails only on a clearly-attributable undeclared writer.
 // GREEN-ON-EMPTY before architecture.calm.json lands.
+function sourceMatches(re, filesOnly = false) {
+  try {
+    return execFileSync("git", ["-c", "core.quotepath=false", "grep", "--untracked", "--no-color", "--full-name",
+      filesOnly ? "-l" : "-n", "-E", "-e", re, "--",
+      "core/**/*.py", "core/**/*.ts", "core/**/*.tsx", "clients/**/*.py", "clients/**/*.ts", "clients/**/*.tsx",
+      ":(exclude)**/node_modules/**", ":(exclude)**/dist/**", ":(exclude)**/tests/**",
+      ":(exclude)**/eval/**", ":(exclude)**/*.test.*"], { cwd: ROOT, encoding: "utf8", stdio: "pipe" })
+      .split("\n").filter(Boolean);
+  } catch (e) {
+    if (e.status === 1) return []; // git grep's documented no-match result
+    throw e; // A broken scan must never silently disable the ownership check.
+  }
+}
+
 function gateDataflow() {
   const file = join(ROOT, "architecture.calm.json");
   if (!existsSync(file)) { console.log("  ✓ gate:dataflow — no architecture.calm.json yet (green-on-empty)"); return true; }
@@ -895,12 +911,7 @@ function gateDataflow() {
     .map((n) => ({ id: n["unique-id"], path: n.metadata.find((m) => m.path).path }))
     .sort((a, b) => b.path.length - a.path.length);
   const ownerOf = (f) => (paths.find((p) => f.startsWith(p.path)) || {}).id;
-  const grepFiles = (re) => {
-    try {
-      return execSync(`grep -rlE ${JSON.stringify(re)} --include=*.py --include=*.ts --include=*.tsx core clients 2>/dev/null | grep -vE 'node_modules|/dist/|\\.test\\.|/tests/|/eval/' || true`,
-        { cwd: ROOT, encoding: "utf8" }).split("\n").map((s) => s.trim()).filter(Boolean);
-    } catch { return []; }
-  };
+  const grepFiles = (re) => sourceMatches(re, true);
 
   // (b) render-only: a forbidden symbol must not be defined/used inside the node's own source.
   // Enforced with NO waiver — any render-only violation (reader re-deriving a producer's data) turns RED.
@@ -910,7 +921,7 @@ function gateDataflow() {
     for (const req of (rc.requirements || [])) for (const sym of (req.config?.["forbidden-symbols"] || [])) {
       const hits = grepFiles(sym).filter((f) => !np || f.startsWith(np));
       if (!hits.length) continue;
-      errs.push(`render-only: '${n["unique-id"]}' re-derives producer data — '${sym}' found in ${hits.map(rel).join(", ")}`);
+      errs.push(`render-only: '${n["unique-id"]}' re-derives producer data — '${sym}' found in ${hits.join(", ")}`);
     }
   }
 
@@ -920,10 +931,7 @@ function gateDataflow() {
   // literal undeclared writer, but never hard-fails (precise cross-language attribution is out of scope
   // for a static gate; (b) render-only is the enforcing check for reader re-derivation).
   const opRe = { xadd: "x[aA]dd", publish: "publish", "db-write": "session\\.add|INSERT INTO|\\.insert\\(" };
-  const grepLines = (re) => {
-    try { return execSync(`grep -rnE ${JSON.stringify(re)} --include=*.py --include=*.ts --include=*.tsx core clients 2>/dev/null | grep -vE 'node_modules|/dist/|\\.test\\.|/tests/|/eval/' || true`,
-      { cwd: ROOT, encoding: "utf8" }).split("\n").filter(Boolean); } catch { return []; }
-  };
+  const grepLines = (re) => sourceMatches(re);
   const shared = [], report = [], undeclared = [];
   for (const n of nodes) {
     const own = (n.controls || {}).ownership; if (!own) continue;
