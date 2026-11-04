@@ -37,6 +37,7 @@ flowchart LR
   workspace_human_documents[("Explicit private Markdown document edits")]
   speech_v1[("speech.v1 protocol")]
   speech_playback[("Ephemeral playback receipts")]
+  speech_room_v1[("speech-room.v1 protocol")]
   bot -->|write| segments_stream
   bot -->|write| tc_mutable
   meeting_api -.->|read| segments_stream

@@ -3,7 +3,7 @@
   "platform": "google_meet",
   "native_meeting_id": "vbo-yhad-njx",
   "operator_user_id": 7,
-  "participants": [7],
+  "participants": [7, 8],
   "documents": ["wiki/speech-pilot.md"],
   "include_transcript": true,
   "gateway_url": "http://127.0.0.1:18056",

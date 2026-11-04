@@ -66,6 +66,8 @@ def pilot():
     http = httpx.AsyncClient(transport=httpx.MockTransport(services.handle))
     app = create_app(room(), 'operator', 'test-stt-secret', http=http)
     with TestClient(app) as client:
+        client.headers['X-Tina-Speech-Epoch'] = app.state.coordinator.epoch
+        client.headers['X-Tina-Speech-Revision'] = '0'
         yield client, services
 
 
@@ -181,3 +183,50 @@ async def test_cancel_during_llm_discards_late_result():
         await asyncio.wait_for(turn.task, 2)
         assert turn.state == 'STOPPED'
         assert not any(r.url.path.endswith('/speak') for r in services.calls)
+
+
+def test_delayed_capture_request_after_release_needs_fresh_revision(pilot):
+    client, _ = pilot
+    headers = {'x-api-key': 'participant'}
+    identifier = str(uuid4())
+    path = '/turns/' + identifier
+    assert client.post(path, headers=headers).status_code == 201
+    client.delete(path, headers=headers)
+    # Receipt retries retain identity, but an old snapshot cannot start another turn.
+    assert client.post(path, headers=headers).json()['state'] == 'STOPPED'
+    next_path = '/turns/' + str(uuid4())
+    assert client.post(next_path, headers=headers).status_code == 409
+    status = client.get('/room', headers=headers).json()
+    assert client.post(next_path, headers=headers | {'X-Tina-Speech-Revision': str(status['revision'])}).status_code == 201
+
+
+
+def test_room_status_is_private_and_old_epoch_cannot_reserve_or_upload(pilot):
+    client, _ = pilot
+    assert client.get('/room').status_code == 401
+    assert client.get('/room', headers={'x-api-key': 'stranger'}).status_code == 403
+    headers = {'x-api-key': 'participant'}
+    status = client.get('/room', headers=headers).json()
+    assert set(status) == {'epoch', 'revision', 'busy'} and status['busy'] is False
+    identifier = str(uuid4()); path = '/turns/' + identifier
+    assert client.post(path, headers=headers).status_code == 201
+    assert client.get('/room', headers=headers).json()['busy'] is True
+    old = status['epoch']
+    coordinator = client.app.state.coordinator
+    coordinator.epoch = str(uuid4())  # simulate a new boot's protocol boundary
+    for method, suffix in [('POST', ''), ('PUT', '/audio'), ('GET', ''), ('DELETE', '')]:
+        assert client.request(method, path + suffix,
+            headers=headers | {'X-Tina-Speech-Epoch': old}).status_code == 409
+    assert coordinator.turns[identifier].digest is None
+
+
+
+def test_disconnected_capture_lease_expires_on_room_poll(pilot):
+    client, _ = pilot
+    headers = {'x-api-key': 'participant'}
+    identifier = str(uuid4())
+    client.post('/turns/' + identifier, headers=headers)
+    turn = client.app.state.coordinator.turns[identifier]
+    turn.created -= 36
+    assert client.get('/room', headers=headers).json()['busy'] is False
+    assert turn.state == 'FAILED' and turn.reason == 'capture_expired'

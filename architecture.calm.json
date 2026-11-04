@@ -1805,7 +1805,7 @@
    "unique-id": "speech-client",
    "node-type": "system",
    "name": "Local wake-word pilot",
-   "description": "Optional host speech CLI: per-microphone KWS, bounded pre-roll and Silero VAD question capture, explicit Start/Stop and participant-only credentials. Opt-in run/run-file sends bounded WAV to the single-room speech coordinator; ordinary listen/file remain local. Wake is activation, not authentication. Default TTS remains Truc Ly.",
+   "description": "Optional host speech CLI: per-microphone KWS, bounded pre-roll and Silero VAD question capture, explicit Start/Stop and participant-only credentials. Opt-in run/run-file sends bounded WAV to the single-room speech coordinator; ordinary listen/file remain local. Wake is activation, not authentication. Default TTS remains Truc Ly. Room-wide polling suppresses KWS/pre-roll while busy; stale status/boot changes disarm until explicit restart; idle requires 800 ms quiet.",
    "metadata": [
     {
      "path": "clients/speech"
@@ -1816,7 +1816,7 @@
    "unique-id": "speech-coordinator",
    "node-type": "service",
    "name": "Optional single-room speech coordinator",
-   "description": "Loopback pilot in clients/speech: authenticates enrolled participants through Gateway auth/me; server-held operator/STT keys; fixed approved meeting and documents; existing grounded Wiki ask and freshness checks; correlated Speak/Stop and terminal receipt polling. Volatile bounded turns, no stored audio/text; ambiguous playback stays disarmed.",
+   "description": "Loopback pilot in clients/speech: authenticates enrolled participants through Gateway auth/me; server-held operator/STT keys; fixed approved meeting and documents; existing grounded Wiki ask and freshness checks; correlated Speak/Stop and terminal receipt polling. Volatile bounded turns, no stored audio/text; ambiguous playback stays disarmed. One central capture grant per room; atomic revision rejects delayed losing wakes; boot epoch fences old requests. Single process only.",
    "metadata": [
     {
      "path": "clients/speech/tina_speech/coordinator.py"
@@ -1856,6 +1856,17 @@
      ]
     }
    }
+  },
+  {
+   "unique-id": "speech-room.v1",
+   "node-type": "data-asset",
+   "name": "speech-room.v1 protocol",
+   "description": "Core-owned authenticated room occupancy, capture revision and boot epoch handshake; speech.v1 playback shapes unchanged.",
+   "metadata": [
+    {
+     "path": "core/meetings/contracts/speech-room.v1"
+    }
+   ]
   }
  ],
  "relationships": [
@@ -1974,7 +1985,8 @@
       "diarization-worker",
       "tts-sidecar",
       "speech.v1",
-      "speech-playback"
+      "speech-playback",
+      "speech-room.v1"
      ]
     }
    }
@@ -4013,7 +4025,7 @@
     }
    },
    "protocol": "HTTP",
-   "description": "Participant-authenticated bounded WAV and turn status; no shared service secrets on clients."
+   "description": "Participant-authenticated bounded WAV and turn status; no shared service secrets on clients. Authenticated speech-room.v1 occupancy polling plus epoch/revision capture fencing; all hosts pause wake dispatch during a shared turn."
   },
   {
    "unique-id": "speech-coordinator-gateway",

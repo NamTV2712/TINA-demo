@@ -1,0 +1,17 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "$id": "urn:tina:schemas:speech-room.v1",
+ "title": "speech-room.v1",
+ "$defs": {
+  "RoomStatus": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": ["epoch", "revision", "busy"],
+   "properties": {
+    "epoch": {"type": "string", "format": "uuid"},
+    "revision": {"type": "integer", "minimum": 0, "maximum": 999999999999999},
+    "busy": {"type": "boolean"}
+   }
+  }
+ }
+}

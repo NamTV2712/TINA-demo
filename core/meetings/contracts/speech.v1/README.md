@@ -41,3 +41,6 @@ clients must not replay an ambiguous Speak automatically. ERROR/playback_unknown
 reserved until Stop is confirmed or an operator stops the bot and restarts/reconfigures the pilot.
 Question endpointing is client-owned; source approval, grounded claims and room credentials are
 coordinator-owned. All STT/agent/meeting calls use existing public HTTP seams.
+
+The multi-client pilot additionally requires the [speech-room.v1](../speech-room.v1/README.md)
+handshake and epoch/revision headers. This does not change the frozen playback or turn shapes.

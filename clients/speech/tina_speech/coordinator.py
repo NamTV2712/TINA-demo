@@ -8,10 +8,11 @@ import os
 from pathlib import Path, PurePosixPath
 import re
 import time
-from uuid import UUID
+from uuid import UUID, uuid4
 import wave
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 import httpx
 
 MAX_WAV = 800000
@@ -139,6 +140,8 @@ class Coordinator:
         self.turns = {}
         self.active = None
         self.lock = asyncio.Lock()
+        self.epoch = str(uuid4())
+        self.revision = 0
 
     async def gateway(self, method, path, *, key=None, **kwargs):
         response = await self.http.request(method, self.room.gateway_url.rstrip('/') + path,
@@ -176,24 +179,32 @@ class Coordinator:
         if any(path not in linked for path in self.room.documents):
             raise ValueError("Approved Wiki document is not linked to the configured meeting")
 
-    async def reserve(self, identifier, user_id):
+    def expire(self):
+        now = time.monotonic()
+        for key, turn in list(self.turns.items()):
+            if turn.state == 'CAPTURING' and now - turn.created > 35:
+                self.finish(turn, 'FAILED', 'capture_expired')
+            if turn.state in TERMINAL and now - turn.created > 600:
+                del self.turns[key]
+
+    async def room_status(self):
         async with self.lock:
-            now = time.monotonic()
-            for key, turn in list(self.turns.items()):
-                if turn.state == 'CAPTURING' and now - turn.created > 35:
-                    turn.state, turn.reason = 'FAILED', 'capture_expired'
-                    if self.active == key: self.active = None
-                if turn.state in TERMINAL and now - turn.created > 600:
-                    del self.turns[key]
+            self.expire()
+            return {'epoch': self.epoch, 'revision': self.revision, 'busy': self.active is not None}
+
+    async def reserve(self, identifier, user_id, revision=None):
+        async with self.lock:
+            self.expire()
             if identifier in self.turns:
                 return self.owned(identifier, user_id)
-            if self.active:
+            if self.active or revision is not None and revision != self.revision:
                 raise HTTPException(409, 'Room is busy or awaiting operator recovery')
             if len(self.turns) >= 256:
                 raise HTTPException(429, 'Turn receipt capacity reached; wait for expiry')
             turn = Turn(identifier, user_id)
             self.turns[identifier] = turn
             self.active = identifier
+            self.revision += 1
             return turn
 
     def owned(self, identifier, user_id):
@@ -304,15 +315,29 @@ def create_app(room, operator_key, stt_key='', http=None):
     async def participant(request):
         return await coordinator.identity(request.headers.get('x-api-key'))
 
+    @app.get('/room')
+    async def room_status(request: Request):
+        await participant(request)
+        return JSONResponse(await coordinator.room_status(), headers={'Cache-Control': 'no-store'})
+
+    def check_epoch(request):
+        if request.headers.get('x-tina-speech-epoch') != coordinator.epoch:
+            raise HTTPException(409, 'Coordinator epoch changed; restart the participant explicitly')
+
     @app.post('/turns/{request_id}', status_code=201)
     async def reserve(request_id: UUID, request: Request):
+        check_epoch(request)
         if request.headers.get('transfer-encoding') or request.headers.get('content-length') not in (None, '0'):
             raise HTTPException(422, 'Room and sources are operator-configured; no request body is accepted')
-        turn = await coordinator.reserve(str(request_id), await participant(request))
+        revision = request.headers.get('x-tina-speech-revision', '')
+        if not re.fullmatch(r'[0-9]{1,15}', revision):
+            raise HTTPException(422, 'A fresh room revision is required')
+        turn = await coordinator.reserve(str(request_id), await participant(request), int(revision))
         return turn.public()
 
     @app.put('/turns/{request_id}/audio', status_code=202)
     async def upload(request_id: UUID, request: Request):
+        check_epoch(request)
         turn = coordinator.owned(str(request_id), await participant(request))
         if request.headers.get('content-type', '').split(';')[0] != 'audio/wav':
             raise HTTPException(415, 'Expected audio/wav')
@@ -325,10 +350,12 @@ def create_app(room, operator_key, stt_key='', http=None):
 
     @app.get('/turns/{request_id}')
     async def state(request_id: UUID, request: Request):
+        check_epoch(request)
         return coordinator.owned(str(request_id), await participant(request)).public()
 
     @app.delete('/turns/{request_id}')
     async def cancel(request_id: UUID, request: Request):
+        check_epoch(request)
         turn = coordinator.owned(str(request_id), await participant(request))
         await coordinator.cancel(turn)
         return turn.public()

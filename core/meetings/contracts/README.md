@@ -7,3 +7,6 @@ validates goldens ≡ schema.
 
 `speech.v1` adds opt-in correlated playback receipts and the authorized single-room speech
 pilot; the frozen legacy `acts.v1` command shapes remain unchanged.
+
+`speech-room.v1` adds authenticated occupancy snapshots, atomic capture revisions and boot
+epoch fencing for multiple enrolled host clients. Speech playback shapes stay unchanged.
