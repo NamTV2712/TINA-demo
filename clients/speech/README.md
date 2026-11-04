@@ -1,5 +1,8 @@
 # Local wake-word pilot (speech phase 2)
 
+Phase 3's opt-in authorized voice-turn path is documented in [PHASE3.md](PHASE3.md).
+The local-only behavior below still applies to `listen` and `file`.
+
 This optional host client detects **Hey TINA** with Sherpa-ONNX on CPU. It emits local JSON
 diagnostics only. It does not contact STT, the agent, Gateway or a meeting, play audio, or save
 microphone recordings. TINA's shared TTS default remains **Trúc Ly**, speaking TINA as "ti na".

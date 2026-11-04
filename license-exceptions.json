@@ -6,7 +6,7 @@
       "license": "MPL-2.0",
       "reason": "Unmodified CA certificate bundle required transitively by the optional VieNeu SDK download/HTTP dependencies. MPL applies to the dependency files, not TINA source.",
       "disposition": "Retained as a separate Python package with upstream notices; no modifications or static linkage into TINA.",
-      "scope": "optional deploy/tts image only",
+      "scope": "optional deploy/tts image and clients/speech coordinator HTTP dependencies",
       "approved": "ADR-0004 Category B implementation record; subject to normal change review"
     },
     {

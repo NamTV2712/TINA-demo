@@ -2,6 +2,10 @@
 
 ## Optional local wake-word client
 
+Phase 3 adds the operator-downloaded Silero VAD model (MIT) and a host-only FastAPI/uvicorn/httpx
+coordinator. The VAD URL, size and SHA-256 are pinned with the KWS manifest. Certifi's unchanged
+MPL certificate bundle is covered by the scoped record in `license-exceptions.json`.
+
 `clients/speech` uses pinned Sherpa-ONNX 2.0.1 (including its core package), SentencePiece
 0.2.2 (Apache-2.0), sounddevice/PortAudio (MIT) and NumPy (BSD). The operator-downloaded
 GigaSpeech 3.3M KWS archive declares Apache-2.0 in its README, retained in the local cache.

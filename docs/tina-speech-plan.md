@@ -1,7 +1,19 @@
 # Wake-word + TTS implementation plan
 
 Status: phase 1 TTS sidecar and phase 2 local wake-word pilot implemented. Remote meeting
-audibility and human wake-word validation remain open. The meeting coordinator is not implemented.
+audibility and human wake-word validation remain open. Phase 3 has an experimental coordinator
+and participant turn controller; full live integration acceptance remains open.
+
+Phase 3 development checkpoint: coordinator, bounded Silero capture, participant client and
+core-owned speech.v1 playback receipts are implemented in the working branch. Focused tests
+passed: 36 client/coordinator, 17 Meeting API/legacy stop, 5 bot speech and 23 Gateway/manifest
+checks. Native KWS + Silero captured the synthetic question into a bounded WAV. Live STT ->
+LLM -> shared meeting playback has NOT been verified; new service images are not deployed.
+See `clients/speech/PHASE3.md`. Do not treat this checkpoint as the phase 3 acceptance gate.
+
+Resource constraint after the Windows virtual-memory incident: run builds/tests sequentially,
+limit Node heap to 2 GiB, and apply the operator's WSL resource cap before container integration
+builds. The default shared voice remains the approved Trúc Ly / "ti na".
 Branch: `feat/tina-speech`. Planning baseline: `6dfbbbf`; phase 1 started from `ab4a743`.
 
 ## Agreed outcome

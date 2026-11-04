@@ -1805,12 +1805,57 @@
    "unique-id": "speech-client",
    "node-type": "system",
    "name": "Local wake-word pilot",
-   "description": "Optional host-only clients/speech CLI: per-microphone Sherpa-ONNX English HEY TINA KWS on 16 kHz mono PCM, explicit device/Start/Stop, bounded callback queue and two-second in-memory pre-roll, cooldown and quiet re-arm. Downloads pinned model assets only on explicit setup; detection and WAV replay are offline. Emits content-free local diagnostics only; no STT, agent, Gateway or meeting requests. Question capture/VAD, coordinator enrollment and playback suppression are not implemented.",
+   "description": "Optional host speech CLI: per-microphone KWS, bounded pre-roll and Silero VAD question capture, explicit Start/Stop and participant-only credentials. Opt-in run/run-file sends bounded WAV to the single-room speech coordinator; ordinary listen/file remain local. Wake is activation, not authentication. Default TTS remains Truc Ly.",
    "metadata": [
     {
      "path": "clients/speech"
     }
    ]
+  },
+  {
+   "unique-id": "speech-coordinator",
+   "node-type": "service",
+   "name": "Optional single-room speech coordinator",
+   "description": "Loopback pilot in clients/speech: authenticates enrolled participants through Gateway auth/me; server-held operator/STT keys; fixed approved meeting and documents; existing grounded Wiki ask and freshness checks; correlated Speak/Stop and terminal receipt polling. Volatile bounded turns, no stored audio/text; ambiguous playback stays disarmed.",
+   "metadata": [
+    {
+     "path": "clients/speech/tina_speech/coordinator.py"
+    }
+   ]
+  },
+  {
+   "unique-id": "speech.v1",
+   "node-type": "data-asset",
+   "name": "speech.v1 protocol",
+   "description": "Core-owned correlated speech commands, playback receipts and authorized participant turn status. Legacy acts.v1 remains unchanged.",
+   "metadata": [
+    {
+     "path": "core/meetings/contracts/speech.v1"
+    }
+   ]
+  },
+  {
+   "unique-id": "speech-playback",
+   "node-type": "data-asset",
+   "name": "Ephemeral playback receipts",
+   "description": "Redis speech:playback:{meeting}:{command} (600s) and speech:active:{meeting} (200s), single writer meeting-api; CAS terminal states, session binding and cancellation tombstones.",
+   "controls": {
+    "ownership": {
+     "description": "Meeting API is the single writer of speech receipts and active reservations",
+     "requirements": [
+      {
+       "requirement-url": "urn:tina:calm:controls:single-writer",
+       "config": {
+        "writers": [
+         "meeting-api"
+        ],
+        "match": "speech:(playback|active):.*",
+        "op": "set"
+       }
+      }
+     ]
+    }
+   }
   }
  ],
  "relationships": [
@@ -1927,7 +1972,9 @@
       "stt-metrics.v1",
       "transcript-sync",
       "diarization-worker",
-      "tts-sidecar"
+      "tts-sidecar",
+      "speech.v1",
+      "speech-playback"
      ]
     }
    }
@@ -3952,6 +3999,80 @@
      "access": "call"
     }
    ]
+  },
+  {
+   "unique-id": "speech-client-coordinator",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "speech-client"
+     },
+     "destination": {
+      "node": "speech-coordinator"
+     }
+    }
+   },
+   "protocol": "HTTP",
+   "description": "Participant-authenticated bounded WAV and turn status; no shared service secrets on clients."
+  },
+  {
+   "unique-id": "speech-coordinator-gateway",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "speech-coordinator"
+     },
+     "destination": {
+      "node": "gateway"
+     }
+    }
+   },
+   "protocol": "HTTP",
+   "description": "Operator-scoped meeting/Wiki APIs and correlated Speak/Stop; participant auth/me."
+  },
+  {
+   "unique-id": "speech-coordinator-stt",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "speech-coordinator"
+     },
+     "destination": {
+      "node": "transcription"
+     }
+    }
+   },
+   "protocol": "HTTP",
+   "description": "Bounded consented question WAV including up to two seconds wake pre-roll; existing authenticated OpenAI-compatible STT."
+  },
+  {
+   "unique-id": "bot-speech-receipt",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "bot"
+     },
+     "destination": {
+      "node": "meeting-api"
+     }
+    }
+   },
+   "protocol": "HTTP",
+   "description": "Internal-secret-authenticated speech.v1 receipts bound to the recorded bot session."
+  },
+  {
+   "unique-id": "meeting-api-speech-state",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "meeting-api"
+     },
+     "destination": {
+      "node": "speech-playback"
+     }
+    }
+   },
+   "description": "Meeting API alone owns the ephemeral Redis playback state."
   }
  ],
  "flows": [

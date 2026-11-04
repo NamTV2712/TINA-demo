@@ -49,6 +49,7 @@ flowchart LR
   terminal["terminal"]
   dashboard["dashboard (deprecated)"]
   native_capture["TINA Capture"]
+  speech_coordinator["Optional single-room speech coordinator"]
   meeting_api -->|"write"| segments_table
   bot -->|"HTTPS"| transcription
   meeting_api -->|"JDBC"| postgres
@@ -95,3 +96,6 @@ flowchart LR
   desktop -->|"HTTP"| alignment_worker
   agent_api -->|"HTTP"| meeting_api
   bot -->|"HTTP"| tts_sidecar
+  speech_coordinator -->|"HTTP"| gateway
+  speech_coordinator -->|"HTTP"| transcription
+  bot -->|"HTTP"| meeting_api
