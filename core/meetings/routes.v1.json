@@ -64,6 +64,11 @@
     },
     {
       "method": "GET",
+      "path": "/bots/{platform}/{native_meeting_id}/speak/{command_id}",
+      "scopes": ["bot"]
+    },
+    {
+      "method": "GET",
       "path": "/meetings",
       "scopes": [
         "tx"

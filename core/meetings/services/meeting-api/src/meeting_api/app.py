@@ -273,7 +273,14 @@ def create_app(
     # The stop router also gets the runtime client so a stop can directly tear down a still-booting bot's
     # workload (the leave command alone is fire-and-forget — a booting bot may never receive it → orphan).
     app.include_router(build_stop_router(meeting_repo, command_publisher, runtime))
-    app.include_router(build_speak_router(meeting_repo, command_publisher))
+    from .lifecycle.speech_status import PlaybackStore
+    if hasattr(command_publisher, "pipeline"):
+        playback_redis = command_publisher
+    else:
+        from fakeredis.aioredis import FakeRedis
+        playback_redis = FakeRedis(decode_responses=True)
+    app.state.speech_playback = PlaybackStore(playback_redis)
+    app.include_router(build_speak_router(meeting_repo, command_publisher, app.state.speech_playback))
 
     # Resolve the shared recording storage before mounting the collector: completed-meeting erasure
     # uses this same port to delete objects before its transcript/JSONB finalization.

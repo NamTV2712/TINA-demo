@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import json
 import os
+import hmac
 from typing import Optional
+from uuid import UUID
 
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -11,11 +13,13 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from ..bot_spawn.ports import MeetingRepo
 from .stop import leave_command_channel
 from .stop_router import CommandPublisher, _SUPPORTED_PLATFORMS, _resolve_user_id
+from .speech_status import PlaybackStore, SpeechConflict, TERMINAL
 
 
 class SpeakRequest(BaseModel):
     text: str = Field(min_length=1, max_length=4000)
     voice: Optional[str] = Field(default=None, max_length=64)
+    command_id: Optional[UUID] = None
     model_config = ConfigDict(extra="forbid")
 
     @field_validator("text")
@@ -27,8 +31,24 @@ class SpeakRequest(BaseModel):
         return value
 
 
-def build_speak_router(repo: MeetingRepo, publisher: CommandPublisher) -> APIRouter:
+class PlaybackReport(BaseModel):
+    command_id: UUID
+    meeting_id: int = Field(gt=0)
+    session_uid: str = Field(min_length=1, max_length=128)
+    state: str = Field(pattern=r"^(started|completed|failed|stopped)$")
+    model_config = ConfigDict(extra="forbid")
+
+
+def build_speak_router(repo: MeetingRepo, publisher: CommandPublisher, playback: PlaybackStore) -> APIRouter:
     router = APIRouter()
+
+    async def operation(awaitable):
+        try:
+            return await awaitable
+        except SpeechConflict as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except Exception as exc:
+            raise HTTPException(503, "Speech state is unavailable") from exc
 
     async def publish(meeting: dict, command: dict) -> None:
         try:
@@ -65,6 +85,22 @@ def build_speak_router(repo: MeetingRepo, publisher: CommandPublisher) -> APIRou
         if not (meeting.get("data") or {}).get("voice_agent_enabled"):
             raise HTTPException(status_code=409, detail="Speak was not enabled when this bot started")
         command = {"action": "speak", "text": body.text, "voice": (body.voice or "").strip() or "auto"}
+        if body.command_id:
+            command_id = str(body.command_id)
+            sessions = await repo.list_sessions(meeting_id=meeting["id"])
+            if not sessions:
+                raise HTTPException(409, "Bot session is unavailable")
+            record, created = await operation(playback.begin(meeting["id"], command_id,
+                sessions[-1], body.text, command["voice"]))
+            if not created:
+                return {"accepted": True, **playback.public(record)}
+            command.update(action="speech_speak", command_id=command_id)
+            try:
+                await publish(meeting, command)
+            except HTTPException:
+                # Publication can be ambiguous: keep queued/room locked for explicit Stop.
+                raise
+            return {"accepted": True, **playback.public(record)}
         await publish(meeting, command)
         return {"accepted": True, "meeting_id": meeting["id"]}
 
@@ -72,13 +108,39 @@ def build_speak_router(repo: MeetingRepo, publisher: CommandPublisher) -> APIRou
     async def stop_speaking(
         platform: str,
         native_meeting_id: str,
+        command_id: Optional[UUID] = None,
         x_user_id: Optional[str] = Header(default=None),
     ):
         user_id = _resolve_user_id(x_user_id)
         meeting = await active_voice_bot(platform, native_meeting_id, user_id)
         if not (meeting.get("data") or {}).get("voice_agent_enabled"):
             raise HTTPException(status_code=409, detail="Speak was not enabled when this bot started")
+        if command_id:
+            sessions = await repo.list_sessions(meeting_id=meeting["id"])
+            if not sessions:
+                raise HTTPException(409, "Bot session is unavailable")
+            record = await operation(playback.cancel(meeting["id"], str(command_id), sessions[-1]))
+            if record["state"] not in TERMINAL:
+                await publish(meeting, {"action": "speech_stop", "command_id": str(command_id)})
+            return {"accepted": True, **playback.public(record)}
         await publish(meeting, {"action": "speak_stop"})
         return {"accepted": True, "meeting_id": meeting["id"]}
+
+    @router.get("/bots/{platform}/{native_meeting_id}/speak/{command_id}")
+    async def speech_state(platform: str, native_meeting_id: str, command_id: UUID,
+                           x_user_id: Optional[str] = Header(default=None)):
+        meeting = await active_voice_bot(platform, native_meeting_id, _resolve_user_id(x_user_id))
+        record = await operation(playback.get(meeting["id"], str(command_id)))
+        if not record:
+            raise HTTPException(404, "Unknown or expired speech command")
+        return playback.public(record)
+
+    @router.post("/bots/internal/callback/speech", include_in_schema=False)
+    async def speech_callback(body: PlaybackReport, x_internal_secret: Optional[str] = Header(default=None)):
+        expected = os.environ.get("INTERNAL_API_SECRET", "")
+        if not expected or not hmac.compare_digest((x_internal_secret or "").encode(), expected.encode()):
+            raise HTTPException(401, "Unauthorized")
+        return playback.public(await operation(playback.report(body.meeting_id, str(body.command_id),
+                                                               body.session_uid, body.state)))
 
     return router
