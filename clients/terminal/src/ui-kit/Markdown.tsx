@@ -31,7 +31,7 @@ function EntityCode({ code }: { code: string }) {
 function inline(text: string): ReactNode[] {
   const out: ReactNode[] = [];
   // split on inline code first; odd indices are code content
-  const codeParts = text.split(/(`[^`]+`)/g);
+  const codeParts = text.split(/((?<!\\)`(?:\\.|[^`])+?(?<!\\)`)/g);
   codeParts.forEach((seg, ci) => {
     if (seg.startsWith("`") && seg.endsWith("`") && seg.length >= 2) {
       const code = seg.slice(1, -1);
@@ -51,7 +51,7 @@ function inline(text: string): ReactNode[] {
 
 // bold / italic / links / wikilinks within a non-code segment
 function emphasis(text: string, key: string, out: ReactNode[]): void {
-  const re = /(\[\[[^\]]+\]\])|(\[[^\]]*\]\([^)]+\))|(\*\*[^*]+\*\*|__[^_]+__)|(\*[^*]+\*|_[^_]+_)/g;
+  const re = /(\[\[[^\]]+\]\])|(\[(?:\\.|[^\]\\])*\]\((?:\\.|[^)\\])+\))|(\*\*[^*]+\*\*|__[^_]+__)|(\*[^*]+\*|_[^_]+_)/g;
   let last = 0;
   let m: RegExpExecArray | null;
   let i = 0;
@@ -65,11 +65,12 @@ function emphasis(text: string, key: string, out: ReactNode[]): void {
     } else if (m[2]) {
       // [text](url) — workspace-internal (schemeless) hrefs navigate in place, resolving
       // relative paths against the linking doc; external links open a browser tab
-      const lm = tok.match(/^\[([^\]]*)\]\(([^)]+)\)$/)!;
+      const lm = tok.match(/^\[((?:\\.|[^\]\\])*)\]\(([^)]+)\)$/)!;
+      const title = lm[1].replace(/\\([\\`*{}\[\]()<>_!])/g, '$1') || lm[2];
       out.push(isInternalHref(lm[2])
-        ? <InternalLink key={`${key}-l${i}`} href={lm[2]}>{lm[1] || lm[2]}</InternalLink>
+        ? <InternalLink key={`${key}-l${i}`} href={lm[2]}>{title}</InternalLink>
         : <a key={`${key}-l${i}`} href={/^https?:/i.test(lm[2]) || lm[2].startsWith("#") ? lm[2] : undefined} target="_blank" rel="noreferrer noopener" style={{ color: "var(--blue)", textDecoration: "underline" }}>
-            {lm[1] || lm[2]}
+            {title}
           </a>,
       );
     } else if (m[3]) {

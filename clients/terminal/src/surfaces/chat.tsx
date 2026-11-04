@@ -892,11 +892,12 @@ export function Chat({ params = {}, variant = "rail" }: ChatProps) {
     });
     try {
       const result = await streamChatTurn(
-        { prompt: p, session: sessionForSend, active, context },
+        { prompt: p, session: sessionForSend, active, context, ...(opts.research ? { research: true } : {}) },
         {
           onStarting: () => {},  // visual is driven by onStatus (below); the stream still signals cold-start here
           onStatus: (phase) => setStatus(phase),
           onDelta: (text) => patchAgentTurn(key, agentId, (t) => ({ ...t, status: null, text: (t.text ?? "") + text })),
+          onReply: (text) => patchAgentTurn(key, agentId, (t) => ({ ...t, status: null, text })),
           onTool: (tool) => patchAgentTurn(key, agentId, (t) => ({ ...t, status: null, ops: [...t.ops, toolOp(tool)] })),
           onCommit: (sha) => patchAgentTurn(key, agentId, (t) => ({ ...t, commit: sha })),
           onRejected: () => patchAgentTurn(key, agentId, (t) => ({ ...t, status: null, rejected: "workspace.v1 violation — reverted" })),
@@ -1024,10 +1025,16 @@ export function Chat({ params = {}, variant = "rail" }: ChatProps) {
     const v = value.trim();
     const hasAttachments = attachments.length > 0;
     if ((!v && !hasAttachments) || busy || uploading) return;
+    setUploadError(null);
+    const research = /^\/research(?:\s|$)/i.test(v);
+    if (research && !v.slice('/research'.length).trim()) {
+      setUploadError('Nhập chủ đề sau /research, ví dụ: /research So sánh tài liệu repo với nguồn web.');
+      return;
+    }
     stickToBottomRef.current = true;  // sending re-attaches follow-the-stream
     window.setTimeout(() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight }), 0);
     if (!hasAttachments && isRoutineCommand(v)) { void send(v, routineCreationPrompt(v)); setValue(""); setMicRestore(null); return; }
-    if (!hasAttachments && v.startsWith("/")) { const sk = commands.querySkills(v)[0]; if (sk) { void commands.execute(sk.id, v); setValue(""); setMicRestore(null); return; } }
+    if (!hasAttachments && !research && v.startsWith("/")) { const sk = commands.querySkills(v)[0]; if (sk) { void commands.execute(sk.id, v); setValue(""); setMicRestore(null); return; } }
     let prompt = isRoutineCommand(v) ? routineCreationPrompt(v) : v;
     let displayText = v;
     let referenceSource = v;
@@ -1054,7 +1061,7 @@ export function Chat({ params = {}, variant = "rail" }: ChatProps) {
       onboardingArmedRef.current = false;
       prompt = ONBOARDING_GROUNDING + ONBOARDING_REPLY_SEP + prompt;
     }
-    void send(displayText, prompt, referenceSource);
+    void send(displayText, prompt, referenceSource, { research });
     setValue("");
     setMicRestore(null);
   };

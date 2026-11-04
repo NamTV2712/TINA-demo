@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import hmac
 import os
+import platform
 from pathlib import Path
 import shlex
 import shutil
@@ -11,9 +13,11 @@ import subprocess
 import sys
 import tempfile
 import time
+from urllib.parse import urlsplit
 
 HERE = Path(__file__).resolve().parent.parent
 ROOT = HERE.parent.parent
+CUDA_OVERLAY = str(HERE / "docker-compose.viegem-cuda.yml")
 SOURCE_ACTIONS = {"all", "build", "bot", "plan"}
 
 
@@ -30,6 +34,19 @@ def run(args, *, env=None, capture=False, check=True):
     return result
 
 
+def _dotenvx_key_file(path: Path, env: dict[str, str]) -> Path | None:
+    explicit = env.get("DOTENVX_KEY_FILE")
+    if explicit:
+        key_file = Path(explicit).expanduser()
+        if not key_file.is_absolute():
+            key_file = ROOT / key_file
+        if not key_file.is_file():
+            raise StackError("DOTENVX_KEY_FILE does not exist; no encrypted env values were read.")
+        return key_file
+    return next((candidate for candidate in (path.parent / ".env.keys", ROOT / ".env.keys")
+                 if candidate.is_file()), None)
+
+
 def _dotenvx_env_source(path: Path, env: dict[str, str]) -> tuple[Path, tempfile.TemporaryDirectory | None]:
     encrypted = any(
         line.partition("=")[2].strip().strip("\"'").startswith("encrypted:")
@@ -42,16 +59,7 @@ def _dotenvx_env_source(path: Path, env: dict[str, str]) -> tuple[Path, tempfile
     dotenvx = env.get("DOTENVX_BIN") or shutil.which("dotenvx")
     if not dotenvx:
         raise StackError("This env file is Dotenvx-encrypted; install dotenvx and provide its private key.")
-    explicit_key = env.get("DOTENVX_KEY_FILE")
-    explicit_path = Path(explicit_key).expanduser() if explicit_key else None
-    if explicit_path and not explicit_path.is_absolute():
-        explicit_path = ROOT / explicit_path
-    key_file = explicit_path if explicit_path else next(
-        (candidate for candidate in (path.parent / ".env.keys", ROOT / ".env.keys") if candidate.is_file()),
-        None,
-    )
-    if explicit_key and not key_file.is_file():
-        raise StackError("DOTENVX_KEY_FILE does not exist; no encrypted env values were read.")
+    key_file = _dotenvx_key_file(path, env)
     command = [dotenvx, "decrypt", "--stdout", "-f", str(path)]
     if key_file:
         command += ["-fk", str(key_file)]
@@ -76,6 +84,24 @@ def json_rows(text):
     return [json.loads(line) for line in text.splitlines() if line.strip()]
 
 
+def select_viegem_device(enabled, requested="auto"):
+    if not enabled:
+        return "disabled"
+    requested = requested.strip().lower()
+    if requested not in {"auto", "mps", "cuda", "cpu"}:
+        raise StackError("TINA_VIEGEM_DEVICE must be auto, mps, cuda, or cpu.")
+    system, machine = platform.system(), platform.machine()
+    if system == "Windows":
+        raise StackError("Run make all inside WSL2 on Windows with NVIDIA GPU support enabled in Docker Desktop.")
+    if requested == "auto":
+        requested = "mps" if system == "Darwin" else "cuda"
+    if requested == "mps" and (system != "Darwin" or machine != "arm64"):
+        raise StackError("Automatic MPS requires an Apple Silicon Mac; CPU is available only with explicit TINA_VIEGEM_DEVICE=cpu.")
+    if requested == "cuda" and system != "Linux":
+        raise StackError("Docker CUDA requires Linux/WSL2 and an accessible NVIDIA GPU.")
+    return requested
+
+
 class Stack:
     def __init__(self, action, *, env=None):
         self.env = dict(os.environ if env is None else env)
@@ -96,6 +122,25 @@ class Stack:
                 "--env-file", str(compose_env_file)]
         interpolation = run([*base, "config", "--environment"], env=self.env, capture=True)
         values = dict(line.split("=", 1) for line in interpolation.stdout.splitlines() if "=" in line)
+        try:
+            self.control_port = int(values.get("TINA_ASR_CONTROL_PORT") or "18007")
+        except ValueError:
+            raise StackError("TINA_ASR_CONTROL_PORT must be a valid TCP port") from None
+        if not 1024 <= self.control_port <= 65535:
+            raise StackError("TINA_ASR_CONTROL_PORT must be between 1024 and 65535")
+        if values.get("INTERNAL_API_SECRET"):
+            for backend in ("gipformer", "viegem"):
+                self.env[f"TINA_{backend.upper()}_DRAIN_KEY"] = hmac.new(
+                    values["INTERNAL_API_SECRET"].encode(), f"tina-asr-drain:v1:{backend}".encode(), "sha256").hexdigest()
+        self.viegem_device = select_viegem_device(bool(values.get("TINA_VIEGEM_TOKEN")),
+                                                  values.get("TINA_VIEGEM_DEVICE") or "auto")
+        self._cuda_verified = False
+        profiles = [p.strip() for p in values.get("COMPOSE_PROFILES", "").split(",") if p.strip()]
+        if self.viegem_device == "mps":
+            profiles = [p for p in profiles if p != "viegem"]
+        elif self.viegem_device in {"cuda", "cpu"} and "viegem" not in profiles:
+            profiles.append("viegem")
+        self.env["COMPOSE_PROFILES"] = ",".join(profiles)
         # Global Docker context may change while a long build runs. Pin it once,
         # including Buildx, so builds, image checks and activation use one daemon.
         if not self.env.get("DOCKER_CONTEXT") and not self.env.get("DOCKER_HOST"):
@@ -111,7 +156,7 @@ class Stack:
             base = ["docker", "--context=" + self.context, *base[1:]]
         # Explicit --profile replaces COMPOSE_PROFILES in some Compose versions.
         # Carry selected profiles explicitly before adding build-only for config inspection.
-        for profile in values.get("COMPOSE_PROFILES", "").split(","):
+        for profile in profiles:
             if profile.strip() and profile.strip() != "build-only":
                 base += ["--profile", profile.strip()]
         separator = values.get("COMPOSE_PATH_SEPARATOR") or os.pathsep
@@ -121,7 +166,10 @@ class Stack:
             files = ["docker-compose.yml"]
             if (HERE / "docker-compose.override.yml").exists():
                 files.append("docker-compose.override.yml")
-        self.files = [str((HERE / file).resolve()) for file in files]
+        self.files = [str((HERE / file).resolve()) for file in files
+                      if str((HERE / file).resolve()) != CUDA_OVERLAY]
+        if self.viegem_device == "cuda":
+            self.files.append(CUDA_OVERLAY)
         # Pin the selected chain, including its project directory, on every subsequent command.
         self.base = base
         for file in self.files:
@@ -163,11 +211,24 @@ class Stack:
         if not ids:
             return
         containers = json.loads(run(["docker", "inspect", *ids], env=self.env, capture=True).stdout)
+        # Runtime workers share the project label but are not created by Compose.
+        containers = [item for item in containers if not (
+            item["Config"]["Labels"].get("com.docker.compose.service") == "agent-worker"
+            and not item["Config"]["Labels"].get("com.docker.compose.project.config_files"))]
+        if not containers:
+            return
+        if self.viegem_device == "mps":
+            for item in containers:
+                labels = item["Config"]["Labels"]
+                if item.get("State", {}).get("Running") and labels.get("com.docker.compose.service") == "viegem":
+                    owner = labels.get("com.docker.compose.project.config_files", "").split(",")[0]
+                    if not owner or str(Path(owner).resolve()) != self.files[0]:
+                        raise StackError("The running VieGem container belongs to another checkout; automatic MPS migration did not stop it.")
         chains = {tuple(str(Path(file).resolve()) for file in
                         item["Config"]["Labels"].get("com.docker.compose.project.config_files", "").split(",")
-                        if file)
+                        if file and str(Path(file).resolve()) != CUDA_OVERLAY)
                   for item in containers}
-        if chains != {tuple(self.files)} and self.env.get("ALLOW_CONFIG_CHANGE") != "1":
+        if chains != {tuple(file for file in self.files if file != CUDA_OVERLAY)} and self.env.get("ALLOW_CONFIG_CHANGE") != "1":
             raise StackError(
                 "Selected Compose files differ from the existing deployment. Preserve its override "
                 "chain with COMPOSE_FILE, or set ALLOW_CONFIG_CHANGE=1 for an intentional configuration "
@@ -175,6 +236,8 @@ class Stack:
         excluded = {item["Config"]["Labels"].get("com.docker.compose.service") for item in containers
                     if item.get("State", {}).get("Running")}
         excluded -= set(self.services) | {"agent-worker", None}
+        if self.viegem_device == "mps":
+            excluded -= {"viegem", "viegem-models"}
         if excluded and self.env.get("ALLOW_CONFIG_CHANGE") != "1":
             raise StackError("Running services excluded by selected profiles: " + ", ".join(sorted(excluded))
                              + ". Preserve COMPOSE_PROFILES or explicitly set ALLOW_CONFIG_CHANGE=1.")
@@ -228,12 +291,72 @@ class Stack:
 
     def build(self):
         # Build-only workers and ALL enabled service images precede any up/recreate.
+        if self.viegem_device == "cuda":
+            probe = run(["docker", "run", "--rm", "--gpus", "all", "--entrypoint", "nvidia-smi",
+                         "python:3.11-slim", "-L"], env=self.env, capture=True, check=False)
+            if probe.returncode or "GPU" not in probe.stdout:
+                raise StackError("Docker cannot access an NVIDIA GPU. Check the Windows NVIDIA driver, WSL2 and Docker GPU support; no CPU fallback was used.")
+        self.native_viegem("prepare")
         self.build_bot()
         names = [name for name, spec in self.services.items() if spec.get("build")]
         self.compose("build", *names, "agent-worker")
         # Fresh hosts also need registry-provided infrastructure images before up.
         self.compose("pull", "--ignore-buildable")
         self.check_images()
+        self.verify_viegem_cuda()
+        for service in ("gipformer-models", "viegem-models"):
+            if service in self.services:
+                self.compose("run", "--rm", "--no-deps", service)
+
+    def verify_viegem_cuda(self):
+        if self.viegem_device != "cuda" or self._cuda_verified:
+            return
+        code = ("import torch; assert torch.cuda.is_available(), 'CUDA unavailable'; "
+                "x=torch.ones((2,2),device='cuda'); assert (x@x).sum().item()==8; torch.cuda.synchronize()")
+        probe = run(["docker", "run", "--rm", "--gpus", "all", "--entrypoint", "python",
+                     self.services["viegem"]["image"], "-c", code], env=self.env, capture=True, check=False)
+        if probe.returncode:
+            raise StackError("The pinned VieGem CUDA image could not compute on the GPU; check GPU/driver compatibility. No CPU fallback was used.")
+        self._cuda_verified = True
+
+    def native_viegem(self, action):
+        identity = self.services["admin-api"].get("environment", {})
+        token = identity.get("TINA_VIEGEM_TOKEN")
+        container = self.viegem_device in {"cuda", "cpu"}
+        if not token:
+            if "viegem" in self.services:
+                raise StackError("The viegem profile requires TINA_VIEGEM_TOKEN in the selected deployment env.")
+            return
+        if container and action in ("prepare", "start"):
+            return
+        if not container and (platform.system() != "Darwin" or platform.machine() != "arm64"):
+            if action == "prepare":
+                print("VieGem: native auto-start requires Mac Apple Silicon; external workers remain separately managed.")
+            return
+        key_file = _dotenvx_key_file(self.env_file, self.env)
+        if not key_file:
+            raise StackError("Automatic VieGem startup requires a private .env.keys file.")
+        endpoint = "http://host.docker.internal:18005"
+        if container:
+            endpoint = f"http://host.docker.internal:{urlsplit(self.endpoint('viegem', 8000)).port}"
+        env = dict(self.env, TINA_VIEGEM_ENV_FILE=str(self.env_file.resolve()),
+                   TINA_VIEGEM_KEYS_FILE=str(key_file.resolve()), TINA_VIEGEM_TOKEN=token,
+                   TINA_VIEGEM_ADMIN_URL=self.endpoint("admin-api", 8001),
+                   TINA_VIEGEM_INTERNAL_SECRET=identity.get("INTERNAL_API_SECRET", ""),
+                   TINA_VIEGEM_URL=endpoint)
+        if action == "register":
+            # Probe from Docker before selecting this host endpoint in a fresh registry.
+            code = '''import os, json, urllib.request
+from admin_api.config_preflight import audio_probe_body
+kind, body = audio_probe_body("5CD-AI/VieGem-ASR")
+req = urllib.request.Request(ENDPOINT + "/v1/audio/transcriptions", data=body,
+    headers={"Content-Type":kind,"Authorization":"Bearer "+os.environ["TINA_VIEGEM_TOKEN"]})
+with urllib.request.urlopen(req, timeout=20) as response:
+    assert response.status == 200 and isinstance(json.load(response).get("text"), str)
+'''
+            code = code.replace("ENDPOINT", repr(endpoint))
+            self.compose("exec", "-T", "admin-api", "python", "-c", code, capture=True)
+        run([sys.executable, str(HERE / "bin/native_viegem.py"), action], env=env)
 
     def readiness(self, services=None):
         rows = json_rows(self.compose("ps", "-a", "--format", "json", capture=True).stdout)
@@ -290,13 +413,18 @@ class Stack:
         state = "endpoint configured" if stt.get("TRANSCRIPTION_SERVICE_URL") else "no deployment endpoint"
         print(f"STT: {state}; effective user/global backends must be tested in Settings → Models.")
         print("Agent: user model/subscription credentials are checked in Settings → Models.")
-        print("Host services: Desktop, native Capture, extension, ASR, diarization and alignment are managed separately.")
+        print("Host services: Desktop, native Capture, extension, diarization and alignment are managed separately.")
+        print(f"VieGem: {self.viegem_device}; auto uses native MPS on Apple Silicon and verified Docker CUDA on Linux/WSL2. KenLM/FSMN stay on CPU.")
 
     def plan_data(self):
         self.validate_bindings()
         return {"project": self.project, "docker_context": self.context,
                           "env_file": str(self.env_file),
                           "compose_files": self.files, "services": list(self.services),
+                          "viegem_device": self.viegem_device,
+                          "native_viegem": bool(self.services["admin-api"].get("environment", {}).get("TINA_VIEGEM_TOKEN")
+                                                and "viegem" not in self.services and platform.system() == "Darwin" and platform.machine() == "arm64"),
+                          "container_viegem": "viegem" in self.services,
                           "images": self.images(),
                           "volumes": {key: value.get("name") for key, value in self.config.get("volumes", {}).items()},
                           "order": ["bootstrap", "preflight", "build bot/services/worker",
@@ -308,9 +436,31 @@ class Stack:
         self.capabilities()
 
     def activate(self):
+        self.guard_existing_config()
+        self.verify_viegem_cuda()
+        if self.viegem_device == "mps":
+            # This project may still have the old CPU worker bound to the native port.
+            self.compose("--profile", "viegem", "stop", "viegem", "viegem-models", capture=True)
+        elif self.viegem_device == "cpu" and platform.system() == "Darwin":
+            self.native_viegem("stop")
+        try:
+            self.native_viegem("start")
+        except StackError:
+            if self.viegem_device == "mps":
+                self.compose("--profile", "viegem", "start", "viegem", capture=True, check=False)
+            raise
         self.compose("up", "-d", "--no-build", "--pull", "never", "--wait",
                      "--wait-timeout", self.env.get("WAIT_TIMEOUT", "180"))
         self.readiness()
+        self.native_viegem("register")
+        if ("gipformer" in self.services or self.viegem_device != "disabled") and self.services["admin-api"].get("environment", {}).get("INTERNAL_API_SECRET"):
+            from asr_control import install
+            install(self)
+
+    def stop_asr_control(self):
+        if self.services["admin-api"].get("environment", {}).get("INTERNAL_API_SECRET"):
+            from asr_control import shutdown
+            shutdown(self)
 
     def access(self):
         key = self.provision_key()
@@ -387,7 +537,10 @@ def main():
         stack.guard_existing_config()
         if action == "destroy" and stack.env.get("DESTROY") != "yes":
             raise StackError("Refusing to delete volumes. Explicitly set DESTROY=yes.")
+        stack.stop_asr_control()
         stack.compose("down", *(["-v"] if action == "destroy" else []), "--remove-orphans")
+        if stack.viegem_device == "mps":
+            stack.native_viegem("stop")
     elif action in {"ps", "logs", "compose"}:
         args = {"ps": ["ps"], "logs": ["logs", "-f"]}.get(action, sys.argv[2:])
         if action == "compose" and args and args[0] in {"up", "down", "build", "run"}:

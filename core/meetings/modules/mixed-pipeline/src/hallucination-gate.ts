@@ -100,9 +100,8 @@ export function teamsWindowHallucinationRule(text: string): HallucinationRule | 
   return null;
 }
 
-/** Which rule condemns this text, or null to publish it. Deliberately NOT included: the gmeet
- *  filter's "single word under 10 chars" rule — on the m24 tape that eats "Yeah.", "Yep.",
- *  "Right." and the rest of a real meeting's backchannel. */
+/** Which rule condemns this text, or null to publish it. Short replies remain valid;
+ *  the m24 tape includes genuine "Yeah.", "Yep." and "Right." backchannels. */
 export function hallucinationRule(text: string): HallucinationRule | null {
   if (typeof process !== 'undefined' && process.env?.TINA_MIXED_HALLUCINATION_GATE === 'off') return null;
   const trimmed = (text ?? '').trim();

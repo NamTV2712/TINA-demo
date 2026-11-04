@@ -21,10 +21,12 @@ export function canSaveModelPrefs(values: Record<string, string>): boolean {
 }
 
 export type TranscriptionPrefs = {
+  runtime_enabled?: boolean;
+  revision?: number;
   effective?: { backend: string; label: string; model: string | null; source: "user" | "platform" | "environment" };
-  backend?: "default" | "apple" | "nvidia" | "funasr" | "sherpa" | "custom" | null;
-  default_backend?: "deployment" | "apple" | "nvidia" | "funasr" | "sherpa";
-  available_backends?: Array<"default" | "apple" | "nvidia" | "funasr" | "sherpa" | "custom">;
+  backend?: "default" | "apple" | "nvidia" | "funasr" | "sherpa" | "gipformer" | "viegem" | "custom" | null;
+  default_backend?: "deployment" | "apple" | "nvidia" | "funasr" | "sherpa" | "gipformer" | "viegem";
+  available_backends?: Array<"default" | "apple" | "nvidia" | "funasr" | "sherpa" | "gipformer" | "viegem" | "custom">;
   url?: string | null;
   token_set?: boolean;
   token?: string | null; // masked on read — write-only in the clear
@@ -61,6 +63,22 @@ export async function setTranscriptionPrefs(update: { backend?: string; url?: st
   return jsonOrThrow(await fetch("/api/user/transcription", {
     method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(update),
   }));
+}
+
+export type AsrRuntime = {
+  instance: string;
+  account: { backend: "gipformer" | "viegem" | null; enabled: boolean; revision: number };
+  counts: Record<"gipformer" | "viegem", number>;
+  workers: Record<"gipformer" | "viegem", { running: boolean; ready: boolean; device: string; draining?: boolean }>;
+  operation: { backend: string; phase: string } | null;
+  last_error?: string | null;
+};
+export async function getAsrRuntime(): Promise<AsrRuntime> {
+  return jsonOrThrow(await fetch("/api/transcription/runtime", { cache: "no-store" }));
+}
+export async function setAsrRuntime(backend: "gipformer" | "viegem", enabled: boolean, revision: number): Promise<AsrRuntime> {
+  return jsonOrThrow(await fetch("/api/transcription/runtime", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ backend, enabled, revision }) }));
 }
 
 /** The admin-writable platform-settings keys: the two config domains + the first-run wizard's

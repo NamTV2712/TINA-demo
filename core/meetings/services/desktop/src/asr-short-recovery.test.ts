@@ -10,7 +10,7 @@ const server=createServer(async(req,res)=>{for await(const _ of req){}res.setHea
 await new Promise<void>(r=>server.listen(0,'127.0.0.1',r));
 const url=`http://127.0.0.1:${(server.address() as any).port}`,epoch=1800000000000;
 try{
- assert.equal(isHallucination('Insane.'),true,'the live Gmeet default is unchanged; batch recovery selects its own policy');
+ assert.equal(isHallucination('Insane.'),false,'short one-word speech is retained by the shared live/recovery filter');
  for(const [platform,text,expected,lowConfidence] of [
   ['zoom','Insane.',true,false],['teams','Yeah.',true,false],['zoom','Vâng.',true,false],
   ['google_meet','Insane.',true,false],['zoom','Thanks for watching!',false,false],

@@ -62,6 +62,34 @@ The Runtime spawns the source-built bot and agent-worker images on demand; they 
 long-running Compose services. Readiness distinguishes healthy services, running workers without
 healthchecks, and completed initialization jobs.
 
+## ASR devices and automatic GPU selection
+
+With a configured `TINA_VIEGEM_TOKEN`, the default `TINA_VIEGEM_DEVICE=auto` resolves to native
+MPS on Apple Silicon or Docker CUDA on Linux/Windows WSL2. `make plan` reports the candidate
+`viegem_device` without allocating GPU resources. Unsupported hosts and failed GPU checks produce
+an error; CPU requires explicit `TINA_VIEGEM_DEVICE=cpu`. Only the acoustic model uses the GPU:
+FSMN-VAD and KenLM remain on CPU.
+
+Mac setup prepares native Python 3.11 and hash-verified assets, then verifies a real MPS operation
+before Docker application activation. It stops only the selected project's old VieGem CPU service
+before starting the owned LaunchAgent. Native startup failure reports an error and attempts to
+restart the old CPU container, without marking the requested MPS deployment successful.
+`make down` also removes/stops the owned native LaunchAgent and keeps cached model files.
+
+CUDA setup automatically appends `docker-compose.viegem-cuda.yml`, builds pinned `cu130` PyTorch
+wheels, reserves one NVIDIA GPU only for inference, and tests driver access plus an actual CUDA
+operation before changing application containers. Windows uses WSL2 and Docker Desktop GPU
+integration; native Windows Python is unsupported. NVIDIA driver installation is not automated.
+The CUDA configuration/tests do not substitute for validation on a real NVIDIA machine.
+
+Gipformer's `asr` profile has its own token-free model-install job independent of VieGem/device.
+Docker VieGem uses a separate job; native MPS prepares the same pinned cache on the host.
+Inference mounts cached weights read-only and receives tokens from the selected dotenvx env,
+without mounting private keys. The shared Mac/Desktop endpoint stays at host port 18005;
+Docker engines must provide host-gateway reachability for that published endpoint.
+Only a fresh transcription registry defaults to VieGem; existing ASR preferences are preserved.
+Enabled account preferences decide which workers remain running; no account can stop another account's ASR.
+
 ## Usage
 
 The same operations are available as `tina` CLI/TUI after `make cli-install` from the repo root.
@@ -181,3 +209,25 @@ Expected / Actual / Verdict; a red stage names where the journey broke and fails
 With the mock bot as `BROWSER_IMAGE` (`mock-bot:dev`) the journey is a deterministic green,
 transcript included; with the real bot it drives a dead synthetic meeting to a truthful named
 `join_failure`. See `deploy/compose/probe.sh` (a wrapper over `scripts/probe/journey.sh`).
+
+## ASR start/stop by account
+
+Settings → Models → Transcription now controls the managed Gipformer and VieGem workers.
+Selecting a managed model starts it and verifies authenticated audio,
+then updates only the signed-in account. Turning the account switch off disables new transcription for
+that account. It does not stop another account's worker or overwrite their preference.
+
+A worker with no enabled account demand is retired after ten idle seconds, only after all
+meeting bots/local Desktop captures have ended and its in-flight requests have drained. The UI
+shows physical worker state separately from the account's enabled state. If another account
+still selects the old model, both workers stay running. Changing a setting never transfers an
+already-running capture to another model. Keep all capture on this managed host; remote unmanaged
+captures must remain operator-managed because their session lifetime is not observable here.
+
+`make all` installs an authenticated host controller on loopback port 18007 (override with
+`TINA_ASR_CONTROL_PORT`), passed to Terminal as `TINA_ASR_CONTROL_URL`. The controller receives
+only known backend names and verified account IDs; no Docker socket or command execution API is
+exposed to the browser. Private keys remain on the host and ASR tokens never reach the UI.
+Identity stores versioned account preferences; the controller serializes lifecycle changes and
+reconciles them every two seconds. `make down` stops the controller first. WSL2 restores its
+detached controller with `make all` after a reboot; Mac uses an owned per-deployment LaunchAgent.

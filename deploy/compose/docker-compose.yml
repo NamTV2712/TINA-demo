@@ -130,6 +130,10 @@ services:
       # the admin surface answers 500 rather than accepting a secret everybody has.
       - ADMIN_API_TOKEN=${ADMIN_TOKEN:-}
       - INTERNAL_API_SECRET=${INTERNAL_API_SECRET}
+      # Decrypted at startup by stack.py; never copied into platform_settings.
+      - TINA_VIEGEM_TOKEN=${TINA_VIEGEM_TOKEN:-}
+      - TINA_GIPFORMER_TOKEN=${TRANSCRIPTION_SERVICE_TOKEN:-}
+      - TINA_GIPFORMER_URL=http://host.docker.internal:${GIPFORMER_HOST_PORT:-18002}
       - LOG_LEVEL=${LOG_LEVEL:-info}
       # ── the publish edge (config.v1 class `publish-edge`) ──────────────────────────────────
       # Identity hands `onboarding.completed` to flows here. Same variable, same default-empty
@@ -476,6 +480,17 @@ services:
     restart: unless-stopped
 
   # Gipformer 1.5 + FSMN-VAD, CPU-only. Model assets stay in the existing pinned host directory.
+  gipformer-models:
+    profiles: ["asr"]
+    build:
+      context: ../..
+      dockerfile: deploy/transcription/gipformer/Dockerfile
+    image: tina/v012-gipformer:${IMAGE_TAG:-dev}
+    entrypoint: ["python", "/app/gipformer/install-models.py", "--directory", "/app/models/gipformer-fsmn"]
+    volumes:
+      - ../transcription/models/gipformer-fsmn:/app/models/gipformer-fsmn
+    networks: [tina]
+
   gipformer:
     profiles: ["asr"]
     build:
@@ -487,6 +502,7 @@ services:
       - TINA_GIPFORMER_PORT=8000
       - TINA_GIPFORMER_MODEL_DIR=/app/models/gipformer-fsmn
       - TINA_GIPFORMER_TOKEN=${TRANSCRIPTION_SERVICE_TOKEN:-}
+      - TINA_GIPFORMER_DRAIN_KEY=${TINA_GIPFORMER_DRAIN_KEY:-}
     ports:
       - "127.0.0.1:${GIPFORMER_HOST_PORT:-18002}:8000"
     volumes:
@@ -497,6 +513,53 @@ services:
       timeout: 5s
       retries: 5
       start_period: 60s
+    init: true
+    restart: unless-stopped
+    depends_on:
+      gipformer-models:
+        condition: service_completed_successfully
+    networks: [tina]
+
+  viegem-models:
+    profiles: ["viegem"]
+    build:
+      context: ../..
+      dockerfile: deploy/transcription/viegem/Dockerfile
+    image: tina/v012-viegem:${IMAGE_TAG:-dev}
+    entrypoint: ["python", "/app/viegem/install-models.py", "--directory", "/app/models/viegem-fsmn"]
+    volumes:
+      - ../transcription/models/viegem-fsmn:/app/models/viegem-fsmn
+    networks: [tina]
+
+  viegem:
+    profiles: ["viegem"]
+    build:
+      context: ../..
+      dockerfile: deploy/transcription/viegem/Dockerfile
+    image: tina/v012-viegem:${IMAGE_TAG:-dev}
+    environment:
+      - TINA_VIEGEM_HOST=0.0.0.0
+      - TINA_VIEGEM_PORT=8000
+      - TINA_VIEGEM_DEVICE=cpu
+      - TINA_VIEGEM_DRAIN_KEY=${TINA_VIEGEM_DRAIN_KEY:-}
+      - TINA_VIEGEM_MODEL_DIR=/app/models/viegem-fsmn
+      - TINA_VIEGEM_TOKEN=${TINA_VIEGEM_TOKEN:-}
+      - HF_HUB_OFFLINE=1
+      - TRANSFORMERS_OFFLINE=1
+      - TOKENIZERS_PARALLELISM=false
+    ports:
+      - "127.0.0.1:${VIEGEM_HOST_PORT:-18005}:8000"
+    volumes:
+      - ../transcription/models/viegem-fsmn:/app/models/viegem-fsmn:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+    depends_on:
+      viegem-models:
+        condition: service_completed_successfully
     init: true
     restart: unless-stopped
     networks: [tina]
@@ -1019,6 +1082,7 @@ services:
       # every service that REFUSES it at boot; these two lines kept it, so an unconfigured stack
       # still PRESENTED the published literal as internal-tier authority. Unset is unset (A19).
       - TINA_INTERNAL_API_SECRET=${INTERNAL_API_SECRET:-}
+      - TINA_ASR_CONTROL_URL=http://host.docker.internal:${TINA_ASR_CONTROL_PORT:-18007}
       # Declared self-hosted Jitsi hostnames — served to the client link parser
       # (/api/meeting/jitsi-hosts) so pasted links on these hosts are recognized in the UI,
       # matching meeting-api's and mcp's parsers (same setting).

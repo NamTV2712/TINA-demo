@@ -56,7 +56,9 @@ def apply_proposal(data, job, sid, correction):
 async def selected_backend(user):
     from ..bot_spawn.service import _fetch_bot_context, _transcription_from_context
     selected = _transcription_from_context(await _fetch_bot_context(user))
-    if selected.get("backend") in ("apple", "nvidia", "funasr", "sherpa", "custom") and not selected.get("url"):
+    if selected.get("disabled"):
+        raise ValueError("Transcription is stopped for this account; start it in Settings")
+    if selected.get("backend") in ("apple", "nvidia", "funasr", "sherpa", "gipformer", "viegem", "custom") and not selected.get("url"):
         raise ValueError("Selected transcription backend is not configured")
     if selected.get("url"):
         return {"url": selected["url"], "token": selected.get("token") or "", "model": selected.get("model") or "whisper-1", "label": selected.get("backend") or "custom"}

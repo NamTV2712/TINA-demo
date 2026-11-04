@@ -53,6 +53,7 @@ class Docker:
         self.fail_build = self.fail_up = self.fail_access = False
         self.missing = set()
         self.context = "fixture-docker"
+        self.gpu_driver_ok = self.gpu_compute_ok = True
 
     def __call__(self, args, *, env=None, capture=False, check=True):
         args = list(args)
@@ -62,7 +63,13 @@ class Docker:
         code, out = 0, ""
         if args[:2] == ["docker", "compose"]:
             if "config" in args:
-                out = "" if "--environment" in args else json.dumps(self.config)
+                if "--environment" in args:
+                    values = {k: v for k, v in self.config["services"]["admin-api"]["environment"].items()
+                              if k == "TINA_VIEGEM_TOKEN"}
+                    values.update({k: (env or {})[k] for k in ("TINA_VIEGEM_DEVICE", "COMPOSE_PROFILES") if k in (env or {})})
+                    out = "\n".join(f"{k}={v}" for k, v in values.items())
+                else:
+                    out = json.dumps(self.config)
             elif "build" in args:
                 code = int(self.fail_build)
             elif "up" in args:
@@ -71,6 +78,10 @@ class Docker:
                 out = json.dumps(self.rows)
         elif args[:2] == ["docker", "version"]:
             out = "27.0.0"
+        elif args[:2] == ["docker", "run"] and "nvidia-smi" in args:
+            code, out = int(not self.gpu_driver_ok), "GPU 0: fixture"
+        elif args[:2] == ["docker", "run"] and "--gpus" in args:
+            code = int(not self.gpu_compute_ok)
         elif args[:3] == ["docker", "context", "show"]:
             out = self.context
         elif args[:2] == ["docker", "ps"]:
@@ -126,6 +137,141 @@ class EntryPointTest(unittest.TestCase):
             self.invoke("all")
         self.assertFalse(any(args[0].endswith("/provision-token") for args, _ in self.docker.calls))
 
+    def test_native_viegem_prepares_before_build_and_registers_before_access(self):
+        self.docker.config["services"]["admin-api"]["environment"]["TINA_VIEGEM_TOKEN"] = "fixture-token" * 4
+        with patch.object(stack.platform, "system", return_value="Darwin"), \
+             patch.object(stack.platform, "machine", return_value="arm64"), \
+             patch.object(stack, "_dotenvx_key_file", return_value=Path("/private/fixture.keys")):
+            self.invoke("all")
+        calls = [args for args, _ in self.docker.calls]
+        native = {args[-1]: i for i, args in enumerate(calls) if any(str(a).endswith("native_viegem.py") for a in args)}
+        build = next(i for i, args in enumerate(calls) if "build" in args and "agent-worker" in args)
+        up = next(i for i, args in enumerate(calls) if "up" in args)
+        access = next(i for i, args in enumerate(calls) if args[0].endswith("/provision-token"))
+        self.assertLess(native["prepare"], build)
+        self.assertLess(build, native["start"])
+        self.assertLess(native["start"], up)
+        self.assertLess(up, native["register"])
+        self.assertLess(native["register"], access)
+        self.assertFalse(any("fixture-token" in str(args) for args in calls))
+
+    def test_container_viegem_skips_native_setup_on_all_hosts(self):
+        self.docker.config["services"]["admin-api"]["environment"]["TINA_VIEGEM_TOKEN"] = "fixture-token" * 4
+        self.docker.config["services"]["viegem"] = {"image": "viegem:fixture"}
+        with patch.dict(os.environ, {"TINA_VIEGEM_DEVICE": "cpu"}):
+            selected = stack.Stack("all")
+        for system in ("Linux", "Darwin"):
+            with patch.object(stack.platform, "system", return_value=system), \
+                 patch.object(stack.platform, "machine", return_value="arm64"):
+                selected.native_viegem("prepare")
+                selected.native_viegem("start")
+        self.assertFalse(any(any(str(a).endswith("native_viegem.py") for a in args) for args, _ in self.docker.calls))
+
+    def test_container_viegem_requires_token_before_build(self):
+        self.docker.config["services"]["viegem"] = {"image": "viegem:fixture"}
+        with self.assertRaisesRegex(stack.StackError, "requires TINA_VIEGEM_TOKEN"):
+            stack.Stack("all").build()
+        self.assertFalse(any("build" in args for args, _ in self.docker.calls))
+
+    def test_container_registration_probes_its_published_port(self):
+        self.docker.config["services"]["admin-api"]["environment"]["TINA_VIEGEM_TOKEN"] = "fixture-token" * 4
+        self.docker.config["services"]["viegem"] = {"image": "viegem:fixture", "ports": [{"target": 8000, "published": "18006"}]}
+        with patch.dict(os.environ, {"TINA_VIEGEM_DEVICE": "cpu"}):
+            selected = stack.Stack("all")
+        with patch.object(stack, "_dotenvx_key_file", return_value=Path("/fixture/.env.keys")):
+            selected.native_viegem("register")
+        helper = [(args, env) for args, env in self.docker.calls if any(str(a).endswith("native_viegem.py") for a in args)]
+        self.assertEqual(helper[-1][1]["TINA_VIEGEM_URL"], "http://host.docker.internal:18006")
+        probes = [args for args, _ in self.docker.calls if "exec" in args]
+        self.assertIn("http://host.docker.internal:18006", probes[-1][-1])
+
+    def test_container_model_downloads_do_not_depend_on_viegem_native_or_token(self):
+        for service in ("gipformer-models", "viegem-models"):
+            self.docker.config["services"][service] = {"image": "fixture-model-installer"}
+        selected = stack.Stack("all")
+        selected.build()
+        calls = [args for args, _ in self.docker.calls]
+        downloads = [args[-1] for args in calls if "run" in args and "--no-deps" in args]
+        self.assertEqual(downloads, ["gipformer-models", "viegem-models"])
+        self.assertFalse(any("up" in args for args in calls))
+
+    def test_cuda_driver_and_compute_failures_prevent_activation(self):
+        self.docker.config["services"]["admin-api"]["environment"]["TINA_VIEGEM_TOKEN"] = "fixture-token" * 4
+        self.docker.config["services"]["viegem"] = {"image": "viegem-cuda:fixture"}
+        for failure in ("gpu_driver_ok", "gpu_compute_ok"):
+            with self.subTest(failure=failure), patch.object(stack.platform, "system", return_value="Linux"):
+                self.docker.calls.clear()
+                self.docker.gpu_driver_ok = self.docker.gpu_compute_ok = True
+                setattr(self.docker, failure, False)
+                with self.assertRaisesRegex(stack.StackError, "GPU|CUDA"):
+                    self.invoke("all")
+                self.assertFalse(any("up" in args or args[0].endswith("/provision-token") for args, _ in self.docker.calls))
+
+    def test_cuda_plan_adds_overlay_but_never_runs_gpu_or_build_jobs(self):
+        self.docker.config["services"]["admin-api"]["environment"]["TINA_VIEGEM_TOKEN"] = "fixture-token" * 4
+        self.docker.config["services"]["viegem"] = {"image": "viegem-cuda:fixture"}
+        with patch.object(stack.platform, "system", return_value="Linux"):
+            selected = stack.Stack("plan")
+        self.assertEqual(selected.viegem_device, "cuda")
+        self.assertIn(stack.CUDA_OVERLAY, selected.files)
+        self.assertFalse(any(args[:2] == ["docker", "run"] or "build" in args for args, _ in self.docker.calls))
+
+    def test_cuda_checks_precede_activation_and_are_not_repeated_within_deploy(self):
+        self.docker.config["services"]["admin-api"]["environment"]["TINA_VIEGEM_TOKEN"] = "fixture-token" * 4
+        self.docker.config["services"]["viegem"] = {"image": "viegem-cuda:fixture",
+            "ports": [{"target": 8000, "published": "18005"}]}
+        self.docker.rows.append({"Service": "viegem", "State": "running", "Health": "healthy"})
+        with patch.object(stack.platform, "system", return_value="Linux"), \
+             patch.object(stack, "_dotenvx_key_file", return_value=Path("/fixture/.env.keys")):
+            self.invoke("all")
+        calls = [args for args, _ in self.docker.calls]
+        probes = [i for i, args in enumerate(calls) if args[:2] == ["docker", "run"] and "--gpus" in args]
+        up = next(i for i, args in enumerate(calls) if "up" in args)
+        self.assertEqual(len(probes), 2)
+        self.assertLess(max(probes), up)
+
+    def test_mps_gpu_switch_can_stop_only_the_old_owned_compose_viegem(self):
+        self.docker.config["services"]["admin-api"]["environment"]["TINA_VIEGEM_TOKEN"] = "fixture-token" * 4
+        with patch.object(stack.platform, "system", return_value="Darwin"), patch.object(stack.platform, "machine", return_value="arm64"):
+            selected = stack.Stack("all")
+        self.docker.containers = [{"Config": {"Labels": {"com.docker.compose.project.config_files": ",".join(selected.files),
+            "com.docker.compose.service": "viegem"}}, "State": {"Running": True}}]
+        selected.guard_existing_config()
+
+    def test_mps_down_stops_owned_native_job_after_docker_without_removing_volumes(self):
+        self.docker.config["services"]["admin-api"]["environment"]["TINA_VIEGEM_TOKEN"] = "fixture-token" * 4
+        with patch.object(stack.platform, "system", return_value="Darwin"), patch.object(stack.platform, "machine", return_value="arm64"), \
+             patch.object(stack, "_dotenvx_key_file", return_value=Path("/fixture/.env.keys")):
+            self.invoke("down")
+        calls = [args for args, _ in self.docker.calls]
+        down = next(i for i, args in enumerate(calls) if "down" in args)
+        native_stop = next(i for i, args in enumerate(calls) if any(str(a).endswith("native_viegem.py") for a in args) and args[-1] == "stop")
+        self.assertLess(down, native_stop)
+        self.assertNotIn("-v", calls[down])
+
+    def test_mps_migration_rejects_foreign_cpu_worker_even_with_config_change_allowed(self):
+        self.docker.config["services"]["admin-api"]["environment"]["TINA_VIEGEM_TOKEN"] = "fixture-token" * 4
+        self.docker.containers = [{"Config": {"Labels": {"com.docker.compose.project.config_files": "/foreign/docker-compose.yml",
+            "com.docker.compose.service": "viegem"}}, "State": {"Running": True}}]
+        with patch.object(stack.platform, "system", return_value="Darwin"), patch.object(stack.platform, "machine", return_value="arm64"), \
+             patch.dict(os.environ, {"ALLOW_CONFIG_CHANGE": "1"}), self.assertRaisesRegex(stack.StackError, "another checkout"):
+            stack.Stack("all").guard_existing_config()
+        self.assertFalse(any("stop" in args for args, _ in self.docker.calls))
+
+    def test_native_viegem_failure_does_not_report_success_or_provision_access(self):
+        self.docker.config["services"]["admin-api"]["environment"]["TINA_VIEGEM_TOKEN"] = "fixture-token" * 4
+        original = self.docker.__call__
+        def fail_registration(args, **kwargs):
+            if any(str(a).endswith("native_viegem.py") for a in args) and args[-1] == "register":
+                raise stack.StackError("injected native ASR failure")
+            return original(args, **kwargs)
+        with patch.object(stack.platform, "system", return_value="Darwin"), \
+             patch.object(stack.platform, "machine", return_value="arm64"), \
+             patch.object(stack, "_dotenvx_key_file", return_value=Path("/private/fixture.keys")), \
+             patch.object(stack, "run", fail_registration), self.assertRaisesRegex(stack.StackError, "native ASR"):
+            self.invoke("all")
+        self.assertFalse(any(args[0].endswith("/provision-token") for args, _ in self.docker.calls))
+
     def test_final_unhealthy_service_fails_before_access(self):
         self.docker.rows[0]["Health"] = "unhealthy"
         with self.assertRaisesRegex(stack.StackError, "not ready"):
@@ -156,6 +302,13 @@ class EntryPointTest(unittest.TestCase):
     def test_matching_override_chain_is_allowed(self):
         selected = stack.Stack("all")
         self.docker.containers = [{"Config": {"Labels": {
+            "com.docker.compose.project.config_files": ",".join(selected.files)}}}]
+        selected.guard_existing_config()
+
+    def test_runtime_spawned_worker_does_not_block_matching_compose_deployment(self):
+        selected = stack.Stack("all")
+        self.docker.containers = [{"Config": {"Labels": {
+            "com.docker.compose.service": "agent-worker"}}}, {"Config": {"Labels": {
             "com.docker.compose.project.config_files": ",".join(selected.files)}}}]
         selected.guard_existing_config()
 

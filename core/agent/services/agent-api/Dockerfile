@@ -37,6 +37,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends git ca-certific
 COPY core/agent/shared ./shared
 COPY core/agent/control_plane ./control_plane
 COPY core/agent/contracts ./contracts
+# Source-only citation/Git helpers; agent CLIs and worker processes remain in the worker image.
+COPY core/agent/llm ./llm
 # The registry of workspace templates (the control plane validates/seeds from one — Phase 6).
 # workspace-seeds/<name>/ — one validated seed per subdir (today: default, finos).
 COPY core/agent/workspace-seeds ./workspace-seeds

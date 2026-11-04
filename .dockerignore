@@ -18,6 +18,7 @@ node_modules/
 .env
 .env.*
 .recordings/
+deploy/transcription/models/
 clients/
 sdks/
 docs/

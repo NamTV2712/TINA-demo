@@ -63,11 +63,11 @@ function resolveMeeting(meetings: MeetingMock[], meetingId: string): MeetingMock
 function latestCaption(segments: { text: string; completed?: boolean }[], note: string): string | undefined {
   for (let i = segments.length - 1; i >= 0; i--) {
     const seg = segments[i];
-    if (seg.text.trim() && seg.completed === false) return cleanTranscriptText(seg.text);
+    if (seg.text.trim() && seg.completed === false) return seg.text;
   }
   for (let i = segments.length - 1; i >= 0; i--) {
     const seg = segments[i];
-    if (seg.text.trim()) return cleanTranscriptText(seg.text);
+    if (seg.text.trim()) return seg.text;
   }
   const cleanNote = cleanTranscriptText(note);
   return cleanNote || undefined;
@@ -94,6 +94,10 @@ function textOf(value: unknown, fallback = ""): string {
   if (typeof value === "string") return value;
   if (value == null) return fallback;
   return String(value);
+}
+
+function transcriptSpeaker(name: string | undefined, status?: string): string {
+  return status === "unknown" || name === "Unknown speaker" ? "" : textOf(name, "Speaker");
 }
 
 function numberOf(value: unknown): number | undefined {
@@ -131,9 +135,11 @@ function normalizeSegments(segments: TranscriptSegment[] | null | undefined): Tr
   return safeArray(segments)
     .map((segment) => ({
       id: segment.id,
-      speaker: textOf(segment.speaker, "Speaker"),
+      speaker: transcriptSpeaker(segment.speaker, segment.speakerStatus),
       speakerId: segment.speakerId,
-      text: cleanTranscriptText(textOf(segment.text)),
+      speakerKey: segment.speakerKey,
+      speakerStatus: segment.speakerStatus,
+      text: textOf(segment.text),
       ts: segment.ts,
       tsMs: segment.tsMs,
       endTsMs: segment.endTsMs,
@@ -406,11 +412,12 @@ function useLiveMeetingState(meetingId?: string): MeetingState {
     const accepted = new Map(safeArray(durable.lines).filter(s => s.id && ((s.revision ?? 0) > 0 || (s.speakerRevision ?? 0) > 0)).map(s => [s.id, s]));
     const liveSegments = safeArray(live.transcript).map((s) => {
       const canonical = s.id ? accepted.get(s.id) : undefined;
-      return { id: s.id, speakerId: canonical?.speakerId ?? s.speakerId, speaker: canonical && (canonical.speakerRevision ?? 0) >= (s.speakerRevision ?? 0) ? canonical.speaker : s.speaker,
-        text: cleanTranscriptText(canonical && (canonical.revision ?? 0) > 0 ? canonical.text : s.text), ts: s.t, tsMs: s.tsMs, completed: canonical && (canonical.revision ?? 0) > 0 ? true : s.completed };
+      const source = canonical && (canonical.speakerRevision ?? 0) >= (s.speakerRevision ?? 0) ? canonical : s;
+      return { id: s.id, speakerId: canonical?.speakerId ?? s.speakerId, speakerKey: canonical?.speakerKey ?? s.speakerKey, speakerStatus: source.speakerStatus, speaker: transcriptSpeaker(source.speaker, source.speakerStatus),
+        text: canonical && (canonical.revision ?? 0) > 0 ? canonical.text : s.text, ts: s.t, tsMs: s.tsMs, completed: canonical && (canonical.revision ?? 0) > 0 ? true : s.completed };
     });
-    const recordedSegments = safeArray(durable.lines).map((s) => ({ id: s.id, speaker: s.speaker, speakerId: s.speakerId, text: cleanTranscriptText(s.text), ts: lineTs(s), tsMs: s.tsMs, endTsMs: s.endTsMs, sessionUid: s.sessionUid }));
-    const fallbackSegments = normalizedSelected.transcript.map((s) => ({ speaker: s.speaker, speakerId: s.speakerId, text: cleanTranscriptText(s.text), ts: lineTs(s) }));
+    const recordedSegments = safeArray(durable.lines).map((s) => ({ id: s.id, speaker: transcriptSpeaker(s.speaker, s.speakerStatus), speakerId: s.speakerId, speakerKey: s.speakerKey, speakerStatus: s.speakerStatus, text: s.text, ts: lineTs(s), tsMs: s.tsMs, endTsMs: s.endTsMs, sessionUid: s.sessionUid }));
+    const fallbackSegments = normalizedSelected.transcript.map((s) => ({ speaker: transcriptSpeaker(s.speaker, s.speakerStatus), speakerId: s.speakerId, speakerKey: s.speakerKey, speakerStatus: s.speakerStatus, text: s.text, ts: lineTs(s) }));
     const segments = selected.session_uid ? liveSegments : (recordedSegments.length ? recordedSegments : fallbackSegments);
     const copilotCards = safeArray(live.cards).filter(c => !c.stale).map((c, i) => ({ id: `live-${i}-${c.kind}-${c.title}`, kind: c.kind, title: cleanTranscriptText(c.title), body: c.body ? cleanTranscriptText(c.body) : c.body }));
     const diagnostics = {
