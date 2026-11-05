@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import tomllib
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -75,6 +76,109 @@ class _FakeCodexProcess:
 
     def kill(self):
         pass
+
+
+def test_groq_codex_requires_its_own_key(monkeypatch):
+    monkeypatch.setattr("llm.codex.shutil.which", lambda _executable: "/usr/bin/codex")
+    monkeypatch.setenv("TINA_CODEX_AUTH_MODE", "groq")
+    monkeypatch.setenv("OPENAI_API_KEY", "foreign-key")
+    monkeypatch.delenv("TINA_LLM_API_KEY", raising=False)
+    assert "Groq API key is missing" in CodexHarness().preflight()
+
+
+def test_groq_codex_does_not_replace_a_rejected_model_with_its_own_default(monkeypatch, tmp_path):
+    monkeypatch.setattr("llm.codex.shutil.which", lambda _executable: "/usr/bin/codex")
+    monkeypatch.setenv("TINA_CODEX_AUTH_MODE", "groq")
+    monkeypatch.setenv("TINA_LLM_API_KEY", "groq-secret")
+    monkeypatch.setenv("TINA_AGENT_MODEL", "")
+    result = list(CodexHarness().run_turn(tmp_path, "hello"))
+    assert result[-1]["ok"] is False
+    assert "approved Groq chat model" in result[-1]["reply"]
+
+
+def test_groq_text_only_model_fails_helpfully_before_starting_a_cli(monkeypatch, tmp_path):
+    monkeypatch.setattr("llm.codex.shutil.which", lambda _executable: "/usr/bin/codex")
+    monkeypatch.setenv("TINA_CODEX_AUTH_MODE", "groq")
+    monkeypatch.setenv("TINA_LLM_API_KEY", "groq-secret")
+    result = list(CodexHarness().run_turn(tmp_path, "hello", model="allam-2-7b"))
+    assert result[-1]["ok"] is False
+    assert "does not support tool calling" in result[-1]["reply"]
+    assert "Meeting model" in result[-1]["reply"]
+    assert "groq-secret" not in json.dumps(result)
+
+
+def test_groq_codex_uses_compatibility_boundary_for_the_whole_sandboxed_turn(monkeypatch, tmp_path):
+    proc = _FakeCodexProcess()
+    captured = {}
+    proxy_states = []
+
+    @contextmanager
+    def proxy(key):
+        assert key == "groq-secret"
+        proxy_states.append("started")
+        try:
+            yield "http://127.0.0.1:12345/v1"
+        finally:
+            proxy_states.append("stopped")
+
+    def spawn(argv, **kwargs):
+        assert proxy_states == ["started"]
+        captured.update(argv=argv, env=kwargs["env"])
+        profile_arg = next(arg for arg in argv if arg.startswith("model_catalog_json="))
+        profile_path = Path(json.loads(profile_arg.partition("=")[2]))
+        captured["profile"] = json.loads(profile_path.read_text())["models"][0]
+        return proc
+
+    monkeypatch.setattr("llm.groq_responses.groq_responses_proxy", proxy)
+    monkeypatch.setattr("llm.codex.subprocess.Popen", spawn)
+    monkeypatch.setattr("llm.codex.shutil.which", lambda _executable: "/usr/bin/codex")
+    monkeypatch.setenv("TINA_CODEX_AUTH_MODE", "groq")
+    monkeypatch.setenv("TINA_LLM_API_KEY", "groq-secret")
+    monkeypatch.setenv("TINA_MOUNTS", json.dumps([{
+        "path": str(tmp_path), "write": True, "role": "private",
+    }]))
+
+    events = list(CodexHarness().run_turn(tmp_path, "summarize this meeting", allowed_tools=["Read"]))
+
+    assert proxy_states == ["started", "stopped"]
+    settings = "\n".join(captured["argv"])
+    assert 'model_provider="groq"' in settings
+    assert 'model_providers.groq.base_url="http://127.0.0.1:12345/v1"' in settings
+    assert 'model_providers.groq.env_key="TINA_LLM_API_KEY"' in settings
+    assert 'model_providers.groq.requires_openai_auth=false' in settings
+    assert 'features.multi_agent=false' in settings
+    assert captured["profile"]["apply_patch_tool_type"] is None
+    assert "apply_patch" not in captured["profile"]["base_instructions"]
+    assert "You are TINA" in captured["profile"]["base_instructions"]
+    assert "groq-secret" not in settings
+    assert "shell_environment_policy.ignore_default_excludes=false" in settings
+    assert "model_context_window=131072" in settings
+    assert "model_auto_compact_token_limit=100000" in settings
+    by_method = {request.get("method"): request for request in proc.requests}
+    assert by_method["turn/start"]["params"]["permissions"] == "tina-offline"
+    assert by_method["thread/start"]["params"]["permissions"] == "tina-offline"
+    config = tomllib.loads("\n".join(captured["argv"][i + 1] for i, arg in enumerate(captured["argv"]) if arg == "-c"))
+    assert config["permissions"]["tina-offline"]["network"]["enabled"] is False
+    assert config["permissions"]["tina-offline"]["filesystem"] == {":root": "read"}
+    assert events[-1]["ok"] is True
+
+
+def test_groq_codex_auth_errors_redact_the_key_and_name_the_right_provider(monkeypatch, tmp_path):
+    proc = _FakeCodexProcess(turn_status="failed", turn_error="HTTP 401: groq-secret is invalid")
+
+    @contextmanager
+    def proxy(_key):
+        yield "http://127.0.0.1:12345/v1"
+
+    monkeypatch.setattr("llm.groq_responses.groq_responses_proxy", proxy)
+    monkeypatch.setattr("llm.codex.subprocess.Popen", lambda *_args, **_kwargs: proc)
+    monkeypatch.setattr("llm.codex.shutil.which", lambda _executable: "/usr/bin/codex")
+    monkeypatch.setenv("TINA_CODEX_AUTH_MODE", "groq")
+    monkeypatch.setenv("TINA_LLM_API_KEY", "groq-secret")
+    events = list(CodexHarness().run_turn(tmp_path, "hello"))
+    assert events[-1]["ok"] is False
+    assert "Groq" in events[-1]["reply"]
+    assert "groq-secret" not in json.dumps(events)
 
 
 @pytest.mark.parametrize("session", [None, "thread-existing"])
@@ -214,6 +318,7 @@ def test_codex_keeps_workspace_write_sandbox_for_write_tools(monkeypatch, tmp_pa
     list(CodexHarness().run_turn(
         workspace, "write a note",
         allowed_tools=["Read", "Write", "Edit", "Bash"],
+        model="gpt-5",
     ))
 
     by_method = {request.get("method"): request for request in proc.requests}
@@ -227,7 +332,7 @@ def test_codex_keeps_workspace_write_sandbox_for_write_tools(monkeypatch, tmp_pa
         assert str(viewer) not in profile["filesystem"]
         assert profile["filesystem"][str(workspace / ".git")] == "read"
         assert profile["network"]["enabled"] is (name == "tina-online")
-    assert by_method["turn/start"]["params"]["effort"] == "medium"
+    assert "effort" not in by_method["turn/start"]["params"]
 
 
 def test_codex_stays_read_only_when_no_mount_has_a_write_grant(monkeypatch, tmp_path):

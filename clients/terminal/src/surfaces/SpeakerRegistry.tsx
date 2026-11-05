@@ -1,4 +1,6 @@
 "use client";
+import styles from "./meetingDialogs.module.css";
+import { useMeetingDialogEscape } from "./useMeetingDialogEscape";
 import {useEffect,useRef,useState,useId} from "react";
 interface Speaker {
   speaker_id: string; segment_count?:number; name: string | null; candidate_name: string | null;
@@ -11,6 +13,7 @@ interface Analysis { id:string; status:string; error?:string; applied_at?:string
 export function SpeakerRegistry({meetingId,openRef,hideTrigger=false}:{meetingId:string;openRef?:{current:(()=>void)|null};hideTrigger?:boolean}) {
   const dialog=useRef<HTMLDialogElement>(null);
   const [opened,setOpened]=useState(false);
+  useMeetingDialogEscape(dialog, opened);
   const titleId=useId();
   const open=()=>{dialog.current?.showModal();setOpened(true);void load();};
   useEffect(()=>{if(openRef)openRef.current=open;});
@@ -79,15 +82,31 @@ export function SpeakerRegistry({meetingId,openRef,hideTrigger=false}:{meetingId
     const timer=setInterval(refresh,3000);
     return () => {alive=false;clearInterval(timer);};
   },[opened,meetingId]);
-  const field = {width:"100%",background:"transparent",color:"inherit",border:"1px solid currentColor",borderRadius:6,padding:8} as const;
-  const content = <div style={{display:"grid",gap:14}}>
-    <p>Confirm who is speaking, or analyze the recording after the meeting.</p>
-    <section aria-label="Recording speaker analysis" style={{display:"grid",gap:8}}>
-      <label>Voices in recording<select aria-label="Number of voices" style={field} value={count} disabled={busy||analyzing} onChange={e=>setCount(Number(e.target.value))}>
+  const content = <div className={styles.content}>
+    {error && <p role="alert">{error} <button disabled={busy} onClick={() => void load()}>Reload</button></p>}
+    {busy && <p role="status">Working…</p>}
+    {doc?.speakers.length === 0 && <p className={styles.empty}>No speakers recorded yet. <button disabled={busy} onClick={() => void load()}>Reload</button></p>}
+    {!!doc?.speakers.length && <label>Speaker<select aria-label="Speaker identity" value={selected} disabled={busy} onChange={e => setSelected(e.target.value)}>
+      {doc.speakers.map(s => <option key={s.speaker_id} value={s.speaker_id}>{s.name || "Unknown speaker"}{!s.name && s.candidate_name ? ` · heard as ${s.candidate_name}` : ""} · {s.speaker_id.slice(0,8)}{s.segment_count ? ` · ${s.segment_count} segments` : ""}</option>)}
+    </select></label>}
+    {speaker && <>
+      <h3>Speaker name</h3>
+      <p role="status">{speaker.status === "confirmed" ? "Confirmed by you" : speaker.status === "observed" ? "Observed in Google Meet" : "Identity unknown"} · revision {speaker.revision}</p>
+      {speaker.candidate_name && <p>Observed label: {speaker.candidate_name}</p>}
+      <label>Name<input aria-label="Speaker name" value={name} maxLength={120} disabled={busy} onChange={e => setName(e.target.value)} /></label>
+      <div className={styles.actions}>
+        <button className={styles.primary} disabled={busy || !name.trim()} onClick={() => void save(name.trim())}>Confirm / save name</button>
+        <button disabled={busy || (speaker.status === "unknown" && speaker.source === "manual")} onClick={() => void save(null)}>Use unknown</button>
+      </div>
+      <details><summary>Assignment history ({speaker.history.length})</summary>{speaker.history.map(h => <p key={h.revision}>{h.revision} · {h.name || "Unknown speaker"} · {h.source === "manual" ? "User assignment" : h.source === "meet_dom" ? "Google Meet metadata" : h.source === "diarization" ? "Recording voice grouping" : "Unattributed audio"}<br /><time dateTime={h.at}>{new Date(h.at).toLocaleString()}</time></p>)}</details>
+    </>}
+    <section aria-label="Recording speaker analysis" className={styles.card}>
+      <h3>Recording analysis</h3>
+      <label>Voices in recording<select aria-label="Number of voices" value={count} disabled={busy||analyzing} onChange={e=>setCount(Number(e.target.value))}>
         <option value={-1}>Detect automatically</option>{Array.from({length:10},(_,i)=><option key={i+1} value={i+1}>{i+1}</option>)}
       </select></label>
-      <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
-        <button disabled={busy||analyzing} onClick={()=>void runAnalysis("start")}>Analyze recording speakers</button>
+      <div className={styles.actions}>
+        <button className={styles.primary} disabled={busy||analyzing} onClick={()=>void runAnalysis("start")}>Analyze recording speakers</button>
         {analyzing && <button disabled={busy||analysis?.status==="cancelling"} onClick={()=>void runAnalysis("cancel")}>Cancel analysis</button>}
         {analysis?.status==="completed" && !analysis.applied_at && <button disabled={busy} onClick={()=>void runAnalysis("apply")}>Apply speaker groups</button>}
       </div>
@@ -95,28 +114,15 @@ export function SpeakerRegistry({meetingId,openRef,hideTrigger=false}:{meetingId
       {analysis?.error && <p role="alert">{analysis.error}</p>}
       <small>Existing Meet identities and names you confirmed stay unchanged. Uncertain audio stays unknown.</small>
     </section>
-    {error && <p role="alert">{error} <button disabled={busy} onClick={() => void load()}>Reload</button></p>}
-    {busy && <p role="status">Working…</p>}
-    {doc?.speakers.length === 0 && <p>No speakers recorded yet. <button disabled={busy} onClick={() => void load()}>Reload</button></p>}
-    {!!doc?.speakers.length && <label>Speaker<select aria-label="Speaker identity" style={field} value={selected} disabled={busy} onChange={e => setSelected(e.target.value)}>
-      {doc.speakers.map(s => <option key={s.speaker_id} value={s.speaker_id}>{s.name || "Unknown speaker"}{!s.name && s.candidate_name ? ` · heard as ${s.candidate_name}` : ""} · {s.speaker_id.slice(0,8)}{s.segment_count ? ` · ${s.segment_count} segments` : ""}</option>)}
-    </select></label>}
-    {speaker && <>
-      <p role="status">{speaker.status === "confirmed" ? "Confirmed by you" : speaker.status === "observed" ? "Observed in Google Meet" : "Identity unknown"} · revision {speaker.revision}</p>
-      {speaker.candidate_name && <p>Observed label: {speaker.candidate_name}</p>}
-      <label>Name<input aria-label="Speaker name" style={field} value={name} maxLength={120} disabled={busy} onChange={e => setName(e.target.value)} /></label>
-      <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
-        <button disabled={busy || !name.trim()} onClick={() => void save(name.trim())}>Confirm / save name</button>
-        <button disabled={busy || (speaker.status === "unknown" && speaker.source === "manual")} onClick={() => void save(null)}>Use unknown</button>
-      </div>
-      <details><summary>Assignment history ({speaker.history.length})</summary>{speaker.history.map(h => <p key={h.revision}>{h.revision} · {h.name || "Unknown speaker"} · {h.source === "manual" ? "User assignment" : h.source === "meet_dom" ? "Google Meet metadata" : h.source === "diarization" ? "Recording voice grouping" : "Unattributed audio"}<br /><time dateTime={h.at}>{new Date(h.at).toLocaleString()}</time></p>)}</details>
-    </>}
   </div>;
   return <>
     {!openRef && <button id={hideTrigger ? "tina-sr-open" : undefined} onClick={open} style={{background:"transparent",color:"var(--t2)",border:"1px solid var(--line2)",borderRadius:6,padding:"3px 8px",fontSize:12,cursor:"pointer",whiteSpace:"nowrap"}}>Speaker identities</button>}
-    <dialog onClose={()=>setOpened(false)} ref={dialog} aria-labelledby={titleId} style={{background:"var(--bg, #102b28)",color:"var(--t1, #e3f1eb)",border:"1px solid var(--line, #668d81)",borderRadius:12,width:"min(620px,90vw)",maxHeight:"85vh",padding:22}}>
-      <div style={{display:"flex",justifyContent:"space-between",gap:16,marginBottom:16}}><h2 id={titleId}>Speaker identities</h2><button onClick={() => dialog.current?.close()}>Close</button></div>
-      {content}
+    <dialog className={styles.dialog} onClose={()=>setOpened(false)} ref={dialog} aria-labelledby={titleId}>
+      <header className={styles.header}>
+        <div><h2 id={titleId}>Speaker identities</h2><p className={styles.description}>Confirm who is speaking, or analyze the recording after the meeting.</p></div>
+        <button type="button" className={styles.close} onClick={() => dialog.current?.close()}>Close</button>
+      </header>
+      <div className={styles.body}>{content}</div>
     </dialog>
   </>;
 }

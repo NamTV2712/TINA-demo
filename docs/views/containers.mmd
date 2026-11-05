@@ -17,6 +17,7 @@ flowchart LR
   subgraph agent["agent"]
     agent_api["agent-api"]
     agent_worker["agent-worker"]
+    meeting_translation_cache["Private meeting translation SQLite cache"]
   end
   subgraph gateway_system["gateway"]
     conformance["conformance"]
@@ -94,5 +95,7 @@ flowchart LR
   meeting_api -->|"HTTP"| diarization_worker
   desktop -->|"HTTP"| alignment_worker
   agent_api -->|"HTTP"| meeting_api
+  agent_api -->|"write"| meeting_translation_cache
+  extension -->|"call"| agent_api
   asr_control -->|"HTTP"| admin_api
   asr_control -->|"HTTP"| transcription

@@ -1,6 +1,35 @@
 # TINA Transcript Viewer
 
-The Chrome extension is a read-only transcript reader. It does not record audio, request microphone or tab-audio access, open the Desktop ingest WebSocket, or auto-start in meetings.
+The Chrome extension reads transcripts and can request a saved English translation overlay for Meeting Bot rows. It does not record audio, request microphone or tab-audio access, open the Desktop ingest WebSocket, or auto-start in meetings.
+
+## Vietnamese to English
+
+The compact **Review a meeting** disclosure is collapsed by default. Open it to select the
+transcript source, meeting or language, or refresh the meeting list. The selected meeting is shown
+in its collapsed summary, with a chevron indicating that the whole card opens the controls.
+The Transcript heading has a compact language button that opens and focuses the existing
+language selector (disabled when translation is not supported). It shows the effective display language, including the original-only
+Desktop archive view; translation progress and retry stay visible below it. Collapsing the controls
+does not stop transcript polling or translation. Expanded controls scroll within a bounded area
+so the transcript remains accessible on short panels. Original text and lightly tinted English
+blocks use separate visual levels in both light and dark themes. Empty meeting lists do not
+show a translation loading message. Connection/capture details remain in Settings. The compact header, meeting card, phrase spacing
+and footer leave more height for the transcript without removing controls or source text.
+
+The language dropdown inside **Review a meeting** defaults to **Song ngữ** and offers
+**Tiếng Việt**, **English** and **Song ngữ**. The same owner-authorized
+agent cache serves Terminal and extension; provider credentials remain on the server and the
+saved Meeting model performs tool-less text translation. `meeting-translation.v2` groups
+consecutive finalized fragments of the same speaker into one phrase. The live tail shows
+**Đang gom câu…** until a sentence boundary or stable pause; stopping flushes it immediately.
+Both clients render the same backend boundaries with one English result per phrase.
+Existing Desktop archive rows keep the original-only view. Reload the extension after upgrading.
+
+The original transcript remains visible when an English phrase is pending or unavailable.
+Provider failures back off automatically; **Thử lại** explicitly retries. Edits invalidate only
+the corresponding phrase. Reading above the live edge preserves the scroll anchor.
+Translation inference advances while a translated view is open; closing all views pauses
+new calls. Reopening resumes missing segments without regenerating cached translations.
 
 ## Transcript sources
 

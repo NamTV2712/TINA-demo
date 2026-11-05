@@ -35,6 +35,7 @@ flowchart LR
   canonical_notes_approved[("proc:meeting:{id} (canonical approved notes)")]
   meeting_knowledge_pages[("Reviewed meeting answers and Wiki pages")]
   workspace_human_documents[("Explicit private Markdown document edits")]
+  meeting_translation_cache[("Private meeting translation SQLite cache")]
   bot -->|write| segments_stream
   bot -->|write| tc_mutable
   meeting_api -.->|read| segments_stream
@@ -80,3 +81,4 @@ flowchart LR
   agent_api -->|write| meeting_knowledge_pages
   terminal -.->|read| meeting_knowledge_pages
   agent_api -->|write| workspace_human_documents
+  agent_api -->|write| meeting_translation_cache

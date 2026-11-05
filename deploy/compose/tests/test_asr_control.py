@@ -47,6 +47,28 @@ class ControlTests(unittest.TestCase):
         directory = tempfile.TemporaryDirectory(); self.addCleanup(directory.cleanup)
         self.identity, self.workers = Identity(), Workers()
         self.controller = control.Controller(self.identity, self.workers, Path(directory.name) / "state.json", "fixture", grace=0)
+
+    def test_missing_optional_viegem_profile_keeps_runtime_status_available(self):
+        selected = SimpleNamespace(services={"admin-api": {"environment": {}}, "gipformer": {}},
+            viegem_device="disabled", endpoint=lambda service, _: {"gipformer": "http://gipformer"}[service])
+        workers = control.Workers(selected)
+        self.controller.workers = workers
+        with patch.object(control, "request_json", return_value={
+                "model": {"asr_model": "g-group-ai-lab/gipformer1.5-68M-rnnt", "device": "cpu"}}) as probe:
+            result = self.controller.status("1")
+        self.assertTrue(result["workers"]["gipformer"]["ready"])
+        self.assertFalse(result["workers"]["viegem"]["running"])
+        self.assertFalse(result["workers"]["viegem"]["ready"])
+        probe.assert_called_once_with("http://gipformer/status", timeout=1)
+
+    def test_native_mps_status_does_not_require_a_compose_viegem_service(self):
+        selected = SimpleNamespace(services={"admin-api": {"environment": {}}}, viegem_device="mps")
+        with patch.object(control, "request_json", return_value={
+                "model": {"asr_model": "5CD-AI/VieGem-ASR", "device": "mps"}}) as probe:
+            result = control.Workers(selected).status("viegem")
+        self.assertTrue(result["ready"])
+        probe.assert_called_once_with("http://127.0.0.1:18005/status", timeout=1)
+
     def test_switch_keeps_worker_required_by_another_account(self):
         self.controller.select("1", "gipformer", True, 0)
         self.assertTrue(self.workers.running["viegem"])

@@ -44,7 +44,7 @@ export async function listBotMeetings(config: BotConnection, signal?: AbortSigna
   const body = await read(config, '/meetings?limit=100&exclude_planned=true', signal);
   if (!Array.isArray(body?.meetings)) throw new Error('Unsupported meetings response.');
   return body.meetings.filter((row: any) => Number.isSafeInteger(row.id) && row.id > 0
-    && typeof row.platform === 'string' && /^[a-z0-9_-]{1,48}$/i.test(row.platform)
+    && typeof row.platform === 'string' && row.platform !== 'note' && /^[a-z0-9_-]{1,48}$/i.test(row.platform)
     && typeof row.native_meeting_id === 'string' && row.native_meeting_id.length > 0 && row.native_meeting_id.length <= 512).map((row: any) => ({
       id: row.id, platform: row.platform, nativeMeetingId: row.native_meeting_id,
       title: typeof row.data?.title === 'string' ? row.data.title : row.native_meeting_id,

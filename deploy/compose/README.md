@@ -81,6 +81,8 @@ wheels, reserves one NVIDIA GPU only for inference, and tests driver access plus
 operation before changing application containers. Windows uses WSL2 and Docker Desktop GPU
 integration; native Windows Python is unsupported. NVIDIA driver installation is not automated.
 The CUDA configuration/tests do not substitute for validation on a real NVIDIA machine.
+The subsequent RTX 5060 Laptop/WSL2 startup and audio probe is recorded in the
+[VieGem worker README](../transcription/viegem/README.md#windows-wsl2-cuda-verification--2026-11-05).
 
 Gipformer's `asr` profile has its own token-free model-install job independent of VieGem/device.
 Docker VieGem uses a separate job; native MPS prepares the same pinned cache on the host.

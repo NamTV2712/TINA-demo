@@ -50,6 +50,9 @@ export function createKeybindingService(container: ServiceContainer): Keybinding
     const ignore = (event: KeyboardEvent) => {
       if (event.repeat || event.isComposing) return true;
       const target = event.target as HTMLElement | null;
+      // Native meeting dialogs own Escape; the window capture listener runs before their
+      // close handler, so it must yield here instead of navigating the underlying meeting.
+      if (event.key === "Escape" && target?.closest("dialog[open]")) return true;
       if (target && target !== event.currentTarget && target.matches("[contenteditable],input,select,textarea")) {
         // Allow $mod (Cmd/Ctrl) chords to fire even from inputs/composers (VS Code / Linear behavior)
         if (!event.metaKey && !event.ctrlKey) return true;

@@ -1,4 +1,6 @@
 "use client";
+import styles from "./meetingDialogs.module.css";
+import { useMeetingDialogEscape } from "./useMeetingDialogEscape";
 import {useEffect,useId,useRef,useState} from "react";
 interface Evidence {
   segment_id:string; revision:number; start_ms:number; end_ms:number; speaker_name:string; quote:string;
@@ -14,6 +16,8 @@ export function MeetingMemory({meetingId,openRef,hideTrigger=false}:{meetingId:s
   const dialog=useRef<HTMLDialogElement>(null);
   const titleId=useId();
   const [opened,setOpened]=useState(false);
+  useMeetingDialogEscape(dialog, opened);
+  const [suggestionsOnly,setSuggestionsOnly]=useState(false);
   const open=()=>{setOpened(true);dialog.current?.showModal();};
   useEffect(()=>{if(openRef)openRef.current=open;});
   const base=`/api/transcripts/by-id/${encodeURIComponent(meetingId)}/memory`;
@@ -40,15 +44,16 @@ export function MeetingMemory({meetingId,openRef,hideTrigger=false}:{meetingId:s
     void refresh();
     return () => {controller.abort();clearTimeout(timer);};
   }, [opened,meetingId,base]);
-  const content=<div style={{display:"grid",gap:16}}>
-    <p>Suggested actions, decisions and facts from explicit phrases. Review the evidence before relying on them.</p>
+  const content=<div className={styles.content}>
     {error && <p role="alert">{error}</p>}
     {!doc && !error && <p role="status">Loading memory…</p>}
     {doc && <>
-      <p role="status">{doc.windows.length} conversation windows · {doc.facts.length} suggestions · revision {doc.canonical_revision}</p>
-      {!doc.windows.length && <p>No finalized speech yet.</p>}
-      {doc.windows.map((window,index)=><details key={window.id} open={index === doc.windows.length-1}>
-        <summary>Window {index+1} · {time(window.evidence[0].start_ms)} · {window.facts.length} suggestions</summary>
+      <div className={styles.stats} role="status"><span className={styles.stat}>{doc.windows.length} conversation windows</span><span className={styles.stat}>{doc.facts.length} {doc.facts.length === 1 ? "suggestion" : "suggestions"}</span><span className={styles.stat}>Revision {doc.canonical_revision}</span></div>
+      {!doc.windows.length && <p className={styles.empty}>No finalized speech yet.</p>}
+      {!!doc.windows.length && <label><input type="checkbox" checked={suggestionsOnly} onChange={e=>setSuggestionsOnly(e.target.checked)} />Only windows with suggestions</label>}
+      {suggestionsOnly && !!doc.windows.length && !doc.windows.some(window=>window.facts.length) && <p className={styles.empty}>No suggestions yet. Turn off the filter to review conversation evidence.</p>}
+      {doc.windows.map((window,index)=>suggestionsOnly && !window.facts.length ? null : <details key={window.id} open={window.facts.length > 0}>
+        <summary>Window {index+1} · {window.evidence[0] ? time(window.evidence[0].start_ms) : "No timestamp"} · {window.facts.length} {window.facts.length === 1 ? "suggestion" : "suggestions"}</summary>
         {window.facts.map(fact=><section key={fact.id} style={{marginBlock:12}}>
           <strong>{labels[fact.type]} · candidate</strong>
           <p>{fact.text}</p>
@@ -64,9 +69,12 @@ export function MeetingMemory({meetingId,openRef,hideTrigger=false}:{meetingId:s
   </div>;
   return <>
     {!openRef && <button id={hideTrigger ? "tina-mm-open" : undefined} onClick={open} style={{background:"transparent",color:"var(--t2)",border:"1px solid var(--line2)",borderRadius:6,padding:"3px 8px",fontSize:12,cursor:"pointer",whiteSpace:"nowrap"}}>Meeting memory</button>}
-    <dialog ref={dialog} aria-labelledby={titleId} onClose={()=>setOpened(false)} style={{background:"var(--panel)",color:"inherit",border:"1px solid var(--line)",borderRadius:10,padding:24,width:680,maxWidth:"90vw",maxHeight:"85vh"}}>
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}><h2 id={titleId}>Meeting memory</h2><button className="btn" onClick={()=>dialog.current?.close()}>Close</button></div>
-      {content}
+    <dialog className={styles.dialog} ref={dialog} aria-labelledby={titleId} onClose={()=>setOpened(false)}>
+      <header className={styles.header}>
+        <div><h2 id={titleId}>Meeting memory</h2><p className={styles.description}>Suggested actions, decisions and facts from explicit phrases. Review the evidence before relying on them.</p></div>
+        <button type="button" className={styles.close} onClick={()=>dialog.current?.close()}>Close</button>
+      </header>
+      <div className={styles.body}>{content}</div>
     </dialog>
   </>;
 }

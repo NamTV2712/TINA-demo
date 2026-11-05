@@ -37,8 +37,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends git ca-certific
 COPY core/agent/shared ./shared
 COPY core/agent/control_plane ./control_plane
 COPY core/agent/contracts ./contracts
-# Source-only citation/Git helpers; agent CLIs and worker processes remain in the worker image.
+# Credential probes and model/effort validation share provider code with the worker.
+# This copies Python adapters only; CLI executables still run exclusively in workers.
 COPY core/agent/llm ./llm
+RUN python -c "from llm.model_capabilities import normalized_effort; from control_plane.config_test import test_bedrock; assert not test_bedrock('test', 'test-model', 'us-east-1', post=lambda *args: (403, '{}'))['ok']"
 # The registry of workspace templates (the control plane validates/seeds from one — Phase 6).
 # workspace-seeds/<name>/ — one validated seed per subdir (today: default, finos).
 COPY core/agent/workspace-seeds ./workspace-seeds

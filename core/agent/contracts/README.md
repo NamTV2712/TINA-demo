@@ -19,6 +19,8 @@ proactive cards, and tool calls.
 | **`event.v1`** | an external event (e.g. email, meeting) mapped into a `unit.v1` Invocation — generic event ingress. | yes |
 | **`proactive-card.v1`** | a proactive output card with actions (agent-initiated surface). | yes |
 | **`invoke.v1`** | the legacy meetings→agent invocation seam. **Sealed**; retiring as callers move to `unit.v1`. | **yes** |
+| **[`meeting-translation.v2`](meeting-translation.v2/README.md)** | current owner-authorized English phrase overlay: exact source members, speaker/timing metadata, readiness, cached results and retry status. | yes |
+| **[`meeting-translation.v1`](meeting-translation.v1/README.md)** | historical per-fragment response; retained frozen as the endpoint and both clients move to v2. | yes |
 
 Note: `schedule.v1` (the Scheduler job spec routines compile to) is owned by `runtime`, not `agent` —
 see `core/runtime/contracts/schedule.v1/`.

@@ -315,6 +315,25 @@ def test_chat_preflight_honors_user_custom_model_config(monkeypatch):
     assert runtime2.spawned == []
 
 
+@pytest.mark.parametrize("mode,runner", [("groq", "codex"), ("deepseek", "claude-code"), ("gemini", "antigravity")])
+def test_chat_preflight_routes_api_provider_without_deployment_credentials(monkeypatch, mode, runner):
+    _clear_model_creds(monkeypatch)
+    client, runtime = _preflight_client(_FakeModelConfig({"mode": mode, "api_key": "own-test-key"}))
+    response = client.post("/api/chat", json={"prompt": "hi", "session": "provider-session"})
+    assert response.status_code == 200
+    assert len(runtime.spawned) == 1
+    assert runtime.spawned[0][2]["TINA_RUNNER"] == runner
+    assert "own-test-key" not in response.text
+
+
+@pytest.mark.parametrize("mode,default", [("groq", "openai/gpt-oss-20b"), ("deepseek", "deepseek-flash"), ("gemini", "gemini-3.5-flash")])
+def test_models_reports_api_provider_defaults_instead_of_another_deployment_provider(mode, default):
+    client, _runtime = _preflight_client(_FakeModelConfig({"mode": mode}))
+    result = client.get("/api/models").json()
+    assert result["agent_model"] == default
+    assert result["meeting_model"] == default
+
+
 def test_chat_preflight_fails_open_when_model_config_lookup_errors(monkeypatch):
     """A DOWN identity service must never block a turn (dispatch's own contract) — the resolver
     raising means we can't prove the user lacks a credential, so the turn dispatches; the worker's

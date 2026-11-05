@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:tina:schemas:meeting-translation.v2",
+  "title": "meeting-translation.v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "meeting_id",
+    "target_language",
+    "status",
+    "retry_after",
+    "total",
+    "completed",
+    "groups"
+  ],
+  "properties": {
+    "version": {
+      "const": "meeting-translation.v2"
+    },
+    "meeting_id": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "target_language": {
+      "const": "en"
+    },
+    "status": {
+      "enum": [
+        "pending",
+        "running",
+        "paused",
+        "complete"
+      ]
+    },
+    "retry_after": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "total": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "completed": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "groups": {
+      "type": "array",
+      "maxItems": 2000,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "group_id",
+          "members",
+          "source_text",
+          "translated_text",
+          "ready",
+          "speaker_id",
+          "speaker_name",
+          "start_ms",
+          "end_ms"
+        ],
+        "properties": {
+          "group_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "members": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 2000,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "segment_id",
+                "source_text"
+              ],
+              "properties": {
+                "segment_id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "source_text": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 10000
+                }
+              }
+            }
+          },
+          "source_text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 10000
+          },
+          "translated_text": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 50000
+          },
+          "ready": {
+            "type": "boolean"
+          },
+          "speaker_id": {
+            "type": "string"
+          },
+          "speaker_name": {
+            "type": "string"
+          },
+          "start_ms": {
+            "type": "number"
+          },
+          "end_ms": {
+            "type": "number"
+          }
+        }
+      }
+    }
+  }
+}

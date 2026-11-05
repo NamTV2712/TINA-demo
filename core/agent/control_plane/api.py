@@ -4,6 +4,7 @@ A thin FastAPI surface mirroring ``runtime_kernel/api.py``. Routes (the gateway 
   POST /invocations          — the dispatcher sink: a unit.v1 dispatch → a runtime.v1 agent spawn
   POST /api/dictation/polish — a tool-less CompletionPort call for a final voice transcript
   POST /api/dictation/translate — a tool-less CompletionPort call for one confirmed caption
+  GET/POST /api/meeting-translations/{id} — cached, owner-authorized English transcript overlay
   POST /api/chat             — a chat *now*-dispatch, streamed back as an SSE VIEW of its Stream
   POST /api/chat/reset       — drop a session
   GET  /api/sessions         — list a subject's sessions
@@ -72,7 +73,7 @@ from control_plane import workspace_membership as membership_mod
 from control_plane import git_credentials as git_creds
 from control_plane import system_mounts
 from control_plane.workspace_membership import MembershipError, MembershipIndex, InMemoryMembershipIndex
-from control_plane.dispatch import Dispatcher, build_mount_set, worker_cwd
+from control_plane.dispatch import Dispatcher, ModelConfigRefreshError, build_mount_set, worker_cwd
 from control_plane.events import event_to_invocation
 from shared.ports import SchedulerPort, StreamReader
 from control_plane.workspace_reader import WorkspaceReader
@@ -585,7 +586,7 @@ def _has_custom_model_endpoint(cfg: dict) -> bool:
     mode = (cfg.get("mode") or "").strip()
     if mode == "custom":
         return bool((cfg.get("base_url") or "").strip())
-    return mode in {"antigravity", "bedrock", "openai-api", "openai-subscription"}
+    return mode in {"antigravity", "bedrock", "groq", "deepseek", "gemini", "openai-api", "openai-subscription"}
 
 
 def _model_creds_error_message() -> str:
@@ -1080,15 +1081,21 @@ def create_app(
         # Match the dispatch-time precedence: the caller's effective Settings → Models config
         # overrides deployment defaults, and an explicit workspace meeting pin wins last.
         model_config = dispatcher.resolve_model_config(subject) or {}
-        chat_model = model_config.get("model") or settings.agent_model or settings.llm_model or "default"
-        streaming_model = (
-            model_config.get("meeting_model")
-            or model_config.get("model")
-            or settings.meeting_model
-            or settings.llm_model
-            or default_meeting_model()
-            or "default"
-        )
+        provider_default = {"groq": "openai/gpt-oss-20b", "deepseek": "deepseek-flash",
+                            "gemini": "gemini-3.5-flash"}.get(model_config.get("mode"))
+        if provider_default:
+            chat_model = model_config.get("model") or provider_default
+            streaming_model = model_config.get("meeting_model") or chat_model
+        else:
+            chat_model = model_config.get("model") or settings.agent_model or settings.llm_model or "default"
+            streaming_model = (
+                model_config.get("meeting_model")
+                or model_config.get("model")
+                or settings.meeting_model
+                or settings.llm_model
+                or default_meeting_model()
+                or "default"
+            )
         try:
             # A workspace-pinned model (free string) wins; an unpinned workspace ("" — deployment
             # default) must NOT blank the label out.
@@ -1097,13 +1104,16 @@ def create_app(
                 streaming_model = workspace_model
         except ValueError:
             pass
-        from control_plane.openai_auth import profile_status
+        chatgpt_connected = None
+        if model_config.get("mode") == "openai-subscription":
+            from control_plane.openai_auth import profile_status
+            chatgpt_connected = profile_status(subject)["connected"]
         return {
             "chat_model": chat_model,
             "agent_model": chat_model,
             "streaming_model": streaming_model,
             "meeting_model": streaming_model,
-            "chatgpt_connected": profile_status(subject)['connected'] if model_config.get('mode') == 'openai-subscription' else None,
+            "chatgpt_connected": chatgpt_connected,
         }
 
     @app.api_route('/internal/openai-auth/{subject}', methods=['GET', 'PUT', 'DELETE'], include_in_schema=False)
@@ -1223,6 +1233,11 @@ def create_app(
             request, text=body.text, task="translate", target_language=body.target_language,
         )
         return {"translated_text": translated}
+
+    from control_plane.meeting_translation import register as register_meeting_translation
+    register_meeting_translation(app, subject_of, wsr.root, settings.meeting_api_url if settings else '',
+                                 lambda request, text: _transcript_completion(
+                                     request, text=text, task='translate', target_language='en'))
 
     @app.get("/api/models/openai/catalog")
     def openai_model_catalog(request: Request):
@@ -1542,7 +1557,10 @@ def create_app(
                 is_new = not any(r["session"] == session for r in sess.list(subject))
                 sess.upsert(subject, session,
                             title=_truncate_title(body.prompt) if is_new else None)
-                unit_id = dispatcher.dispatch(inv)  # spawn-or-touch the thread's warm chat unit
+                try:
+                    unit_id = dispatcher.dispatch(inv)  # refresh immutable settings before warm delivery
+                except ModelConfigRefreshError as exc:
+                    raise HTTPException(status_code=exc.status, detail=str(exc)) from None
                 if body.turn_id and start is not None:
                     _record_chat_turn_head(redis_url, unit_id, body.turn_id, start)
                 resume = start
@@ -2652,6 +2670,39 @@ def create_app(
     # ── Settings → Models "Test" buttons (on-demand credential tests, fail-loud surface) ────────
     # Both test the caller's EFFECTIVE config — the same user > global > env resolution the
     # dispatch overlay / bot_spawn apply — so what's tested is what a turn/bot actually gets.
+
+    @app.post("/api/models/catalog")
+    def models_catalog(request: Request, body: dict = Body(...)):
+        """List the models the caller's provider credential can actually use.
+
+        ``api_key`` may carry a just-typed draft key so the picker fills BEFORE Save; when absent
+        (or masked) the subject's effective config supplies the credential — but only when that
+        config's mode matches the requested provider, so a stale Groq key can never be sent to
+        OpenAI. Fixed first-party endpoints only (control_plane.model_catalog); no base_url here.
+        """
+        from control_plane import model_catalog as _mc
+
+        subject = subject_of(request)
+        mode = str(body.get("mode") or "").strip()
+        raw_key = body.get("api_key")
+        region = str(body.get("region") or "").strip()
+        api_key = _mc.masked_or_blank(raw_key if isinstance(raw_key, str) else "")
+        if not api_key:
+            # The same user > platform > env resolution a turn applies. None = the lookup failed;
+            # fall through to the env/draft paths rather than probing with a foreign provider's key.
+            cfg = dispatcher.resolve_model_config(subject) or {}
+            if (cfg.get("mode") or "").strip() == mode:
+                api_key = _mc.masked_or_blank(str(cfg.get("api_key") or ""))
+                region = region or str(cfg.get("region") or "").strip()
+        if not api_key and mode == "openai-api":
+            api_key = (os.environ.get("OPENAI_API_KEY") or "").strip()
+        if not api_key and mode in ("gemini", "antigravity"):
+            api_key = (os.environ.get("GEMINI_API_KEY") or "").strip()
+        try:
+            return _mc.list_models(mode, api_key, region=region) if mode == "bedrock" else _mc.list_models(mode, api_key)
+        except _mc.CatalogError as exc:
+            status = exc.status or (401 if exc.auth else 502)
+            raise HTTPException(status_code=status, detail=str(exc)) from exc
 
     @app.get("/api/models/test")
     def models_test(request: Request):

@@ -58,6 +58,10 @@ class Workers:
             return self.identity_env.get("TINA_VIEGEM_TOKEN", "")
         return self.selected.services["gipformer"]["environment"].get("TINA_GIPFORMER_TOKEN", "")
     def status(self, backend):
+        if backend not in self.selected.services and not (
+                backend == "viegem" and self.selected.viegem_device == "mps"):
+            return {"running": False, "ready": False,
+                    "device": self.selected.viegem_device if backend == "viegem" else "cpu"}
         try:
             info = request_json(self.endpoint(backend) + "/status", timeout=1)
             model = info["model"]

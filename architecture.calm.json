@@ -91,7 +91,7 @@
    "unique-id": "agent-api",
    "node-type": "service",
    "name": "agent-api",
-   "description": "unit control-plane; dispatch -> runtime spawn; meeting copilot Per-user ChatGPT disconnect keeps TINA/ASR sessions separate. Terminal OAuth state is cancelled locally; authenticated internal Agent API owns profile writes, disconnect and generation checks under the same file lock as token refresh. Credentials stay in the private auth volume; callbacks from a disconnected generation cannot restore an old account. Existing in-flight workers may retain short-lived tokens. Owner-scoped meeting Q&A reads canonical transcript and explicitly selected linked private Wiki documents, validates source IDs, stores source fingerprints, and creates a new Wiki page only after explicit Apply; existing pages and canonical data are never overwritten. Routine files are owner-scoped active private-workspace resources: anchored no-symlink I/O, per-owner serialized reconcile, source SHA preconditions for explicit Edit/toggle/delete, and stable IDs per workspace/file. Delete removes the source before cancelling all related jobs; shared workspace files never grant schedules. Explicit /research chat commands and document research requests resolve a private writable note destination from the authenticated active set. Private Codex history restores turn-scoped recorded source metadata and original opened URLs; missing reference mappings remain visibly unresolved.",
+   "description": "unit control-plane; dispatch -> runtime spawn; meeting copilot Per-user ChatGPT disconnect keeps TINA/ASR sessions separate. Terminal OAuth state is cancelled locally; authenticated internal Agent API owns profile writes, disconnect and generation checks under the same file lock as token refresh. Credentials stay in the private auth volume; callbacks from a disconnected generation cannot restore an old account. Existing in-flight workers may retain short-lived tokens. Owner-scoped meeting Q&A reads canonical transcript and explicitly selected linked private Wiki documents, validates source IDs, stores source fingerprints, and creates a new Wiki page only after explicit Apply; existing pages and canonical data are never overwritten. Routine files are owner-scoped active private-workspace resources: anchored no-symlink I/O, per-owner serialized reconcile, source SHA preconditions for explicit Edit/toggle/delete, and stable IDs per workspace/file. Delete removes the source before cancelling all related jobs; shared workspace files never grant schedules. Chat dispatch serializes configuration changes per thread in Redis using expiring locks and keyed model-configuration digests under agent:chat-config:*. Raw credentials are never stored in that metadata. An unchanged configuration reuses its warm worker; changed provider, credential or model waits for the previous turn-complete and requests cooperative stop through the existing chat input stream, confirms terminal state through runtime.v1 and replaces the idle workload before pre-delivering and spawning the next turn. Busy or unverifiable refreshes return actionable errors without sending the prompt to an old provider. The existing thread id, output stream and provider-session history are preserved. Bedrock model discovery reads paginated regional foundation-model/inference-profile lists; credential tests use native InvokeModel. The API image packages the same Python provider helpers and automatic thinking policy as the worker. All providers use automatic thinking; legacy effort pins are ignored, and the settings UI exposes no manual thinking field. Worker configuration digests include the deployed provider-adapter revision, so adapter fixes replace old warm workers without discarding conversation history. Gemini defaults to gemini-3.5-flash. Gemini, DeepSeek and Bedrock credential tests verify native function-call/result round trips before reporting success; Bedrock uses the same InvokeModelWithResponseStream protocol as its CLI and decodes complete AWS event-stream frames with checksum validation; custom API model registration supplies exact model IDs to the pinned CLI SDK rather than embedding endpoint URIs. Groq credential tests verify a real function-call/result round trip through the worker request adapter before testing summaries. Model discovery excludes speech-only Orpheus entries and marks known text-only ALLaM as summary-only, preventing chat selection while preserving meeting use. Explicit /research chat commands and document research requests resolve a private writable note destination from the authenticated active set. Private Codex history restores turn-scoped recorded source metadata and original opened URLs; missing reference mappings remain visibly unresolved.",
    "metadata": [
     {
      "path": "core/agent/services/agent-api"
@@ -108,7 +108,7 @@
    "unique-id": "completion-provider",
    "node-type": "system",
    "name": "configured completion provider",
-   "description": "the deployment or per-user model endpoint selected by TINA_LLM_PROVIDER; may be tenant-hosted or an external provider",
+   "description": "the deployment or per-user model endpoint; may be tenant-hosted or an external provider. Groq uses Codex Responses at https://api.groq.com/openai/v1 for chat, DeepSeek uses the Claude Code Anthropic-compatible endpoint at https://api.deepseek.com/anthropic, and Gemini uses agy with its Gemini API-key provider. Their tool-less meeting jobs use OpenAI-compatible Chat Completions at the respective fixed Groq, DeepSeek and Gemini endpoints. The same masked per-user/platform provider credential selects both paths; TINA transcript API tokens remain separate.",
    "interfaces": [
     {
      "unique-id": "completion-provider-api",
@@ -1222,7 +1222,7 @@
    "unique-id": "agent-worker",
    "node-type": "service",
    "name": "agent-worker",
-   "description": "spawned isolated workspace-agent worker; selectable Claude Code, Codex app-server, or Antigravity CLI (agy) harness; every dispatch mounts the ordered [_global, active workspaces, _system] stack, fails closed without _global, and loads its authoritative entry context. Codex pins explicit named per-turn filesystem profiles to TINA write grants, protects agent/Git metadata and excludes temporary write roots. Trusted chat/routine turns map WebSearch/WebFetch grants to cached/live hosted web tools; untrusted event/transcription turns disable web tools and remain read-only/offline. Shell networking requires Bash plus WebFetch and a root-owned exclusive GitHub-domain proxy policy, with private addresses, upstream proxies, Unix-socket forwarding and direct-network bypass blocked. Managed networking is not globally forced so offline turns remain isolated. Codex loads workspace instructions and skills, maps TINA auto/gate MCP grants to Codex approval modes, streams tool lifecycle events, pauses gate calls for owner-scoped, one-call decisions over chat streams using tool-approval.v1, and participates in the shared transcript-size resume cap. A private per-TINA-session provider-thread index preserves display history across provider restarts; reset removes this index, and legacy recovery uses only same-subject, same-session Redis events newer than session creation. Codex user-message events define visible human messages, excluding injected environment and developer context; restored tool names remain descriptive. Antigravity maps TINA mount grants to read_file/write_file permissions, sandboxes commands, loads governed skills, exposes only auto-granted non-secret MCP servers in headless mode, and normalizes streamed events and conversation ids. Its model setting requires a persisted Terms warning acknowledgment; consumer OAuth access through third-party software is prohibited by Google's terms. Harness-written kg/entities files are workspace.v1-validated before commit. Post-meeting summary uses a tool-less CompletionPort and a deterministic writer with a local generated-content fingerprint, inference-time compare-and-swap, workspace locking and atomic publication; user-edited or unmarked existing documents are preserved, and only the meeting entity path is committed. Meeting Q&A uses a private short-lived, tool-less CompletionPort job with read-only mounts and no public chat history. Web-enabled Codex turns render explicit source metadata as final Markdown links and persist bounded per-turn source records in private continuity; missing citation mappings are never guessed. Explicit Knowledge research instructions create a new private Markdown note with meeting/repo/web source rows, evidence versions and verification dates, preserving other files and canonical transcript/audio.",
+   "description": "spawned isolated workspace-agent worker; selectable Claude Code, Codex app-server, or Antigravity CLI (agy) harness; every dispatch mounts the ordered [_global, active workspaces, _system] stack, fails closed without _global, and loads its authoritative entry context. Groq mode reuses Codex against the fixed Groq Responses endpoint for chat and OpenAI-compatible Chat Completions for meeting summaries. A per-turn Groq model profile disables unsupported freeform patch tools and namespace delegation at the CLI source, with provider-neutral TINA instructions and file edits through the existing sandboxed function tools. DeepSeek mode reuses Claude Code against DeepSeek's Anthropic-compatible endpoint for chat and its Chat Completions endpoint for summaries. Gemini mode selects agy's Gemini API-key provider for chat and the Gemini OpenAI-compatible endpoint for summaries, without consumer/OAuth credentials or a synthetic Terms acknowledgment. Dispatch selects each effective per-user/platform key for both paths and clears other providers' credentials. A temporary authenticated loopback proxy inside the worker strips unsupported Responses fields and non-function tools, maps developer instructions to system messages for non-GPT-OSS chat templates without changing tool history, rejects known non-tool chat models, serializes function calls and preserves streamed events and HTTP errors; it never executes tools or expands the harness grants. Codex pins explicit named per-turn filesystem profiles to TINA write grants, protects agent/Git metadata and excludes temporary write roots. Trusted chat/routine turns map WebSearch/WebFetch grants to cached/live hosted web tools; untrusted event/transcription turns disable web tools and remain read-only/offline. Shell networking requires Bash plus WebFetch and a root-owned exclusive GitHub-domain proxy policy, with private addresses, upstream proxies, Unix-socket forwarding and direct-network bypass blocked. Managed networking is not globally forced so offline turns remain isolated. Codex loads workspace instructions and skills, maps TINA auto/gate MCP grants to Codex approval modes, streams tool lifecycle events, pauses gate calls for owner-scoped, one-call decisions over chat streams using tool-approval.v1, and participates in the shared transcript-size resume cap. A private per-TINA-session provider-thread index preserves display history across provider restarts; reset removes this index, and legacy recovery uses only same-subject, same-session Redis events newer than session creation. Codex user-message events define visible human messages, excluding injected environment and developer context; restored tool names remain descriptive. Antigravity maps TINA mount grants to read_file/write_file permissions, sandboxes commands, loads governed skills, exposes only auto-granted non-secret MCP servers in headless mode, and normalizes streamed events and conversation ids. The legacy Antigravity model selection requires a persisted Terms warning acknowledgment; consumer OAuth access through third-party software is prohibited by Google's terms. The Gemini API-key provider has independent credential preflight. Harness-written kg/entities files are workspace.v1-validated before commit. Post-meeting summary uses a tool-less CompletionPort and a deterministic writer with a local generated-content fingerprint, inference-time compare-and-swap, workspace locking and atomic publication; user-edited or unmarked existing documents are preserved, and only the meeting entity path is committed. Meeting Q&A uses a private short-lived, tool-less CompletionPort job with read-only mounts and no public chat history. Web-enabled Codex turns render explicit source metadata as final Markdown links and persist bounded per-turn source records in private continuity; missing citation mappings are never guessed. Explicit Knowledge research instructions create a new private Markdown note with meeting/repo/web source rows, evidence versions and verification dates, preserving other files and canonical transcript/audio.",
    "metadata": [
     {
      "path": "core/agent/worker"
@@ -1791,6 +1791,59 @@
    "description": "Owner-authorized content document PUT, no-overwrite move and explicit delete with expected SHA-256, existing workspace write lock, entity frontmatter validation and atomic file replacement. Reviewed moves preview source-preserving static backlinks and outgoing relative links in the same workspace; confirmation rechecks the full plan fingerprint, preserves code and aliases, reports ambiguous/uneditable references, rolls back ordinary write failures and removes the source last. Bounded Unicode Markdown content search excludes hidden paths and symlinks. Dashboard uses source-preserving formatting, a folder tree, wikilinks, history and per-account/workspace/file draft recovery across reloads via browser session storage retaining the original SHA-256; Terminal searches its authorized active mounts. Explicit per-path Git commit leaves unrelated staged paths and remotes untouched; shared workspaces remain read-only here. General harness writers retain their existing filesystem behavior."
   },
   {
+   "unique-id": "meeting-translation.v1",
+   "node-type": "contract",
+   "name": "meeting-translation.v1",
+   "description": "Owner-scoped English transcript overlay with progressive status, source validation and retry backoff.",
+   "metadata": [
+    {
+     "path": "core/agent/contracts/meeting-translation.v1",
+     "domain": "agent"
+    }
+   ]
+  },
+  {
+   "unique-id": "meeting-translation-cache",
+   "node-type": "database",
+   "name": "Private meeting translation SQLite cache",
+   "description": "Durable owner/meeting/phrase English translations, observed live-tail stability and atomic provider job leases. Exact member IDs/text invalidate edits. Legacy fragment cache is retained without reuse; no transcript mutation.",
+   "metadata": [
+    {
+     "contract": "meeting-translation.v2",
+     "stage": "derived"
+    }
+   ],
+   "controls": {
+    "ownership": {
+     "description": "single writer",
+     "requirements": [
+      {
+       "requirement-url": "urn:tina:calm:controls:single-writer",
+       "config": {
+        "writers": [
+         "agent-api"
+        ],
+        "match": ".meeting-translations/translations.sqlite3",
+        "op": "write"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "unique-id": "meeting-translation.v2",
+   "node-type": "contract",
+   "name": "meeting-translation.v2",
+   "description": "Backend-owned same-speaker phrase groups, source members, stable live-tail buffering and cached English overlay.",
+   "metadata": [
+    {
+     "path": "core/agent/contracts/meeting-translation.v2",
+     "domain": "agent"
+    }
+   ]
+  },
+  {
    "unique-id": "asr-control",
    "node-type": "service",
    "name": "ASR host controller",
@@ -1831,7 +1884,10 @@
       "unit-in",
       "va-chat",
       "meeting-knowledge-pages",
-      "workspace-human-documents"
+      "workspace-human-documents",
+      "meeting-translation.v1",
+      "meeting-translation-cache",
+      "meeting-translation.v2"
      ]
     }
    }
@@ -3927,6 +3983,63 @@
     }
    ],
    "description": "Authenticated explicit Markdown edit and optional selected-path local commit; owner and content preconditions are enforced in the control plane."
+  },
+  {
+   "unique-id": "translation-cache-write",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "agent-api"
+     },
+     "destination": {
+      "node": "meeting-translation-cache"
+     }
+    }
+   },
+   "description": "Owner-scoped SQLite phrase cache, live-tail observations and job leases; every HTTP access first reauthorizes canonical transcript and meeting status.",
+   "metadata": [
+    {
+     "access": "write"
+    }
+   ]
+  },
+  {
+   "unique-id": "terminal-meeting-translation",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "terminal-app"
+     },
+     "destination": {
+      "node": "agent-api"
+     }
+    }
+   },
+   "description": "Authenticated English/bilingual view reads and advances the shared translation overlay; original ASR remains independent.",
+   "metadata": [
+    {
+     "access": "call"
+    }
+   ]
+  },
+  {
+   "unique-id": "extension-meeting-translation",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "extension"
+     },
+     "destination": {
+      "node": "agent-api"
+     }
+    }
+   },
+   "description": "Meeting Bot viewer requests the same gateway-authorized translation cache; provider secrets remain server-side.",
+   "metadata": [
+    {
+     "access": "call"
+    }
+   ]
   },
   {
    "unique-id": "terminal-asr-control",

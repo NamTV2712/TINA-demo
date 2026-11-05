@@ -12,10 +12,14 @@ the minted token, ``REDIS_URL`` + the ``unit:<id>:in/out`` topics, the ``start``
 from __future__ import annotations
 
 import json
+import hashlib
+import hmac
 import logging
 import os
 import threading
 import time
+import uuid
+from contextlib import contextmanager, nullcontext
 from typing import Optional
 
 import contracts
@@ -29,6 +33,12 @@ from shared.units import (
     is_dictation_translate, is_meeting_knowledge, is_private_transcript_job, output_topic,
 )
 from pathlib import Path
+
+
+class ModelConfigRefreshError(RuntimeError):
+    def __init__(self, message: str, status: int = 503):
+        super().__init__(message)
+        self.status = status
 
 logger = logging.getLogger("agent_api.dispatch")
 
@@ -137,7 +147,7 @@ MODEL_AUTH_ENV_ALLOWLIST = (
     "TINA_LLM_BASE_URL",        # llm/ completion adapters' first-class endpoint (pairs with the key above)
     "OPENAI_API_KEY",           # Codex app-server / OpenAI Responses API (provider-specific)
     "ACCESS_TOKEN",             # short-lived Sign in with ChatGPT access token for Codex app-server
-    "TINA_CODEX_AUTH_MODE",     # API key or ChatGPT plan auth configuration for the Codex runner
+    "TINA_CODEX_AUTH_MODE",     # OpenAI, Groq API key or ChatGPT plan auth for the Codex runner
     "GEMINI_API_KEY",           # Antigravity CLI's official Gemini API-key auth mode
     "TINA_ANTIGRAVITY_AUTH_MODE",
     "TINA_ANTIGRAVITY_TERMS_ACKNOWLEDGED",
@@ -168,6 +178,10 @@ def overlay_model_config(env: dict[str, str], config: dict, *, allowlist: str = 
     allowlist: a non-allowlisted model is DROPPED (deployment default applies), never an error —
     a stale pref must not brick a turn."""
     mode = (config.get("mode") or "").strip()
+    env["TINA_AGENT_EFFORT"] = ""  # Auto for every provider, including legacy stored pins.
+    # Vendor routing must never survive switching back from Bedrock.
+    if mode:
+        env["CLAUDE_CODE_USE_BEDROCK"] = "1" if mode == "bedrock" else ""
     model = (config.get("model") or "").strip()
     if model and _allowlisted(model, allowlist):
         env["TINA_AGENT_MODEL"] = model     # harness turns (chat/docs/routines)
@@ -181,18 +195,51 @@ def overlay_model_config(env: dict[str, str], config: dict, *, allowlist: str = 
     elif mode != "antigravity" and meeting_model:
         logger.warning("meeting model %r not in TINA_MODEL_ALLOWLIST — using deployment default",
                        meeting_model)
-    # Reasoning-effort pin for the claude-code harness (Settings → Models "effort"). Empty ⇒ unset ⇒
-    # the CLI's own default (no flag on the argv); an explicit value reaches the worker env and the
-    # harness passes it through as --effort. Backends that validate the OpenAI-compatible
-    # reasoning_effort field (vLLM/LiteLLM groups) reject the CLI's default high when it is outside
-    # their allowlist; the pin overrides that default.
-    effort = (config.get("effort") or "").strip()
-    if effort:
-        env["TINA_AGENT_EFFORT"] = effort
     if mode and mode != "antigravity":
         env["GEMINI_API_KEY"] = ""
         env["TINA_ANTIGRAVITY_AUTH_MODE"] = ""
         env["TINA_ANTIGRAVITY_TERMS_ACKNOWLEDGED"] = ""
+    if mode in ("groq", "deepseek", "gemini"):
+        # Each API provider owns its endpoint/key/model defaults. Explicit empty values stop
+        # Runtime from restoring another provider's secrets or a deployment model.
+        key = (config.get("api_key") or "").strip()
+        default_model = {"groq": "openai/gpt-oss-20b", "deepseek": "deepseek-flash",
+                         "gemini": "gemini-3.5-flash"}[mode]
+        env["TINA_RUNNER"] = {"groq": "codex", "deepseek": "claude-code",
+                              "gemini": "antigravity"}[mode]
+        env["TINA_CODEX_AUTH_MODE"] = "groq" if mode == "groq" else ""
+        env["TINA_LLM_PROVIDER"] = "openai-compat"
+        env["TINA_LLM_BASE_URL"] = {
+            "groq": "https://api.groq.com/openai/v1", "deepseek": "https://api.deepseek.com",
+            "gemini": "https://generativelanguage.googleapis.com/v1beta/openai",
+        }[mode]
+        env["TINA_LLM_API_KEY"] = key
+        for other_key in (
+            "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL",
+            "CLAUDE_CODE_OAUTH_TOKEN", "OPENAI_API_KEY", "ACCESS_TOKEN",
+            "AWS_BEARER_TOKEN_BEDROCK", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY",
+            "AWS_SESSION_TOKEN", "AWS_PROFILE",
+        ):
+            env[other_key] = ""
+        target = model or default_model
+        target = target if _allowlisted(target, allowlist) else ""
+        env["TINA_AGENT_MODEL"] = target
+        env["TINA_LLM_MODEL"] = target
+        # Do not let an unrelated deployment's meeting model leak across the provider boundary.
+        env["TINA_MEETING_MODEL"] = (
+            meeting_model if meeting_model and _allowlisted(meeting_model, allowlist) else target
+        )
+        if mode == "deepseek":
+            env["ANTHROPIC_BASE_URL"] = "https://api.deepseek.com/anthropic"
+            env["ANTHROPIC_AUTH_TOKEN"] = key
+            # Claude's subagent/model aliases must stay on the selected DeepSeek model too.
+            for alias in ("ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL",
+                          "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL"):
+                env[alias] = target
+        elif mode == "gemini":
+            env["GEMINI_API_KEY"] = key
+            env["TINA_ANTIGRAVITY_AUTH_MODE"] = "gemini-api"
+        return
     if mode == "antigravity":
         env["TINA_RUNNER"] = "antigravity"
         env["TINA_ANTIGRAVITY_TERMS_ACKNOWLEDGED"] = (
@@ -216,14 +263,25 @@ def overlay_model_config(env: dict[str, str], config: dict, *, allowlist: str = 
             key = os.environ.get("AWS_BEARER_TOKEN_BEDROCK", "").strip()
         if region and key:
             base = f"https://bedrock-runtime.{region}.amazonaws.com/anthropic"
-            env["ANTHROPIC_BASE_URL"] = base
-            env["ANTHROPIC_API_KEY"] = key
-            # Bedrock API keys use x-api-key. Suppress any deployment bearer token (e.g. Ollama)
-            # so the Claude CLI cannot send conflicting authorization headers.
+            env["TINA_RUNNER"] = "claude-code"
+            env["TINA_CODEX_AUTH_MODE"] = ""
+            env["AWS_REGION"] = region
+            env["AWS_DEFAULT_REGION"] = region
+            env["AWS_BEARER_TOKEN_BEDROCK"] = key
+            env["ANTHROPIC_BASE_URL"] = ""
+            env["ANTHROPIC_API_KEY"] = ""
+            # Native Bedrock uses its own bearer credential; suppress deployment provider auth.
             env["ANTHROPIC_AUTH_TOKEN"] = ""
             for key_name in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN",
-                             "AWS_PROFILE", "AWS_BEARER_TOKEN_BEDROCK"):
+                             "AWS_PROFILE", "CLAUDE_CODE_OAUTH_TOKEN", "OPENAI_API_KEY"):
                 env[key_name] = ""
+            target = model if model and _allowlisted(model, allowlist) else ""
+            env["TINA_AGENT_MODEL"] = target
+            env["TINA_LLM_MODEL"] = target
+            env["TINA_MEETING_MODEL"] = meeting_model if meeting_model and _allowlisted(meeting_model, allowlist) else target
+            for alias in ("ANTHROPIC_MODEL", "ANTHROPIC_DEFAULT_OPUS_MODEL",
+                          "ANTHROPIC_DEFAULT_SONNET_MODEL", "ANTHROPIC_DEFAULT_HAIKU_MODEL"):
+                env[alias] = target
             env["TINA_LLM_PROVIDER"] = "anthropic"
             env["TINA_LLM_BASE_URL"] = base
             env["TINA_LLM_API_KEY"] = key
@@ -327,6 +385,7 @@ def build_unit_env(settings: Settings, invocation: dict, *, unit_id: str, token:
         "TINA_LAUNCHER": identity["launcher"],
         "TINA_AGENT_IDENTITY_TOKEN": token,                      # the per-dispatch SIGNED token (minted now; boundary verification lands in Stage 2)
         "TINA_RUNNER": invocation.get("runner", "claude-code"),
+        "TINA_AGENT_EFFORT": "",                                # Auto, never inherit an old manual pin
         "TINA_UNIT_ID": unit_id,
         "TINA_UNIT_TRIGGER": invocation["trigger"],
         "TINA_UNIT_OUT_TOPIC": output_topic(unit_id),
@@ -567,6 +626,10 @@ class Dispatcher:
         # ungated so async triggers (scheduled/event/transcription) never lose a dispatch; their
         # credential-less failure mode is the clean rewritten done frame (llm/errors taxonomy).
         model_config = self.resolve_model_config(identity["subject"])
+        if (model_config is None and invocation["trigger"] == "message"
+                and not is_private_transcript_job(invocation)
+                and callable(getattr(self._runtime, "stop", None))):
+            raise ModelConfigRefreshError("Could not load your saved model configuration. Retry shortly.")
         env = build_unit_env(self._settings, invocation, unit_id=uid, token=token, memberships=memberships,
                              model_config=model_config, trusted_live_meeting=trusted_live_meeting,
                              trusted_canonical_notes=trusted_canonical_notes)
@@ -584,9 +647,11 @@ class Dispatcher:
         #     entrypoint (no double turn).
         # A watchdog then waits for the worker's turn-accepted ack and respawns once if the worker
         # exited in the XADD↔idle-exit race window without taking the message.
-        delivery = (self._predeliver(uid, invocation)
-                    if invocation["trigger"] == "message" and not is_private_transcript_job(invocation) else None)
-        acked = self._runtime.spawn(uid, self._settings.agent_profile, env)
+        is_chat = invocation["trigger"] == "message" and not is_private_transcript_job(invocation)
+        guard = self._chat_config_guard(uid, env) if is_chat else nullcontext()
+        with guard:
+            delivery = self._predeliver(uid, invocation) if is_chat else None
+            acked = self._runtime.spawn(uid, self._settings.agent_profile, env)
         if delivery is not None:
             self._watch_delivery(uid, env, tail=delivery)
         logger.info(
@@ -599,6 +664,89 @@ class Dispatcher:
 
     _ACK_DEADLINE_SEC = 10.0   # worker boot is ~1-2s; a warm pickup acks in ms
     _ACK_POLL_SEC = 0.5
+    _CONFIG_WAIT_SEC = 8.0
+    _STOP_WAIT_SEC = 3.0
+
+    def _model_fingerprint(self, env: dict[str, str]) -> str:
+        from llm.model_capabilities import model_runtime_revision
+        selected = {key: value for key, value in env.items() if (
+            key.startswith(("ANTHROPIC_", "AWS_", "GEMINI_", "OPENAI_", "CLAUDE_CODE_", "TINA_LLM_", "TINA_ANTIGRAVITY_"))
+            or key in {"TINA_RUNNER", "TINA_AGENT_MODEL", "TINA_AGENT_EFFORT", "TINA_MEETING_MODEL", "TINA_CODEX_AUTH_MODE", "ACCESS_TOKEN"}
+        )}
+        selected["__runtime_policy__"] = model_runtime_revision()
+        secret = self._settings.dispatch_signing_key.get_secret_value().encode()
+        return hmac.new(secret, json.dumps(selected, sort_keys=True).encode(), hashlib.sha256).hexdigest()
+
+    def _chat_idle(self, client, uid: str) -> bool:
+        # turn-complete follows both inference AND governed commits. A done frame alone is too early.
+        for _entry_id, fields in client.xrevrange(output_topic(uid), count=100):
+            event = json.loads(fields.get("event") or fields.get(b"event") or "{}")
+            if event.get("type") == "turn-complete":
+                return True
+            if event.get("type") == "turn-accepted":
+                return False
+        return False
+
+    @contextmanager
+    def _chat_config_guard(self, uid: str, env: dict[str, str]):
+        # Older injected runtimes expose only spawn/await; the production HTTP runtime supports stop.
+        if not callable(getattr(self._runtime, "stop", None)):
+            yield
+            return
+        client = self._redis()
+        if client is None:
+            raise ModelConfigRefreshError("Could not verify this chat's model configuration. Retry shortly.")
+        key, lock = f"agent:chat-config:{uid}", f"agent:chat-config-lock:{uid}"
+        nonce, fingerprint = uuid.uuid4().hex, self._model_fingerprint(env)
+        acquired = False
+        try:
+            deadline = time.monotonic() + self._CONFIG_WAIT_SEC
+            while not client.set(lock, nonce, nx=True, ex=60):
+                if time.monotonic() >= deadline:
+                    raise ModelConfigRefreshError("Another message is updating this chat. Retry shortly.", 409)
+                time.sleep(0.05)
+            acquired = True
+            stored = client.get(key)
+            if isinstance(stored, bytes):
+                stored = stored.decode()
+            if stored != fingerprint:
+                state = self._runtime.await_done(uid, timeout_sec=0.0)
+                if state in ("starting", "running"):
+                    while not self._chat_idle(client, uid):
+                        if self._runtime.await_done(uid, timeout_sec=0.0) not in ("starting", "running"):
+                            break
+                        if time.monotonic() >= deadline:
+                            raise ModelConfigRefreshError("The previous response is still finishing. Retry after it completes to use your new model.", 409)
+                        time.sleep(0.1)
+                    # Chat workers already support a cooperative stop input. Avoid Docker's
+                    # meeting-bot SIGTERM grace (30s), and let any earlier queued turn drain.
+                    client.xadd(input_topic(uid), {"turn": json.dumps({"type": "stop"})})
+                    stop_deadline = time.monotonic() + self._STOP_WAIT_SEC
+                    while self._runtime.await_done(uid, timeout_sec=0.0) in ("starting", "running", "stopping"):
+                        if time.monotonic() >= stop_deadline:
+                            raise ModelConfigRefreshError("The previous chat worker is finishing its queued messages. Retry shortly to use your new model.", 409)
+                        time.sleep(0.05)
+                    self._runtime.stop(uid)  # terminal already: reconcile state without a grace wait
+                # Only a keyed digest is stored; credentials never enter this Redis metadata.
+                client.set(key, fingerprint, ex=86400)
+        except ModelConfigRefreshError:
+            raise
+        except Exception:
+            raise ModelConfigRefreshError("Could not refresh this chat's model configuration. Retry shortly.") from None
+        else:
+            yield
+        finally:
+            if acquired:
+                # Compare-and-delete so an expired lock cannot delete another dispatch's lock.
+                try:
+                    with client.pipeline() as pipe:
+                        pipe.watch(lock)
+                        if pipe.get(lock) in (nonce, nonce.encode()):
+                            pipe.multi()
+                            pipe.delete(lock)
+                            pipe.execute()
+                except Exception:
+                    pass  # the bounded lock TTL still releases it
 
     def _redis(self):
         """The warm-delivery redis client — lazy, fail-soft (None = warm path off this dispatch),

@@ -8,6 +8,7 @@ export interface TranscriptSegment {
   speakerStatus?: "unknown" | "observed" | "confirmed";
   speaker?: string;
   text: string;
+  sourceText?: string;        // Exact accepted source before display-only typography cleanup.
   ts?: number | string;       // meeting-relative time (seconds) — back-compat
   tsMs?: number;              // ABSOLUTE wall-clock time of the line, epoch ms (UTC). Renderer formats in local TZ.
   endTsMs?: number;           // Absolute wall-clock end of this segment; used for audio-follow highlighting.

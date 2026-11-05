@@ -21,6 +21,15 @@ TINA Capture live translation is also a one-shot, tool-less `CompletionPort` job
 confirmed transcript segment and a fixed target-language code; the source is treated as untrusted
 text, and the translated result is returned to the loopback client without writing transcript or
 workspace history.
+
+Meeting transcript translation reuses this same entrypoint with one backend-grouped phrase as
+its source text. `engine.py` passes the saved `TINA_MEETING_MODEL` override to CompletionPort
+(falling back to its configured completion model when absent). The shared `translation_text`
+helper removes inline reasoning and rejects unusable output before emitting a message delta.
+Failures emit no translated text and do not log the transcript or provider response body.
+The control plane owns phrase grouping, persistence, leases and retry; this worker performs
+only the tool-less translation and leaves original/canonical transcripts unchanged.
+
 # Canonical notes jobs
 
 `processed_notes.py` handles the private canonical-window entrypoint before the legacy live loop.

@@ -14,11 +14,14 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { recordAsrTiming } from "../lib/asrTelemetry";
 import { splitTextIntoSpans, type SpanEntity } from "./inlineSpans";
 import { entityColor } from "../ui-kit/docLinks";
+import styles from "./MeetingTranscript.module.css";
+import type { TranscriptLanguage } from "./MeetingTranslation";
+import type { PhraseTranslation } from "./translationGroups";
 
 export interface EngineTag { label: string; kind: string }
 export interface EngineEntity { id?: string; label: string; kind: string; docPath?: string }
 export interface EngineSignal { id: string; kind: string; label: string }
-export interface EngineSegment { speakerId?: string; speakerKey?: string; speaker?: string; text: string; tsMs?: number; endTsMs?: number; id?: string; completed?: boolean; tags?: EngineTag[]; stale?: boolean; evidence?: unknown[] }
+export interface EngineSegment { speakerId?: string; speakerKey?: string; speaker?: string; text: string; tsMs?: number; endTsMs?: number; id?: string; completed?: boolean; tags?: EngineTag[]; stale?: boolean; evidence?: unknown[]; translation?: PhraseTranslation }
 
 export function TranscriptEvidence({ evidence }: { evidence?: unknown[] }) {
   const [open, setOpen] = useState(false);
@@ -155,6 +158,8 @@ export function LiveTranscriptEngine({
   onSegmentClick,
   playableSegmentIds,
   activeSegmentId,
+  language = "vi",
+  translationPaused = false,
 }: {
   segments: EngineSegment[];
   emptyLabel?: string;
@@ -164,6 +169,8 @@ export function LiveTranscriptEngine({
   onSegmentClick?: (segmentId: string) => void;
   playableSegmentIds?: ReadonlySet<string>;
   activeSegmentId?: string | null;
+  language?: TranscriptLanguage;
+  translationPaused?: boolean;
 }) {
   const renderedAt = performance.now();
   useLayoutEffect(() => {
@@ -196,14 +203,35 @@ export function LiveTranscriptEngine({
 
   const head = (speaker?: string, tsMs?: number) =>
     speaker ? (
-      <div style={{ fontSize: 12, fontWeight: 700, color: "var(--t2)", marginBottom: 3 }}>
+      <div className={styles.speaker}>
         {speaker}
         {typeof tsMs === "number" && (
-          <span style={{ fontWeight: 400, color: "var(--t3)", marginLeft: 8 }}>{new Date(tsMs).toLocaleTimeString()}</span>
+          <time>{new Date(tsMs).toLocaleTimeString()}</time>
         )}
       </div>
     ) : null;
 
+  if (language !== "vi") {
+    return <div className={styles.flow}>
+      {segments.map((segment, index) => {
+        const translated = segment.translation?.text;
+        const draft = segment.completed === false;
+        const originalVisible = language === "bilingual" || !translated;
+        const playable = !!segment.id && playableSegmentIds?.has(segment.id) && !!onSegmentClick;
+        return <article className={styles.turn} data-active={!!segment.id && segment.id === activeSegmentId} key={segment.translation?.groupId ?? segment.id ?? index}>
+          {head(segment.speaker, segment.tsMs)}
+          {originalVisible && <div className={styles.original} data-draft={draft}>
+            {playable ? <button type="button" onClick={() => onSegmentClick?.(segment.id!)} aria-label="Play transcript segment"
+              className={styles.play} aria-current={segment.id === activeSegmentId ? "true" : undefined}>{segment.text}</button> : segment.text}
+          </div>}
+          <div lang="en" className={styles.english}>
+            <span className={styles.languageLabel}>EN</span>
+            {translated || (draft ? "Chờ đoạn nói hoàn tất…" : translationPaused ? "Chưa dịch được · bản gốc vẫn được giữ" : segment.translation?.ready ? "Đang dịch…" : "Đang gom câu…")}
+          </div>
+        </article>;
+      })}
+    </div>;
+  }
   const pendingLine = (segment: EngineSegment, index: number) => (
     <div key={segment.id ?? `pending-${index}`}>
       {head(segment.speaker, segment.tsMs)}
@@ -219,7 +247,7 @@ export function LiveTranscriptEngine({
     const turns = segments.filter((segment) => segment.completed !== false);
     let previousIdentity: string | undefined;
     return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 5, maxWidth: 760 }}>
+      <div className={styles.flow} style={{ gap: 5 }}>
         {turns.map((segment, index) => {
           const speakerIdentity = segment.speakerId ? `id:${segment.speakerId}`
             : segment.speaker?.trim() ? `name:${segment.speaker}`
@@ -303,7 +331,7 @@ export function LiveTranscriptEngine({
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 13, maxWidth: 760 }}>
+    <div className={styles.flow}>
       {blocks.map((b, idx) => {
         const isLast = idx === blocks.length - 1;
         return (

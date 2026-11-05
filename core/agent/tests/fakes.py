@@ -58,6 +58,9 @@ class FakeRuntime(RuntimePort):
     def await_done(self, workload_id: str, timeout_sec: float = 0.0) -> str:
         return "stopped"
 
+    def stop(self, workload_id: str) -> None:
+        pass  # this fake is already terminal
+
 
 class FakeLLM(AgentDecisionPort):
     """A scripted ``AgentDecisionPort`` standing in for the LLM — NEVER calls a real model.

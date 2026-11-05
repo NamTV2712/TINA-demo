@@ -40,6 +40,23 @@ BAD = {"title": "no type or id"}  # missing required type + id → workspace.v1 
 
 # ── stream-json normalization ────────────────────────────────────────────────
 
+def test_deepseek_harness_requires_own_key_and_reports_provider_auth_failure(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://api.deepseek.com/anthropic")
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "foreign-credential")
+    harness = ClaudeCodeHarness()
+    assert "DeepSeek API key is missing" in harness.preflight()
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "deepseek-own-key")
+    monkeypatch.setenv("TINA_AGENT_MODEL", "deepseek-flash")
+    assert harness.preflight() is None
+    done, = parse_stream_json([json.dumps({"type": "result", "is_error": True,
+                                        "result": "HTTP 401: deepseek-own-key invalid"})])
+    assert not done["ok"] and "DeepSeek" in done["reply"]
+    assert "deepseek-own-key" not in json.dumps(done)
+    monkeypatch.setenv("TINA_AGENT_MODEL", "")
+    assert "approved DeepSeek chat model" in harness.preflight()
+
+
 def test_parse_stream_json_normalizes():
     lines = [
         json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": "hello"}]}}),
@@ -124,10 +141,9 @@ def test_build_argv_core_flags_and_session_model():
     assert "--effort" not in argv
 
 
-def test_build_argv_effort_pin():
+def test_build_argv_ignores_legacy_effort_pin():
     argv = build_argv("hi", effort="medium")
-    assert "--effort" in argv and "medium" in argv
-    assert argv[argv.index("--effort") + 1] == "medium"
+    assert "--effort" not in argv
 
 # ── the untrusted-subprocess env scrub (data-plane tenancy) ──────────────────
 # The model-driven harness CLI exposes a Bash tool. It must NOT inherit the worker's REDIS_URL (which

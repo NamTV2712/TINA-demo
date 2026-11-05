@@ -55,11 +55,14 @@ class OpenAICompatCompletion:
             r = self._client.post(f"{self._base}/chat/completions",
                                   json={"model": target, "messages": messages}, headers=headers)
         except httpx.HTTPError as exc:
-            raise LLMError(f"completion transport failure against {self._base}: {exc}") from exc
+            detail = str(exc).replace(self._key, "[redacted]") if self._key else str(exc)
+            raise LLMError(f"completion transport failure against {self._base}: {detail}") from exc
         if r.status_code in (401, 403):
-            raise LLMAuthError(f"{r.status_code} from {self._base}: {r.text[:300]}")
+            detail = r.text.replace(self._key, "[redacted]") if self._key else r.text
+            raise LLMAuthError(f"{r.status_code} from {self._base}: {detail[:300]}")
         if r.status_code >= 400:
-            raise LLMError(f"{r.status_code} from {self._base}: {r.text[:300]}")
+            detail = r.text.replace(self._key, "[redacted]") if self._key else r.text
+            raise LLMError(f"{r.status_code} from {self._base}: {detail[:300]}")
         try:
             choice = (r.json().get("choices") or [{}])[0]
             text = (choice.get("message") or {}).get("content") or ""

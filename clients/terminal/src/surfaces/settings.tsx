@@ -4,7 +4,7 @@
  *  "API Tokens" activity-bar item retired into here (its panels are imported, not duplicated);
  *  the Meetings sidebar keeps its own first-connect calendar card at the point of need — this is
  *  the durable home (multi-calendar management lives in `calendarConnections.tsx`). Sections are a left nav with local state. */
-import { Fragment, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { Fragment, useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { registerTab } from "../contributions";
 import { Icon } from "../ui-kit";
 import { Modal } from "../ui-kit/Modal";
@@ -12,10 +12,12 @@ import { GitHubTokenCard, TokensPanel } from "./tokens";
 import { presentError } from "./apiClient";
 import { CalendarConnectionsPanel } from "./calendarConnections";
 import { ChatGPTModelInput } from "./chatGPTModelInput";
+import { ModelPicker } from "./modelPicker";
+import { BEDROCK_REGIONS, fallbackChoicesForMode } from "./modelCatalog";
 import { AsrStatusPanel } from "./asrStatus";
 import { TranscriptionPicker } from "./transcriptionPicker";
 import transcriptionStyles from "./transcriptionPicker.module.css";
-import { canSaveModelPrefs, getModelPrefs, setModelPrefs, getTranscriptionPrefs, setTranscriptionPrefs, getGlobalSetting, setGlobalSetting, testModels, testTranscription, type ConfigTestResult } from "./settingsApi";
+import { apiModelProvider, canSaveModelPrefs, getModelPrefs, setModelPrefs, getTranscriptionPrefs, setTranscriptionPrefs, getGlobalSetting, setGlobalSetting, testModels, testTranscription, type ConfigTestResult } from "./settingsApi";
 import { getAsrRuntime, setAsrRuntime, type AsrRuntime } from "./settingsApi";
 
 type SectionId = "calendar" | "models" | "asr" | "tokens" | "github" | "account";
@@ -196,8 +198,8 @@ export function ChatGPTPlanConnection() {
 /** Shared models/transcription form. Callers provide scope-specific fields for per-user or admin
  *  global settings. Secrets arrive MASKED (********abcd): an untouched masked value is never sent
  *  back, typing replaces it, and emptying a previously-set field clears it. */
-function ConfigForm({ fields, load, save, note, savedNote = "Saved — next agent turn uses it", chatGPTModelCatalog = false, chatGPTConnection = false, onValues, renderWarning, saveGuard }: {
-  fields: Array<{ key: string; label: string; placeholder?: string; secret?: boolean; checkbox?: boolean; options?: Array<{ value: string; label: string; disabled?: boolean }>; showIf?: (v: Record<string, string>) => boolean }>;
+function ConfigForm({ fields, load, save, note, savedNote = "Saved — next agent turn uses it", chatGPTModelCatalog = false, chatGPTConnection = false, onValues, renderWarning, saveGuard, footer }: {
+  fields: Array<{ key: string; label: string; placeholder?: string | ((v: Record<string, string>) => string); secret?: boolean; checkbox?: boolean; options?: Array<{ value: string; label: string; disabled?: boolean }> | ((v: Record<string, string>) => Array<{ value: string; label: string; disabled?: boolean }>); hint?: (v: Record<string, string>) => string; showIf?: (v: Record<string, string>) => boolean; modelPicker?: (v: Record<string, string>) => boolean; modelEmptyLabel?: (v: Record<string, string>) => string }>;
   load: () => Promise<Record<string, string>>;
   save: (update: Record<string, string>) => Promise<Record<string, string>>;
   note?: string;
@@ -207,8 +209,10 @@ function ConfigForm({ fields, load, save, note, savedNote = "Saved — next agen
   onValues?: (values: Record<string, string>) => void;
   renderWarning?: (values: Record<string, string>) => ReactNode;
   saveGuard?: (values: Record<string, string>) => boolean;
+  footer?: (state: { dirty: boolean; values: Record<string, string> }) => ReactNode;
 }) {
   const [values, setValues] = useState<Record<string, string>>({});
+  const regionSuggestionsId = useId();
   const [initial, setInitial] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -225,6 +229,13 @@ function ConfigForm({ fields, load, save, note, savedNote = "Saved — next agen
   const dirty = fields.some((f) => (values[f.key] ?? "") !== (initial[f.key] ?? ""));
   const updateField = (key: string, value: string) => {
     const next = { ...values, [key]: value };
+    if (key === "mode" && value !== values.mode) {
+      // An API provider is a different endpoint + credential + model namespace, so switching into or
+      // out of one must not carry the previous provider's values across.
+      if (apiModelProvider(value) || apiModelProvider(values.mode)) {
+        for (const providerField of ["api_key", "base_url", "model", "meeting_model"]) next[providerField] = "";
+      }
+    }
     setSaved(false);
     setValues(next);
     onValues?.(next);
@@ -257,15 +268,18 @@ function ConfigForm({ fields, load, save, note, savedNote = "Saved — next agen
             </label>
           );
         }
+        const useModelPicker = f.modelPicker?.(values) ?? false;
+        const options = typeof f.options === "function" ? f.options(values) : f.options;
+        const hint = f.hint?.(values);
         return (
           <Fragment key={f.key}>
-            <label style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 13.5, color: "var(--t2)" }}>
-              <span style={{ width: 128, flex: "none", color: "var(--t3)" }}>{f.label}</span>
-              {f.options ? (
+            <label style={{ display: "flex", alignItems: useModelPicker ? "flex-start" : "center", gap: 12, fontSize: 13.5, color: "var(--t2)" }}>
+              <span style={{ width: 128, flex: "none", color: "var(--t3)", ...(useModelPicker ? { paddingTop: 9 } : {}) }}>{f.label}</span>
+              {options ? (
                 <select value={values[f.key] ?? ""}
                   onChange={(e) => updateField(f.key, e.target.value)}
                   style={{ ...field, width: "auto", flex: 1 }}>
-                  {f.options.map((o) => <option key={o.value} value={o.value} disabled={o.disabled}>{o.label}</option>)}
+                  {options.map((o) => <option key={o.value} value={o.value} disabled={o.disabled}>{o.label}</option>)}
                 </select>
               ) : chatGPTModelCatalog && f.key === "model" && values.mode === "openai-subscription" ? (
                 <ChatGPTModelInput
@@ -273,13 +287,34 @@ function ConfigForm({ fields, load, save, note, savedNote = "Saved — next agen
                   onChange={(value) => updateField(f.key, value)}
                   style={field}
                 />
+              ) : useModelPicker ? (
+                <ModelPicker
+                  key={values.mode}
+                  ariaLabel={f.label}
+                  value={values[f.key] ?? ""}
+                  onChange={(value) => updateField(f.key, value)}
+                  mode={values.mode ?? ""}
+                  apiKey={values.api_key}
+                  region={values.region}
+                  requiresTools={f.key === "model"}
+                  suggestDefault={values.mode === "bedrock" && f.key === "model"}
+                  emptyLabel={f.modelEmptyLabel?.(values) ?? "Provider default"}
+                  style={field}
+                />
               ) : (
-                <input value={values[f.key] ?? ""} placeholder={f.placeholder}
+                <><input value={values[f.key] ?? ""} aria-label={f.label} placeholder={typeof f.placeholder === "function" ? f.placeholder(values) : f.placeholder}
                   type={f.secret ? "password" : "text"}
+                  list={f.key === "region" ? regionSuggestionsId : undefined}
                   onChange={(e) => updateField(f.key, e.target.value)}
                   style={field} />
+                  {f.key === "region" && <datalist id={regionSuggestionsId}>
+                    {BEDROCK_REGIONS.map((region) => <option key={region.value} value={region.value}>{region.label}</option>)}
+                  </datalist>}</>
               )}
             </label>
+            {hint && (
+              <p style={{ margin: "0 0 0 140px", fontSize: 11.5, color: "var(--t3)", lineHeight: 1.5 }}>{hint}</p>
+            )}
             {chatGPTConnection && f.key === "mode" && values.mode === "openai-subscription" && <ChatGPTPlanConnection />}
           </Fragment>
         );
@@ -291,6 +326,7 @@ function ConfigForm({ fields, load, save, note, savedNote = "Saved — next agen
         </button>
         {saved && <span style={{ fontSize: 11.5, color: "var(--green)" }}>{savedNote}</span>}
       </div>
+      {footer?.({ dirty, values })}
     </div>
   );
 }
@@ -298,7 +334,14 @@ function ConfigForm({ fields, load, save, note, savedNote = "Saved — next agen
 /** On-demand credential test row (fail-loud surface): runs the EFFECTIVE config — the same
  *  user > global > env resolution a chat turn / bot spawn applies — against the real backend
  *  and prints the verdict inline, remedy included. What Save can't tell you, Test does. */
-function TestRow({ label, run }: { label: string; run: () => Promise<ConfigTestResult> }) {
+function TestRow({ label, run, disabled = false, hint }: {
+  label: string;
+  run: () => Promise<ConfigTestResult>;
+  /** The probe uses the SAVED config; while the form is dirty it would report the previous
+   *  provider/key — the exact mismatch that reads as "the key worked elsewhere". */
+  disabled?: boolean;
+  hint?: string;
+}) {
   const [busy, setBusy] = useState(false);
   const [res, setRes] = useState<ConfigTestResult | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -312,10 +355,13 @@ function TestRow({ label, run }: { label: string; run: () => Promise<ConfigTestR
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4, maxWidth: 460, marginTop: 6 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <button disabled={busy} onClick={() => void doTest()}
-          style={{ ...btn, opacity: busy ? 0.5 : 1 }}>
+        <button disabled={busy || disabled} onClick={() => void doTest()}
+          style={{ ...btn, opacity: busy || disabled ? 0.5 : 1 }}>
           {busy ? "Testing…" : label}
         </button>
+        {disabled && hint && (
+          <span role="status" style={{ fontSize: 11.5, color: "var(--t3)" }}>{hint}</span>
+        )}
         {res && (
           <span style={{ fontSize: 11.5, color: res.ok ? "var(--green)" : "var(--danger)" }}>
             {res.ok ? "✓" : "✗"} {provenance && <span style={{ color: "var(--t3)" }}>[{provenance}] </span>}
@@ -382,27 +428,41 @@ export function ModelsSection() {
       { value: "subscription", label: "Claude subscription (deployment credentials)" },
       { value: "openai-subscription", label: "ChatGPT plan (Sign in with ChatGPT)" },
       { value: "openai-api", label: "OpenAI API key" },
+      { value: "groq", label: "Groq API key" },
+      { value: "deepseek", label: "DeepSeek API key" },
+      { value: "gemini", label: "Gemini API key" },
       { value: "antigravity", label: "Google Antigravity CLI (agy)" },
       { value: "bedrock", label: "AWS Bedrock" },
       { value: "custom", label: "Custom endpoint (open-source / gateway)" },
     ] },
     { key: "base_url", label: "Base URL", placeholder: "https://… (Anthropic/OpenAI-compatible gateway)", showIf: (v: Record<string, string>) => v.mode === "custom" },
-    { key: "region", label: "AWS Region", placeholder: "e.g. us-east-1", showIf: (v: Record<string, string>) => v.mode === "bedrock" },
-    { key: "api_key", label: "Credential", placeholder: "unchanged unless typed", secret: true, showIf: (v: Record<string, string>) => ["antigravity", "custom", "bedrock", "openai-api"].includes(v.mode) },
+    { key: "region", label: "AWS Region", placeholder: "Choose or enter a region", showIf: (v: Record<string, string>) => v.mode === "bedrock",
+      hint: () => "Use the region where your Bedrock key was generated. Model suggestions refresh for this region; you can also enter another AWS region." },
+    { key: "api_key", label: "Credential", placeholder: (v: Record<string, string>) => apiModelProvider(v.mode) ? `${apiModelProvider(v.mode)!.label} API key — unchanged unless typed` : "unchanged unless typed", secret: true, showIf: (v: Record<string, string>) => ["antigravity", "custom", "bedrock", "openai-api", "groq", "deepseek", "gemini"].includes(v.mode) },
     { key: "antigravity_terms_acknowledged", label: "I have read this warning and acknowledge the account risk.", checkbox: true, showIf: (v: Record<string, string>) => v.mode === "antigravity" },
-    { key: "model", label: "Chat model", placeholder: "deployment default (e.g. sonnet)" },
-    { key: "meeting_model", label: "Meeting model", placeholder: "defaults to chat model", showIf: (v: Record<string, string>) => v.mode !== "antigravity" },
-    { key: "effort", label: "Reasoning effort", placeholder: "CLI default (e.g. medium)", options: [
-      { value: "", label: "CLI default" },
-      { value: "low", label: "low" },
-      { value: "medium", label: "medium" },
-      { value: "high", label: "high" },
-      { value: "xhigh", label: "xhigh" },
-    ] },
+    { key: "model", label: "Chat model", placeholder: (v: Record<string, string>) => apiModelProvider(v.mode) ? `${apiModelProvider(v.mode)!.model} (default)` : "deployment default (e.g. sonnet)",
+      modelPicker: (v: Record<string, string>) => fallbackChoicesForMode(v.mode) !== null,
+      modelEmptyLabel: (v: Record<string, string>) => {
+        const provider = apiModelProvider(v.mode);
+        if (provider) return `Provider default — ${provider.model}`;
+        if (v.mode === "subscription") return "Deployment default (e.g. sonnet)";
+        if (v.mode === "antigravity") return "CLI default";
+        if (v.mode === "bedrock") return "Choose a regional model (required)";
+        return "Provider default";
+      } },
+    { key: "meeting_model", label: "Meeting model", placeholder: "defaults to chat model", showIf: (v: Record<string, string>) => v.mode !== "antigravity",
+      modelPicker: (v: Record<string, string>) => fallbackChoicesForMode(v.mode) !== null,
+      modelEmptyLabel: () => "Same as chat model" },
   ];
   const renderModelWarning = (values: Record<string, string>) => values.mode === "antigravity" ? (
     <div role="alert" style={{ border: "1px solid var(--danger)", borderRadius: 8, padding: "10px 12px", background: "color-mix(in srgb, var(--danger) 8%, transparent)", color: "var(--t2)", fontSize: 12.5, lineHeight: 1.55 }}>
       Google says third-party access to Antigravity violates its Terms of Service; wrapping <code>agy</code> in TINA with a consumer-plan login is unsupported and may lead to account suspension or termination. Acknowledging this warning does not make that use permitted. Use a Gemini API key or Gemini Enterprise credential for TINA. This choice affects agent turns only; meeting summaries continue using the deployment completion provider. CLI authentication and model access are checked on the first agent turn.
+    </div>
+  ) : apiModelProvider(values.mode) ? (
+    <div role="status" style={{ fontSize: 12.5, color: "var(--t3)", lineHeight: 1.55 }}>
+      Use your <a href={apiModelProvider(values.mode)!.keyUrl} target="_blank" rel="noopener noreferrer" style={{ color: "var(--t1)" }}>{apiModelProvider(values.mode)!.label} API key</a> for chat and meeting notes.
+      {" "}Leave Chat model blank to use <code>{apiModelProvider(values.mode)!.model}</code>; Meeting model follows Chat model unless specified.
+      {" "}Save, then test model credentials. Speech-to-text is configured separately in Transcription.
     </div>
   ) : null;
   const modelSaveGuard = canSaveModelPrefs;
@@ -452,7 +512,7 @@ export function ModelsSection() {
   ];
   const providerLabels: Record<string, string> = {
     "": "Deployment default", subscription: "Claude subscription", "openai-subscription": "ChatGPT plan",
-    "openai-api": "OpenAI API", bedrock: "AWS Bedrock", custom: "Custom endpoint",
+    "openai-api": "OpenAI API", groq: "Groq", deepseek: "DeepSeek", gemini: "Gemini", bedrock: "AWS Bedrock", custom: "Custom endpoint",
   };
   const transcriptionLabels: Record<string, string> = {
     "": "Deployment default", default: "Follow platform default", deployment: "Deployment endpoint", apple: "Apple GPU (MLX/Metal)",
@@ -501,10 +561,11 @@ export function ModelsSection() {
         <div style={head}>Your models</div>
         <ConfigForm fields={modelFields} load={async () => asStrings(await getModelPrefs())}
           save={async (u) => { const saved = await setModelPrefs(u); window.dispatchEvent(new Event("tina-models-changed")); return asStrings(saved); }} chatGPTModelCatalog chatGPTConnection onValues={setModelSummary}
-          renderWarning={renderModelWarning} saveGuard={modelSaveGuard} />
-        {modelSummary.mode === "antigravity"
-          ? <div role="status" style={{ fontSize: 11.5, color: "var(--t3)", lineHeight: 1.5 }}>Antigravity CLI authentication and model availability are validated on the first agent turn.</div>
-          : <TestRow label="Test model credentials" run={testModels} />}
+          renderWarning={renderModelWarning} saveGuard={modelSaveGuard}
+          footer={({ dirty }) => modelSummary.mode === "antigravity"
+            ? <div role="status" style={{ fontSize: 11.5, color: "var(--t3)", lineHeight: 1.5 }}>Antigravity CLI authentication and model availability are validated on the first agent turn.</div>
+            : <TestRow label="Test model credentials" run={testModels} disabled={dirty}
+                hint="Save first — Test checks the saved configuration." />} />
       </div>
       <div id="models-panel-transcription" role="tabpanel" aria-labelledby="models-tab-transcription" hidden={scope !== "transcription"}>
         <TranscriptionPicker runtime={runtime} available={availableTranscriptionBackends} busy={runtimeBusy}

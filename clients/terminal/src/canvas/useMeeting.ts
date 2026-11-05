@@ -140,6 +140,7 @@ function normalizeSegments(segments: TranscriptSegment[] | null | undefined): Tr
       speakerKey: segment.speakerKey,
       speakerStatus: segment.speakerStatus,
       text: textOf(segment.text),
+      sourceText: segment.sourceText ?? textOf(segment.text),
       ts: segment.ts,
       tsMs: segment.tsMs,
       endTsMs: segment.endTsMs,
@@ -414,10 +415,11 @@ function useLiveMeetingState(meetingId?: string): MeetingState {
       const canonical = s.id ? accepted.get(s.id) : undefined;
       const source = canonical && (canonical.speakerRevision ?? 0) >= (s.speakerRevision ?? 0) ? canonical : s;
       return { id: s.id, speakerId: canonical?.speakerId ?? s.speakerId, speakerKey: canonical?.speakerKey ?? s.speakerKey, speakerStatus: source.speakerStatus, speaker: transcriptSpeaker(source.speaker, source.speakerStatus),
+        sourceText: canonical && (canonical.revision ?? 0) > 0 ? canonical.text : s.text,
         text: canonical && (canonical.revision ?? 0) > 0 ? canonical.text : s.text, ts: s.t, tsMs: s.tsMs, completed: canonical && (canonical.revision ?? 0) > 0 ? true : s.completed };
     });
-    const recordedSegments = safeArray(durable.lines).map((s) => ({ id: s.id, speaker: transcriptSpeaker(s.speaker, s.speakerStatus), speakerId: s.speakerId, speakerKey: s.speakerKey, speakerStatus: s.speakerStatus, text: s.text, ts: lineTs(s), tsMs: s.tsMs, endTsMs: s.endTsMs, sessionUid: s.sessionUid }));
-    const fallbackSegments = normalizedSelected.transcript.map((s) => ({ speaker: transcriptSpeaker(s.speaker, s.speakerStatus), speakerId: s.speakerId, speakerKey: s.speakerKey, speakerStatus: s.speakerStatus, text: s.text, ts: lineTs(s) }));
+    const recordedSegments = safeArray(durable.lines).map((s) => ({ id: s.id, speaker: transcriptSpeaker(s.speaker, s.speakerStatus), speakerId: s.speakerId, speakerKey: s.speakerKey, speakerStatus: s.speakerStatus, sourceText: s.text, text: s.text, ts: lineTs(s), tsMs: s.tsMs, endTsMs: s.endTsMs, sessionUid: s.sessionUid }));
+    const fallbackSegments = normalizedSelected.transcript.map((s) => ({ speaker: transcriptSpeaker(s.speaker, s.speakerStatus), speakerId: s.speakerId, speakerKey: s.speakerKey, speakerStatus: s.speakerStatus, sourceText: s.text, text: s.text, ts: lineTs(s) }));
     const segments = selected.session_uid ? liveSegments : (recordedSegments.length ? recordedSegments : fallbackSegments);
     const copilotCards = safeArray(live.cards).filter(c => !c.stale).map((c, i) => ({ id: `live-${i}-${c.kind}-${c.title}`, kind: c.kind, title: cleanTranscriptText(c.title), body: c.body ? cleanTranscriptText(c.body) : c.body }));
     const diagnostics = {

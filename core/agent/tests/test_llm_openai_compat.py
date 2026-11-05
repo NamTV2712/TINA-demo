@@ -17,6 +17,16 @@ def _adapter(handler, **kw):
     return OpenAICompatCompletion(transport=httpx.MockTransport(handler), **kw)
 
 
+@pytest.mark.parametrize("status", [401, 500])
+def test_provider_error_body_cannot_echo_the_api_key(status):
+    adapter = _adapter(lambda _request: httpx.Response(status, text="rejected own-key"),
+                       api_key="own-key")
+    with pytest.raises(LLMError) as error:
+        adapter.complete("hello")
+    assert "own-key" not in str(error.value)
+    assert "[redacted]" in str(error.value)
+
+
 def test_request_shape_and_parse():
     seen = {}
 
