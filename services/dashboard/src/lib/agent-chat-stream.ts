@@ -3,11 +3,11 @@ import { withBasePath } from './base-path';
 export interface AgentEvent { type: string; text?: string; tool?: string; reply?: string; message?: string; ok?: boolean; sha?: string }
 
 /** Resume the same turn, acknowledging only complete SSE frames (including split UTF-8). */
-export async function readAgentTurn(body: { prompt: string; session: string; context?: unknown },
+export async function readAgentTurn(body: { prompt: string; session: string; context?: unknown; research?: boolean },
   signal: AbortSignal, onEvent: (event: AgentEvent) => void,
   fetchImpl: typeof fetch = fetch): Promise<void> {
   const payload = JSON.stringify({ ...body, turn_id: crypto.randomUUID() });
-  const timeout = AbortSignal.timeout(90000);
+  const timeout = AbortSignal.timeout(body.research ? 600000 : 90000);
   const combined = AbortSignal.any([signal, timeout]);
   let cursor = '';
   const seen = new Set<string>();

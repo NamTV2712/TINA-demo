@@ -31,6 +31,7 @@ flowchart LR
     transcript_sync["Owner transcript synchronization CLI"]
     diarization_worker["Local speaker diarization worker"]
     meeting_translation_cache["Private meeting translation SQLite cache"]
+    asr_control["ASR host controller"]
   end
   transcription["transcription"]
   bot ==>|"audio -> tenant-hosted"| transcription

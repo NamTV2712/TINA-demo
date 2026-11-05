@@ -68,6 +68,12 @@ try {
       body: JSON.stringify({ platform: 'desktop', native_meeting_id: id }) });
   }
   assert.ok(seen.includes('first') && seen.includes('second'), 'audio must reach each pinned STT endpoint');
+  selected = { backend: 'viegem', url: bUrl };
+  const viegem = await open('managed-viegem');
+  assert.equal(viegem.frame.transcription.backend, 'viegem');
+  assert.ok(!JSON.stringify(viegem.frame).includes('secret'));
+  await fetch(`${base}/extension/sessions/end`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ platform: 'desktop', native_meeting_id: 'managed-viegem' }) });
   const denied = await open('denied', 'invalid'); assert.equal(denied.frame.type, 'error');
   const deniedMeeting = await (await fetch(`${base}/transcripts/desktop/denied`)).json() as any;
   assert.equal(deniedMeeting.id, 0, 'authentication failure must not create a meeting');

@@ -22,3 +22,21 @@ These tests fake provider calls and do not need API keys or consume inference qu
 agent suite includes POSIX file locks and symlinks; run it on Linux/WSL or in the existing Docker
 test environment when developing on Windows. Frontend behavior belongs to the Terminal canvas
 and extension suites, not these backend tests.
+
+Codex network/web probes run explicitly in an isolated built worker image. They do not use model
+credentials or production workspace volumes. Run from the repository root (use the appropriate
+Docker context for the host):
+
+```sh
+for probe in codex_network_smoke.py codex_web_smoke.py; do
+  docker run --rm --read-only --tmpfs /tmp --tmpfs /work \
+    --security-opt seccomp=unconfined --security-opt no-new-privileges --cap-drop SYS_ADMIN \
+    -v "$PWD/core/agent/tests/$probe:/smoke.py:ro" \
+    --entrypoint python tina/v012-agent-worker:dev /smoke.py || exit 1
+done
+```
+
+The network probe checks allowed HTTPS/Git, blocked domains/private addresses/proxy bypass,
+offline/read-only turns and metadata/credential protection. The web probe uses a local Responses
+fixture to inspect real Codex requests on new/resumed threads: live, cached and disabled modes.
+It does not claim that a live model/account actually performed a search.

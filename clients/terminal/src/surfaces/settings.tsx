@@ -15,25 +15,35 @@ import { ChatGPTModelInput } from "./chatGPTModelInput";
 import { ModelPicker } from "./modelPicker";
 import { BEDROCK_REGIONS, fallbackChoicesForMode } from "./modelCatalog";
 import { AsrStatusPanel } from "./asrStatus";
+import { TranscriptionPicker } from "./transcriptionPicker";
+import transcriptionStyles from "./transcriptionPicker.module.css";
 import { apiModelProvider, canSaveModelPrefs, getModelPrefs, setModelPrefs, getTranscriptionPrefs, setTranscriptionPrefs, getGlobalSetting, setGlobalSetting, testModels, testTranscription, type ConfigTestResult } from "./settingsApi";
+import { getAsrRuntime, setAsrRuntime, type AsrRuntime } from "./settingsApi";
 
 type SectionId = "calendar" | "models" | "asr" | "tokens" | "github" | "account";
 type ModelSettingsScope = "agent" | "transcription" | "global";
-// shortcut: Gipformer uses the existing custom backend record; update this preset if Compose's host port changes.
-const GIPFORMER_URL = "http://host.docker.internal:18002";
-const GIPFORMER_LABEL = "Gipformer 1.5 · FSMN-VAD";
+// shortcut: recognize legacy custom URLs; managed VieGem selections resolve their endpoint on the server.
+const TRANSCRIPTION_PRESETS: Record<string, { url: string; label: string }> = {
+  gipformer: { url: "http://host.docker.internal:18002", label: "Gipformer 1.5 · FSMN-VAD" },
+  viegem: { url: "http://host.docker.internal:18005", label: "VieGem + LM" },
+};
 
 function transcriptionFormValues(value: object): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [key, item] of Object.entries(value)) if (typeof item === "string" && item) out[key] = item;
-  if (out.backend === "custom" && out.url === GIPFORMER_URL) out.backend = "gipformer";
+  if (out.backend === "custom") {
+    const preset = Object.entries(TRANSCRIPTION_PRESETS).find(([key, item]) => key !== "viegem" && item.url === out.url);
+    if (preset) out.backend = preset[0];
+  }
   return out;
 }
 
 function transcriptionDisplay(value: { backend?: string | null; url?: string | null; effective?: { label: string; source: string } | null }) {
   return value.effective ? {
     ...value.effective,
-    label: value.backend === "custom" && value.url === GIPFORMER_URL ? GIPFORMER_LABEL : value.effective.label,
+    label: value.backend === "custom"
+      ? Object.values(TRANSCRIPTION_PRESETS).find((item) => item.url === value.url)?.label ?? value.effective.label
+      : value.effective.label,
   } : null;
 }
 
@@ -367,7 +377,7 @@ function TestRow({ label, run, disabled = false, hint }: {
 /** Models — which LLM the agent runs on and which STT backend the bot transcribes with; your own
  *  settings first, the deployment-wide defaults below for admins. Empty fields = the level below
  *  decides (global settings, then the deployment env). */
-function ModelsSection() {
+export function ModelsSection() {
   const [globalAdmin, setGlobalAdmin] = useState(false);
   const [scope, setScope] = useState<ModelSettingsScope>("agent");
   const [modelSummary, setModelSummary] = useState<Record<string, string>>({});
@@ -375,6 +385,34 @@ function ModelsSection() {
   const [effectiveTranscription, setEffectiveTranscription] = useState<{ label: string; source: string } | null>(null);
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const [availableTranscriptionBackends, setAvailableTranscriptionBackends] = useState<string[]>(["default", "custom"]);
+  const [runtime, setRuntime] = useState<AsrRuntime | null>(null);
+  const [runtimeError, setRuntimeError] = useState("");
+  const [runtimeFetchError, setRuntimeFetchError] = useState("");
+  const [runtimeTarget, setRuntimeTarget] = useState<"gipformer" | "viegem" | null>(null);
+  const [runtimeBusy, setRuntimeBusy] = useState(false);
+  const [runtimeVersion, setRuntimeVersion] = useState(0);
+  const [otherProvidersOpen, setOtherProvidersOpen] = useState(false);
+  useEffect(() => {
+    if (scope !== "transcription") return;
+    let active = true;
+    const refresh = () => getAsrRuntime().then(value => { if (active) { setRuntime(value); setRuntimeFetchError(""); } })
+      .catch(() => { if (active) setRuntimeFetchError("ASR control is unavailable. Retry shortly."); });
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 3000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [scope]);
+  const changeRuntime = async (backend: "gipformer" | "viegem", enabled: boolean) => {
+    setRuntimeBusy(true); setRuntimeTarget(backend); setRuntimeError("");
+    try {
+      const current = await getAsrRuntime();
+      const saved = await setAsrRuntime(backend, enabled, current.account.revision);
+      setRuntime(saved);
+      const prefs = await getTranscriptionPrefs();
+      setEffectiveTranscription(transcriptionDisplay(prefs));
+      return prefs;
+    } catch (error) { setRuntimeError(presentError(error).headline); throw error; }
+    finally { setRuntimeBusy(false); setRuntimeTarget(null); }
+  };
   useEffect(() => {
     let on = true;
     // Admin probe: the global card renders only when /api/admin/settings answers (404 = not admin).
@@ -430,12 +468,12 @@ function ModelsSection() {
   const modelSaveGuard = canSaveModelPrefs;
   const transcriptionFields = [
     { key: "backend", label: "Backend", options: [
+      { value: "managed", label: "Model selected above", disabled: true },
       { value: "default", label: "Follow platform default" },
       { value: "apple", label: availableTranscriptionBackends.includes("apple") ? "Apple GPU (MLX/Metal)" : "Apple GPU (MLX/Metal) — not configured", disabled: !availableTranscriptionBackends.includes("apple") },
       { value: "nvidia", label: availableTranscriptionBackends.includes("nvidia") ? "NVIDIA GPU (CUDA)" : "NVIDIA GPU (CUDA) — not configured", disabled: !availableTranscriptionBackends.includes("nvidia") },
       { value: "funasr", label: availableTranscriptionBackends.includes("funasr") ? "FunASR · Qwen + FSMN-VAD" : "FunASR · Qwen + FSMN-VAD — not configured", disabled: !availableTranscriptionBackends.includes("funasr") },
       { value: "sherpa", label: availableTranscriptionBackends.includes("sherpa") ? "Sherpa · Qwen INT8 + Silero" : "Sherpa · Qwen INT8 + Silero — not configured", disabled: !availableTranscriptionBackends.includes("sherpa") },
-      { value: "gipformer", label: GIPFORMER_LABEL },
       { value: "custom", label: "Custom endpoint" },
     ] },
     { key: "url", label: "Service URL", placeholder: "https://…", showIf: (v: Record<string, string>) => v.backend === "custom" },
@@ -446,6 +484,7 @@ function ModelsSection() {
       { value: "deployment", label: "Deployment endpoint" },
       { value: "funasr", label: "FunASR · Qwen + FSMN-VAD" },
       { value: "sherpa", label: "Sherpa · Qwen INT8 + Silero" },
+      { value: "viegem", label: "VieGem + LM" },
       { value: "apple", label: "Apple GPU (MLX/Metal)" },
       { value: "nvidia", label: "NVIDIA GPU (CUDA)" },
     ] },
@@ -453,6 +492,8 @@ function ModelsSection() {
     { key: "token", label: "Deployment token", placeholder: "unchanged unless typed", secret: true },
     { key: "funasr_url", label: "FunASR URL", placeholder: "http://host.docker.internal:18000" },
     { key: "sherpa_url", label: "Sherpa native URL", placeholder: "http://host.docker.internal:18001" },
+    { key: "viegem_url", label: "VieGem + LM URL", placeholder: "http://host.docker.internal:18005" },
+    { key: "viegem_token", label: "VieGem worker token", placeholder: "unchanged unless typed", secret: true },
     { key: "apple_url", label: "Apple GPU (MLX/Metal) URL", placeholder: "http://host.docker.internal:8084" },
     { key: "apple_token", label: "Apple GPU token", placeholder: "unchanged unless typed", secret: true },
     { key: "nvidia_url", label: "NVIDIA GPU URL", placeholder: "CUDA transcription worker URL" },
@@ -475,7 +516,7 @@ function ModelsSection() {
   };
   const transcriptionLabels: Record<string, string> = {
     "": "Deployment default", default: "Follow platform default", deployment: "Deployment endpoint", apple: "Apple GPU (MLX/Metal)",
-    nvidia: "NVIDIA GPU (CUDA)", funasr: "FunASR · Qwen + FSMN-VAD", sherpa: "Sherpa · Qwen INT8 + Silero", gipformer: GIPFORMER_LABEL, custom: "Custom endpoint",
+    nvidia: "NVIDIA GPU (CUDA)", funasr: "FunASR · Qwen + FSMN-VAD", sherpa: "Sherpa · Qwen INT8 + Silero", ...Object.fromEntries(Object.entries(TRANSCRIPTION_PRESETS).map(([key, item]) => [key, item.label])), custom: "Custom endpoint",
   };
   const activeTranscriptionBackend = transcriptionSummary.backend === "default"
     ? transcriptionSummary.default_backend || "deployment"
@@ -487,7 +528,7 @@ function ModelsSection() {
 
   return (
     <div style={{ maxWidth: 720 }}>
-      <div aria-label="Current model settings" style={{ display: "flex", gap: 12, marginBottom: 22 }}>
+      {scope !== "transcription" && <div aria-label="Current model settings" style={{ display: "flex", gap: 12, marginBottom: 22 }}>
         <div style={summaryTile}>
           <span style={{ fontSize: 11.5, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".07em" }}>Agent model</span>
           <strong style={{ fontSize: 14.5, color: "var(--t1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{modelSummary.model || "Deployment default"}</strong>
@@ -498,7 +539,7 @@ function ModelsSection() {
           <strong style={{ fontSize: 14.5, color: "var(--t1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{effectiveTranscription?.label ?? transcriptionLabels[activeTranscriptionBackend] ?? "Deployment default"}</strong>
           <span style={{ fontSize: 12, color: "var(--t3)" }}>{effectiveTranscription ? { user: "Personal preference", platform: "Platform default", environment: "Deployment environment" }[effectiveTranscription.source] : "Choose and save a backend"} · next session</span>
         </div>
-      </div>
+      </div>}
       <div role="tablist" aria-label="Model settings scope" style={{ display: "flex", gap: 4, borderBottom: "1px solid var(--line)", marginBottom: 16 }}>
         {scopeTabs.map((tab, index) => {
           const selected = scope === tab.id;
@@ -527,18 +568,23 @@ function ModelsSection() {
                 hint="Save first — Test checks the saved configuration." />} />
       </div>
       <div id="models-panel-transcription" role="tabpanel" aria-labelledby="models-tab-transcription" hidden={scope !== "transcription"}>
-        <div style={head}>Your transcription backend</div>
-        <ConfigForm fields={transcriptionFields} load={async () => transcriptionFormValues(await getTranscriptionPrefs())}
-          save={async (u) => {
-            const value = await setTranscriptionPrefs(u.backend === "gipformer"
-              ? { ...u, backend: "custom", url: GIPFORMER_URL }
-              : u);
+        <TranscriptionPicker runtime={runtime} available={availableTranscriptionBackends} busy={runtimeBusy}
+          target={runtimeTarget} error={runtimeError || runtimeFetchError} unavailable={!!runtimeFetchError}
+          onChange={(backend, enabled) => void changeRuntime(backend, enabled)
+            .then(() => setRuntimeVersion(value => value + 1)).catch(() => undefined)} />
+        <details className={transcriptionStyles.advanced} onToggle={event => setOtherProvidersOpen(event.currentTarget.open)}>
+          <summary><Icon name="chevR" size={13} />Other providers</summary>
+          {otherProvidersOpen && <ConfigForm key={runtimeVersion} fields={transcriptionFields} load={async () => {
+            const values = transcriptionFormValues(await getTranscriptionPrefs());
+            if (values.backend in TRANSCRIPTION_PRESETS) values.backend = "managed";
+            return values;
+          }} save={async (update) => {
+            const value = await setTranscriptionPrefs(update);
             setEffectiveTranscription(transcriptionDisplay(value));
+            void getAsrRuntime().then(setRuntime).catch(() => undefined);
             return transcriptionFormValues(value);
-          }} onValues={setTranscriptionSummary}
-          savedNote="Saved — applies to new capture and bot sessions"
-          note="Meeting bots and Desktop capture use this preference when connected with your API key. Unbound TINA Capture follows the platform default. Running capture sessions keep their backend. The selected service must be running." />
-        <TestRow label="Test transcription backend" run={testTranscription} />
+          }} onValues={setTranscriptionSummary} savedNote="Saved — applies to new sessions" />}
+        </details>
       </div>
       {globalAdmin && <div id="models-panel-global" role="tabpanel" aria-labelledby="models-tab-global" hidden={scope !== "global"}>
         <div style={{ ...head, marginTop: 10, color: "var(--accent)" }}>Global defaults (admin — every user without own settings)</div>

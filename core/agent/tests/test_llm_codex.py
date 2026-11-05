@@ -28,6 +28,10 @@ class _Stdin:
         method = request.get("method")
         if method == "initialize":
             self.proc.stdout.lines.append(json.dumps({"id": request["id"], "result": {}}) + "\n")
+        elif method == "configRequirements/read":
+            self.proc.stdout.lines.append(json.dumps({
+                "id": request["id"], "result": {"requirements": self.proc.requirements},
+            }) + "\n")
         elif method == "thread/start":
             self.proc.stdout.lines.append(json.dumps({
                 "id": request["id"], "result": {"thread": {"id": "thread-readonly"}},
@@ -35,7 +39,7 @@ class _Stdin:
         elif method == "thread/resume":
             self.proc.stdout.lines.append(json.dumps({"id": request["id"], "result": {}}) + "\n")
         elif method == "turn/start":
-            self.proc.stdout.lines.append(json.dumps({"id": request["id"], "result": {}}) + "\n")
+            self.proc.stdout.lines.append(json.dumps({"id": request["id"], "result": {"turn": {"id": "turn-citations"}}}) + "\n")
             self.proc.stdout.lines.extend(json.dumps(event) + "\n" for event in self.proc.notifications)
             turn = {"status": self.proc.turn_status}
             if self.proc.turn_error:
@@ -52,11 +56,12 @@ class _Stdin:
 
 
 class _FakeCodexProcess:
-    def __init__(self, *, notifications=(), turn_status="completed", turn_error=None):
+    def __init__(self, *, notifications=(), turn_status="completed", turn_error=None, requirements=None):
         self.requests = []
         self.notifications = list(notifications)
         self.turn_status = turn_status
         self.turn_error = turn_error
+        self.requirements = requirements
         self.stdout = _Stdout()
         self.stdin = _Stdin(self)
 
@@ -150,8 +155,11 @@ def test_groq_codex_uses_compatibility_boundary_for_the_whole_sandboxed_turn(mon
     assert "model_context_window=131072" in settings
     assert "model_auto_compact_token_limit=100000" in settings
     by_method = {request.get("method"): request for request in proc.requests}
-    assert by_method["turn/start"]["params"]["sandboxPolicy"]["networkAccess"] is False
-    assert by_method["thread/start"]["params"]["sandbox"] == "read-only"
+    assert by_method["turn/start"]["params"]["permissions"] == "tina-offline"
+    assert by_method["thread/start"]["params"]["permissions"] == "tina-offline"
+    config = tomllib.loads("\n".join(captured["argv"][i + 1] for i, arg in enumerate(captured["argv"]) if arg == "-c"))
+    assert config["permissions"]["tina-offline"]["network"]["enabled"] is False
+    assert config["permissions"]["tina-offline"]["filesystem"] == {":root": "read"}
     assert events[-1]["ok"] is True
 
 
@@ -195,16 +203,100 @@ def test_codex_uses_read_only_sandbox_when_only_read_tools_are_allowed(
 
     by_method = {request.get("method"): request for request in proc.requests}
     if session is None:
-        assert by_method["thread/start"]["params"]["sandbox"] == "read-only"
-        assert by_method["thread/start"]["params"]["developerInstructions"] == "TINA workspace rules"
+        assert by_method["thread/start"]["params"]["permissions"] == "tina-offline"
+        assert by_method["thread/start"]["params"]["developerInstructions"].startswith("TINA workspace rules")
     else:
-        assert by_method["thread/resume"]["params"]["developerInstructions"] == "TINA workspace rules"
-        assert "excludeTurns" not in by_method["thread/resume"]["params"]
-    assert by_method["turn/start"]["params"]["sandboxPolicy"] == {
-        "type": "readOnly",
-        "networkAccess": False,
-    }
+        assert by_method["thread/resume"]["params"]["developerInstructions"].startswith("TINA workspace rules")
+    assert by_method["turn/start"]["params"]["permissions"] == "tina-offline"
     assert events[-1]["type"] == "done" and events[-1]["ok"] is True
+
+
+@pytest.mark.parametrize("session", [None, "thread-existing"])
+@pytest.mark.parametrize("trigger,tools,web_mode,network", [
+    ("message", ["Read", "Write", "Bash", "WebSearch", "WebFetch"], "live", True),
+    ("scheduled", ["Read", "Write", "Bash", "WebSearch", "WebFetch"], "live", True),
+    ("message", ["Read", "Write", "Bash", "WebSearch"], "cached", False),
+    ("message", ["Read", "Write", "WebSearch", "WebFetch"], "live", False),
+    ("message", ["Read", "Write", "Bash", "WebFetch"], "disabled", True),
+    ("message", ["Read", "WebSearch", "WebFetch"], "live", False),
+    ("event", ["Read", "Write", "Bash", "WebSearch", "WebFetch"], "disabled", False),
+    ("transcription", ["Read", "Write", "Bash", "WebSearch", "WebFetch"], "disabled", False),
+    ("unknown", ["Read", "Write", "Bash", "WebSearch", "WebFetch"], "disabled", False),
+])
+def test_codex_web_and_shell_network_follow_turn_grants(
+    monkeypatch, tmp_path, session, trigger, tools, web_mode, network,
+):
+    proc = _FakeCodexProcess(requirements={"network": {
+        "enabled": None, "managedAllowedDomainsOnly": True,
+        "allowLocalBinding": False, "allowUpstreamProxy": False,
+        "dangerouslyAllowNonLoopbackProxy": False, "dangerouslyAllowAllUnixSockets": False,
+    }})
+    spawned = {}
+
+    def spawn(argv, **_kwargs):
+        spawned["argv"] = argv
+        return proc
+
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.delenv("TINA_CODEX_AUTH_MODE", raising=False)
+    monkeypatch.setenv("TINA_UNIT_TRIGGER", trigger)
+    monkeypatch.setenv("TINA_MOUNTS", json.dumps([{
+        "slug": "private", "path": str(tmp_path), "write": True,
+    }]))
+    monkeypatch.setattr("llm.codex.shutil.which", lambda _: "/usr/bin/codex")
+    monkeypatch.setattr("llm.codex.subprocess.Popen", spawn)
+
+    events = list(CodexHarness().run_turn(tmp_path, "research this repo", allowed_tools=tools, session=session))
+
+    requests = {request.get("method"): request for request in proc.requests}
+    assert requests["initialize"]["params"]["capabilities"]["experimentalApi"] is True
+    thread = requests["thread/resume" if session else "thread/start"]["params"]
+    assert thread["config"]["web_search"] == web_mode
+    assert f'web_search="{web_mode}"' in spawned["argv"]
+    assert "features.network_proxy=true" in spawned["argv"]
+    assert requests["turn/start"]["params"]["permissions"] == ("tina-online" if network else "tina-offline")
+    assert thread["permissions"] == ("tina-online" if network else "tina-offline")
+    settings = tomllib.loads("\n".join(spawned["argv"][i + 1] for i, arg in enumerate(spawned["argv"]) if arg == "-c"))
+    filesystem = settings["permissions"]["tina-offline"]["filesystem"]
+    assert filesystem[":root"] == "read"
+    assert (filesystem.get(str(tmp_path)) == "write") is (trigger in ("message", "scheduled") and "Write" in tools)
+    assert events[-1]["ok"] is True
+
+
+@pytest.mark.parametrize("override", [
+    None, {"enabled": False}, {"enabled": True}, {"managedAllowedDomainsOnly": False},
+    {"allowLocalBinding": True}, {"allowUpstreamProxy": True},
+    {"dangerouslyAllowNonLoopbackProxy": True}, {"dangerouslyAllowAllUnixSockets": True},
+    {"allowUnixSockets": ["/var/run/docker.sock"]}, {"unixSockets": {"/var/run/docker.sock": "allow"}},
+])
+def test_codex_never_enables_unfiltered_shell_network(monkeypatch, tmp_path, override):
+    policy = {
+        "enabled": None, "managedAllowedDomainsOnly": True,
+        "allowLocalBinding": False, "allowUpstreamProxy": False,
+        "dangerouslyAllowNonLoopbackProxy": False, "dangerouslyAllowAllUnixSockets": False,
+    }
+    if override:
+        policy.update(override)
+    proc = _FakeCodexProcess(requirements={"network": policy} if override is not None else None)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.delenv("TINA_CODEX_AUTH_MODE", raising=False)
+    monkeypatch.setenv("TINA_UNIT_TRIGGER", "message")
+    monkeypatch.setenv("TINA_MOUNTS", json.dumps([{"path": str(tmp_path), "write": True}]))
+    monkeypatch.setattr("llm.codex.shutil.which", lambda _: "/usr/bin/codex")
+    monkeypatch.setattr("llm.codex.subprocess.Popen", lambda *_args, **_kwargs: proc)
+
+    events = list(CodexHarness().run_turn(
+        tmp_path, "fetch repo", allowed_tools=["Read", "Write", "Bash", "WebFetch"],
+    ))
+
+    if override == {"enabled": True}:
+        assert not any(request.get("method") == "turn/start" for request in proc.requests)
+        assert events[-1]["ok"] is False
+        assert "enabled unset" in events[-1]["reply"]
+    else:
+        turn = next(request for request in proc.requests if request.get("method") == "turn/start")
+        assert turn["params"]["permissions"] == "tina-offline"
+        assert events[-1]["ok"] is True
 
 
 def test_codex_keeps_workspace_write_sandbox_for_write_tools(monkeypatch, tmp_path):
@@ -230,14 +322,16 @@ def test_codex_keeps_workspace_write_sandbox_for_write_tools(monkeypatch, tmp_pa
     ))
 
     by_method = {request.get("method"): request for request in proc.requests}
-    assert by_method["thread/start"]["params"]["sandbox"] == "workspace-write"
-    assert by_method["turn/start"]["params"]["sandboxPolicy"] == {
-        "type": "workspaceWrite",
-        "writableRoots": [str(workspace), str(system)],
-        "networkAccess": False,
-        "excludeTmpdirEnvVar": True,
-        "excludeSlashTmp": True,
-    }
+    assert by_method["thread/start"]["params"]["permissions"] == "tina-offline"
+    assert by_method["turn/start"]["params"]["permissions"] == "tina-offline"
+    argv = CodexHarness()._argv(writable_roots=[str(workspace), str(system)])
+    settings = tomllib.loads("\n".join(argv[i + 1] for i, arg in enumerate(argv) if arg == "-c"))
+    for name, profile in settings["permissions"].items():
+        assert profile["filesystem"][str(workspace)] == "write"
+        assert profile["filesystem"][str(system)] == "write"
+        assert str(viewer) not in profile["filesystem"]
+        assert profile["filesystem"][str(workspace / ".git")] == "read"
+        assert profile["network"]["enabled"] is (name == "tina-online")
     assert "effort" not in by_method["turn/start"]["params"]
 
 
@@ -256,11 +350,8 @@ def test_codex_stays_read_only_when_no_mount_has_a_write_grant(monkeypatch, tmp_
     ))
 
     by_method = {request.get("method"): request for request in proc.requests}
-    assert by_method["thread/start"]["params"]["sandbox"] == "read-only"
-    assert by_method["turn/start"]["params"]["sandboxPolicy"] == {
-        "type": "readOnly",
-        "networkAccess": False,
-    }
+    assert by_method["thread/start"]["params"]["permissions"] == "tina-offline"
+    assert by_method["turn/start"]["params"]["permissions"] == "tina-offline"
 
 
 def test_codex_prepare_exposes_workspace_skills_without_overwriting_user_agents(tmp_path):
@@ -700,3 +791,38 @@ def test_codex_surfaces_non_auth_turn_failure_detail(monkeypatch, tmp_path):
     assert done["type"] == "done" and done["ok"] is False
     assert "Codex workspace policy rejected the turn" in done["reply"]
     assert done["detail"] == "Codex workspace policy rejected the turn"
+
+
+def test_codex_resolves_final_citations_and_persists_private_sources(monkeypatch, tmp_path):
+    proc = _FakeCodexProcess(notifications=[
+        {'method': 'item/completed', 'params': {'item': {
+            'type': 'webSearch', 'id': 'web-1', 'query': 'pathlib',
+            'results': [{'url': 'https://docs.python.org/3/library/pathlib.html',
+                         'title': 'Python pathlib', 'ref_id': 'turn0search0'}],
+        }}},
+        {'method': 'item/agentMessage/delta', 'params': {'delta': 'Verified. citeturn0search0'}},
+    ])
+    monkeypatch.setenv('OPENAI_API_KEY', 'test-key')
+    monkeypatch.delenv('TINA_CODEX_AUTH_MODE', raising=False)
+    monkeypatch.setattr('llm.codex.shutil.which', lambda _: '/usr/bin/codex')
+    monkeypatch.setattr('llm.codex.subprocess.Popen', lambda *_args, **_kwargs: proc)
+    harness = CodexHarness()
+    harness.prepare(tmp_path, chat_root=tmp_path / 'private')
+    events = list(harness.run_turn(tmp_path, 'research', allowed_tools=['Read', 'WebSearch']))
+    assert '[Python pathlib](https://docs.python.org/3/library/pathlib.html)' in events[-1]['reply']
+    assert 'cite' not in events[-1]['reply']
+    path = tmp_path / 'private/.codex/tina-sources/thread-readonly/turn-citations.json'
+    assert json.loads(path.read_text())[0]['refs'] == ['turn0search0']
+    assert not (tmp_path / '.codex/tina-sources').exists()
+
+
+def test_codex_uses_completed_native_text_when_no_deltas_arrive(monkeypatch, tmp_path):
+    proc = _FakeCodexProcess(notifications=[{'method': 'item/completed', 'params': {'item': {
+        'id': 'message-1', 'type': 'agentMessage', 'text': 'Native complete text. citeturn0search0',
+    }}}])
+    monkeypatch.setenv('OPENAI_API_KEY', 'test-key')
+    monkeypatch.delenv('TINA_CODEX_AUTH_MODE', raising=False)
+    monkeypatch.setattr('llm.codex.shutil.which', lambda _: '/usr/bin/codex')
+    monkeypatch.setattr('llm.codex.subprocess.Popen', lambda *_args, **_kwargs: proc)
+    events = list(CodexHarness().run_turn(tmp_path, 'research', allowed_tools=['Read']))
+    assert events[-1]['reply'] == 'Native complete text. [Nguồn chưa có liên kết]'

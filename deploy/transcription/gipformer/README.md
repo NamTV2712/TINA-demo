@@ -1,5 +1,8 @@
 # Gipformer 1.5 + FSMN-VAD for TINA
 
+The HTTP auth/queue/upload boundary is shared with VieGem in `../http_worker.py`.
+The Gipformer model, settings and decoder remain owned by this worker.
+
 Optional HTTP-window backend: **FunASR runs FSMN-VAD on CPU**, then **Sherpa-ONNX
 runs Gipformer 1.5 INT8 on each speech interval**. Gipformer is not loaded through
 FunASR `AutoModel`. The worker preserves VAD offsets on the original 16 kHz source

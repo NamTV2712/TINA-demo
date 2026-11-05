@@ -2,8 +2,8 @@
  *  transcription), proxied server-side to admin-api's internal-tier `/internal/settings/{key}`.
  *  Same gate + hiding as the infra panel: a VERIFIED allowlisted admin (../gate.ts) or a plain
  *  404, and the X-Internal-Secret never reaches the browser. Unlike /api/admin/overview this
- *  route WRITES (PUT) — the admin-api validates fields and masks nothing here (admin tier sees
- *  the stored values; the per-user endpoints are the masked ones). */
+ *  route WRITES (PUT) — admin-api validates fields. The managed VieGem credential stays
+ *  write-only even on the browser-facing admin edge. */
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "../../gate";
 
@@ -29,7 +29,12 @@ async function proxy(req: NextRequest, key: string, method: "GET" | "PUT") {
       cache: "no-store",
       signal: AbortSignal.timeout(10000),
     });
-    const body = await res.text();
+    let body = await res.text();
+    if (res.ok && key === "transcription") {
+      const settings = JSON.parse(body);
+      if (settings.value) { delete settings.value.viegem_token; delete settings.value.gipformer_token; }
+      body = JSON.stringify(settings);
+    }
     return new NextResponse(body, {
       status: res.status,
       headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },

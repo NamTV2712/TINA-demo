@@ -14,7 +14,7 @@ def client(monkeypatch):
     monkeypatch.setenv("DEV_MODE", "true")
     user = SimpleNamespace(id=7, email="test@example.test", max_concurrent_bots=1,
                            data={"transcription_prefs": {"backend": "funasr"}})
-    token = SimpleNamespace(expires_at=None, scopes=["bot"], last_used_at=None)
+    token = SimpleNamespace(user_id=7, expires_at=None, scopes=["bot"], last_used_at=None)
     platform = {"default_backend": "sherpa", "sherpa_url": "http://host.docker.internal:18001",
                 "funasr_url": "http://host.docker.internal:18000", "token": "not-for-clients"}
 
@@ -25,7 +25,13 @@ def client(monkeypatch):
         async def execute(self, statement):
             values = list(statement.compile().params.values())
             row = (token, user) if "valid-key" in values else None
-            return SimpleNamespace(first=lambda: row, scalar_one_or_none=lambda: user)
+            entity = token if "FROM api_tokens" in str(statement) and "JOIN" not in str(statement) else user
+            return SimpleNamespace(first=lambda: row, scalar_one_or_none=lambda: user,
+                                   scalar_one=lambda: user,
+                                   scalars=lambda: SimpleNamespace(first=lambda: entity))
+
+        def add(self, _):
+            pass
 
         async def commit(self):
             pass
@@ -37,6 +43,8 @@ def client(monkeypatch):
 
     app.dependency_overrides[app_db.get_db] = database
     with TestClient(app) as client:
+        client.fixture_user = user
+        client.fixture_platform = platform
         yield client, token
 
 
@@ -71,3 +79,38 @@ def test_public_summary_is_safe_for_personal_custom_service_and_environment_fall
     assert summary == {"backend": "custom", "label": "Custom endpoint", "model": None, "source": "user"}
     assert _transcription_summary({}, {})["source"] == "environment"
     assert _transcription_summary({"backend": "default"}, {"default_backend": "sherpa"})["source"] == "platform"
+
+
+def test_managed_viegem_uses_only_platform_credentials_and_does_not_leak_them(client, monkeypatch):
+    c, _ = client
+    c.fixture_platform.update(viegem_url="http://host.docker.internal:18005", viegem_token="managed-secret")
+    c.fixture_user.data = {"transcription_prefs": {"backend": "viegem", "url": "https://attacker.example", "token": "foreign-token"}}
+    response = c.post("/internal/transcription/resolve", headers={"X-Internal-Secret": "internal-test-secret"}, json={"token": "valid-key"})
+    assert response.status_code == 200
+    config = response.json()
+    assert config["backend"] == "viegem"
+    assert config["url"] == "http://host.docker.internal:18005"
+    assert config["token"] == "managed-secret"
+    assert config["model"] == "5CD-AI/VieGem-ASR"
+    public = c.get("/user/transcription", headers={"X-API-Key": "valid-key"})
+    assert public.status_code == 200
+    assert "managed-secret" not in public.text
+    assert "viegem" in public.json()["available_backends"]
+    assert public.json()["effective"]["label"] == "VieGem + LM"
+    # A subsequent arbitrary custom endpoint never borrows the platform credential.
+    c.fixture_user.data = {"transcription_prefs": {"backend": "custom", "url": "https://attacker.example"}}
+    config = c.post("/internal/transcription/resolve", headers={"X-Internal-Secret": "internal-test-secret"}, json={"token": "valid-key"}).json()
+    assert config["url"] == "https://attacker.example"
+    assert "token" not in config
+    monkeypatch.setattr("sqlalchemy.orm.attributes.flag_modified", lambda *_: None)
+    response = c.put("/user/transcription", headers={"X-API-Key": "valid-key"}, json={"backend": "viegem"})
+    assert response.status_code == 200
+    assert response.json()["backend"] == "viegem"
+    assert c.fixture_user.data["transcription_prefs"].get("token") is None
+
+
+def test_managed_viegem_requires_configured_url_and_token(client):
+    c, _ = client
+    r = c.put("/user/transcription", headers={"X-API-Key": "valid-key"}, json={"backend": "viegem"})
+    assert r.status_code == 422
+    assert c.fixture_user.data["transcription_prefs"]["backend"] == "funasr"

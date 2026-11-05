@@ -11,7 +11,7 @@
 import { useEffect } from "react";
 import { useSyncExternalStore } from "react";
 
-export interface LiveSegment { speaker: string; text: string; t?: number; tsMs?: number; id?: string; speakerId?: string; speakerRevision?: number; completed?: boolean }
+export interface LiveSegment { speaker: string; text: string; t?: number; tsMs?: number; id?: string; speakerId?: string; speakerKey?: string; speakerStatus?: "unknown" | "observed" | "confirmed"; speakerRevision?: number; completed?: boolean }
 export interface LiveCard { id?: string; kind: string; title: string; body?: string; stale?: boolean; publication_revision?: number }
 export interface LiveNote { id: string; speaker?: string; chapter?: string; text: string; t?: number; tsMs?: number; pass?: number; frozen?: boolean; stale?: boolean; withdrawn?: boolean; publication_revision?: number; source?: Record<string, unknown>; evidence?: unknown[] }
 export interface LiveModelError { stage?: string; model?: string; message: string; t?: number }
@@ -120,7 +120,7 @@ function connect(e: Entry, meetingId: string, sessionUid: string): void {
   e.es = es;
   es.onopen = () => { e.state.connected = true; e.state.lastEventAt = Date.now(); armWatchdog(); emit(); };
   es.onmessage = (m) => {
-    let ev: { type?: string; speaker?: string; text?: string; t?: number; tsMs?: number; id?: string; speakerId?: string; speakerRevision?: number; completed?: boolean; card?: LiveCard; note?: LiveNote; error?: LiveModelError | string; message?: string; status?: number; segment_ids?: string[] };
+    let ev: { type?: string; speaker?: string; text?: string; t?: number; tsMs?: number; id?: string; speakerId?: string; speakerKey?: string; speakerStatus?: "unknown" | "observed" | "confirmed"; speakerRevision?: number; completed?: boolean; card?: LiveCard; note?: LiveNote; error?: LiveModelError | string; message?: string; status?: number; segment_ids?: string[] };
     try { ev = JSON.parse(m.data); } catch {
       addIssue({ kind: "parse", message: "Could not parse meeting stream event" });
       emit();
@@ -135,7 +135,7 @@ function connect(e: Entry, meetingId: string, sessionUid: string): void {
       // Prefer the bot's canonical ABSOLUTE wall-clock (`ev.tsMs`, epoch ms) carried through the
       // agent-api seam; fall back to the connect-time anchor only when the event lacks it (old/seed data).
       const tsMs = (typeof ev.tsMs === "number" && Number.isFinite(ev.tsMs)) ? ev.tsMs : absMs(ev.t);
-      const seg: LiveSegment = { speaker: ev.speaker ?? "?", text: ev.text ?? "", t: ev.t, tsMs, id: ev.id, speakerId: ev.speakerId, speakerRevision: ev.speakerRevision, completed: ev.completed !== false };
+      const seg: LiveSegment = { speaker: ev.speaker ?? "?", text: ev.text ?? "", t: ev.t, tsMs, id: ev.id, speakerId: ev.speakerId, speakerKey: ev.speakerKey, speakerStatus: ev.speakerStatus, speakerRevision: ev.speakerRevision, completed: ev.completed !== false };
       const i = ev.id ? s.transcript.findIndex((x) => x.id === ev.id) : -1;
       if (i >= 0) s.transcript[i] = seg; else s.transcript.push(seg);
       s.lastTranscriptAt = s.lastEventAt;

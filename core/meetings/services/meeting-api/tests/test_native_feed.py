@@ -62,6 +62,7 @@ async def test_cp2_collector_writes_row_keyed_feed(store, bus):
     assert first["segments"][0] == {
         "speaker": "Alice", "text": "Hello", "start": 1.0, "end": 2.5, "abs_start_ms": 1000,
         "absolute_start_time": None, "completed": True, "language": "en", "segment_id": "a",
+        "speaker_key": None,
     }
 
 

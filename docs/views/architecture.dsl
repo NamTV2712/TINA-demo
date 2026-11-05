@@ -53,6 +53,7 @@ system meetings  # capture → transcribe → record; owns the raw transcript
   data-asset stt-metrics.v1
   service transcript-sync
   service diarization-worker
+  service asr-control
 
 system agent  # the execution domain: a trigger becomes one governed agent turn over a workspace.v1 git repo; owns no transcript
   service agent-api
@@ -223,8 +224,11 @@ edges:
   agent-api -write-> meeting-translation-cache  # Owner-scoped SQLite phrase cache, live-tail observations and job leases; every HTTP access first reauthorizes canonical transcript and meeting status.
   terminal-app -call-> agent-api  # Authenticated English/bilingual view reads and advances the shared translation overlay; original ASR remains independent.
   extension -call-> agent-api  # Meeting Bot viewer requests the same gateway-authorized translation cache; provider secrets remain server-side.
+  terminal-app -call-> asr-control  # Authenticated account-only ASR start/stop and safe resource status through Terminal proxy; private derived host key.
+  asr-control -call-> admin-api  # Internal account preference CAS and aggregate enabled demand; no user list or credential projection.
+  asr-control -call-> transcription  # Authenticated real audio readiness and derived-key drain fencing before owned process/container stop.
   bot, agent-worker deployed-in runtime
-  gateway, meeting-api, agent-api, admin-api, runtime, redis, postgres, object-store, transcription deployed-in deploy
+  gateway, meeting-api, agent-api, admin-api, runtime, redis, postgres, object-store, transcription, asr-control deployed-in deploy
   flows-api, flows-worker deployed-in deploy
 
 flows:

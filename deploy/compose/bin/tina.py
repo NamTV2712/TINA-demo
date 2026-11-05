@@ -93,7 +93,7 @@ def parser():
                 command.add_argument("--scope", choices=["global", "account"], default=None,
                                      help="Configure requires an explicit scope outside an interactive terminal")
                 if action == "configure":
-                    command.add_argument("--backend", choices=["deployment", "default", "custom", "funasr", "sherpa", "apple", "nvidia"])
+                    command.add_argument("--backend", choices=["deployment", "default", "custom", "funasr", "sherpa", "apple", "nvidia", "gipformer", "viegem"])
                     command.add_argument("--url", help="Explicit HTTP(S) endpoint without embedded credentials or query")
                     tokens = command.add_mutually_exclusive_group()
                     tokens.add_argument("--token-env", help="Environment variable name containing the endpoint token")
@@ -110,7 +110,7 @@ def redact(text, selected):
     values_list = [selected.env, *[v.get("environment", {}) for v in selected.config["services"].values()]] if selected else [os.environ]
     for values in values_list:
         for key, value in values.items():
-            if re.search(r"token|password|secret|api_key|access_key", key, re.I) and value and len(str(value)) >= 4:
+            if re.search(r"token|password|secret|api_key|access_key|drain_key", key, re.I) and value and len(str(value)) >= 4:
                 secrets.add(str(value))
     for secret in sorted(secrets, key=len, reverse=True):
         text = text.replace(secret, "[REDACTED]")
@@ -328,7 +328,10 @@ def execute(selected, args):
         selected.check_images()
         selected.activate()
     elif args.command == "down":
+        selected.stop_asr_control()
         selected.compose("down", "--remove-orphans")
+        if selected.viegem_device == "mps":
+            selected.native_viegem("stop")
     elif args.command == "restart":
         rows = stack.json_rows(selected.compose("ps", "-a", "--format", "json", capture=True).stdout)
         if any(name not in {row.get("Service") for row in rows} for name in names):

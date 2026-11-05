@@ -59,12 +59,12 @@ function postMeetingTurn(prompt: string, session: string): void {
 export const ASK_CHAT_EVENT = "tina:terminal:ask-chat";
 
 export interface AskChatDetail {
-  prompt: string; hidden?: boolean; ground?: boolean; focus?: MeetingFocus;
+  prompt: string; hidden?: boolean; ground?: boolean; focus?: MeetingFocus; research?: boolean;
   onAccepted?: () => void; onRejected?: (message: string) => void; handled?: boolean;
 }
 
 /** Explicit actions need delivery feedback; a fire-and-forget event can be dropped. */
-export function requestChat(detail: Pick<AskChatDetail, 'prompt' | 'focus'>): void {
+export function requestChat(detail: Pick<AskChatDetail, 'prompt' | 'focus' | 'research'>): void {
   let accepted = false, reason = 'Chat is unavailable. Open the chat panel and retry.';
   window.dispatchEvent(new CustomEvent<AskChatDetail>(ASK_CHAT_EVENT, { detail: {
     ...detail, onAccepted: () => { accepted = true; }, onRejected: message => { reason = message; },

@@ -4,6 +4,8 @@ import type { MeetingAudioRecording } from "../surfaces/meetingModel";
 export interface TranscriptSegment {
   id?: string;
   speakerId?: string;
+  speakerKey?: string;
+  speakerStatus?: "unknown" | "observed" | "confirmed";
   speaker?: string;
   text: string;
   sourceText?: string;        // Exact accepted source before display-only typography cleanup.

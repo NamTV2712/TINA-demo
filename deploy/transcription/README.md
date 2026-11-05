@@ -78,3 +78,10 @@ natively on the Mac and stays bound to `127.0.0.1`; Docker Terminal and meeting 
 After the FunASR, Apple and/or NVIDIA endpoints are running, an admin saves their URL and token under
 **Settings → Models → Global transcription backend**. Users then choose the configured backend under
 **Your transcription backend**. The existing deployment endpoint remains the default.
+
+## VieGem Vietnamese/English + KenLM
+
+For a separately selected native PyTorch VieGem-ASR + 4-gram KenLM + FSMN worker,
+see [`viegem/README.md`](viegem/README.md). The default endpoint is host loopback
+`127.0.0.1:18005`; existing Bot/Desktop Custom endpoint settings support it.
+The model is non-commercial research only and also follows Gemma terms.

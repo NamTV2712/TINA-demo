@@ -26,8 +26,9 @@ assert(format && data); assert.equal(format.readUInt16LE(0), 1); assert.equal(fo
 assert.equal(format.readUInt32LE(4), 16000); assert.equal(format.readUInt16LE(14), 16);
 assert(data.length > 0 && data.length <= 16000 * 30 * 2);
 const pcm = Float32Array.from({ length: data.length / 2 }, (_, i) => data.readInt16LE(i * 2) / 32768);
-const config = parseEnv(readFileSync(join(homedir(), '.config/tina/gipformer.env'), 'utf8'));
-const token = config.TINA_GIPFORMER_TOKEN, url = 'http://127.0.0.1:' + (config.TINA_GIPFORMER_PORT || '18002');
+const config = process.env.TINA_ASR_SMOKE_URL ? {} : parseEnv(readFileSync(join(homedir(), '.config/tina/gipformer.env'), 'utf8'));
+const token = process.env.TINA_ASR_SMOKE_TOKEN || config.TINA_GIPFORMER_TOKEN;
+const url = process.env.TINA_ASR_SMOKE_URL || 'http://127.0.0.1:' + (config.TINA_GIPFORMER_PORT || '18002');
 assert(token);
 const epoch = Date.now(), confirmed = [], faults = [];
 const pipe = createBotPipeline({ platform: 'google_meet', language: 'vi', transcribeEnabled: true,
@@ -59,5 +60,5 @@ try {
   assert(!readFileSync(join(directory, 'transcripts.sqlite')).includes(Buffer.from(token)), 'Worker credential must not persist');
   const report = { bot_confirmed_segments: confirmed.length, desktop_confirmed_segments: transcript.segments.length,
     canonical_segments: canonical.segments.length, memory_windows: memory.windows.length, faults: faults.length };
-  console.log('PASS real Gipformer HTTP → Bot engine and capture.v1 → Desktop → canonical/memory', JSON.stringify(report));
+  console.log('PASS real ASR HTTP → Bot engine and capture.v1 → Desktop → canonical/memory', JSON.stringify(report));
 } finally { socket?.terminate(); await desktop.close(); rmSync(directory, { recursive: true, force: true }); }

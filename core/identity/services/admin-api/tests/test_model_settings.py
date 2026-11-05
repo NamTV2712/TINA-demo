@@ -373,3 +373,81 @@ def test_bot_context_carries_effective_transcription(client):
     cfg = client.get("/user/transcription", headers={"X-API-Key": tok}).json()
     assert cfg["url"] == "https://stt-mine.example.com"
     assert cfg["token_set"] is False
+
+
+def test_managed_viegem_persists_without_personal_credentials(client):
+    uid, tok = _user_token(client, email="viegem@example.test")
+    h = {"X-API-Key": tok}
+    assert client.put("/user/transcription", headers=h, json={"backend": "viegem"}).status_code == 422
+    r = client.put("/internal/settings/transcription", headers=_internal(), json={
+        "viegem_url": "https://asr.example.test", "viegem_token": "managed-secret",
+    })
+    assert r.status_code == 200
+    r = client.put("/user/transcription", headers=h, json={"backend": "viegem"})
+    assert r.status_code == 200
+    cfg = client.get("/user/transcription", headers=h).json()
+    assert cfg["backend"] == "viegem"
+    assert cfg["token_set"] is False
+    assert cfg["url"] is None
+    assert "managed-secret" not in str(cfg)
+    effective = client.get(f"/internal/users/{uid}/bot-context", headers=_internal()).json()["transcription"]
+    assert effective["backend"] == "viegem"
+    assert effective["url"] == "https://asr.example.test"
+    assert effective["token"] == "managed-secret"
+    assert effective["provider"] == "tina"
+
+
+def test_deployment_viegem_token_never_persists_in_settings(client, monkeypatch):
+    monkeypatch.setenv("TINA_VIEGEM_TOKEN", "dotenvx-injected-secret")
+    fresh = client.get("/internal/settings/transcription", headers=_internal()).json()
+    assert fresh["configured"] is False
+    assert fresh["value"]["viegem_token"] == "dotenvx-injected-secret"
+    uid, tok = _user_token(client, email="encrypted-viegem@example.test")
+    payload = {"viegem_url": "https://asr.example.test", "default_backend": "viegem"}
+    r = client.put("/internal/settings/transcription", headers=_internal(), json=payload)
+    assert r.status_code == 200
+    assert r.json()["value"] == payload
+    assert client.get("/internal/settings/transcription", headers=_internal()).json()["configured"] is True
+    assert client.put("/internal/settings/transcription", headers=_internal(),
+                      json={"viegem_token": "must-not-store"}).status_code == 422
+    assert client.put("/user/transcription", headers={"X-API-Key": tok},
+                      json={"backend": "viegem"}).status_code == 200
+    effective = client.get(f"/internal/users/{uid}/bot-context", headers=_internal()).json()["transcription"]
+    assert effective["token"] == "dotenvx-injected-secret"
+    assert "dotenvx-injected-secret" not in client.get("/user/transcription", headers={"X-API-Key": tok}).text
+    from sqlalchemy import text
+    engine = create_engine(app_db._engine.url.set(drivername="postgresql+psycopg"))
+    try:
+        with engine.connect() as db:
+            assert db.execute(text("SELECT value FROM platform_settings WHERE key = 'transcription'")).scalar_one() == payload
+    finally:
+        engine.dispose()
+
+
+def test_asr_runtime_keeps_accounts_independent_and_fences_stale_updates(client):
+    h = _internal()
+    assert client.put("/internal/settings/transcription", headers=h, json={
+        "gipformer_url": "http://gipformer.example.test", "gipformer_token": "gip-secret",
+        "viegem_url": "http://viegem.example.test", "viegem_token": "vie-secret"}).status_code == 200
+    first, one = _user_token(client, email="asr-one@example.test")
+    second, two = _user_token(client, email="asr-two@example.test")
+    for token in (one, two):
+        assert client.put("/user/transcription", headers={"X-API-Key": token}, json={"backend": "viegem"}).status_code == 200
+    before = client.get(f"/internal/transcription/runtime?user_id={first}", headers=h).json()
+    assert before["counts"] == {"gipformer": 0, "viegem": 2}
+    assert set(before) == {"counts", "account"}
+    assert set(before["account"]) == {"backend", "enabled", "revision"}
+    assert "token" not in str(before) and "email" not in str(before)
+    revision = before["account"]["revision"]
+    payload = {"backend": "gipformer", "enabled": "true", "expected_revision": revision}
+    assert client.put(f"/internal/users/{first}/transcription-runtime", headers=h, json=payload).status_code == 200
+    assert client.put(f"/internal/users/{first}/transcription-runtime", headers=h, json=payload).status_code == 409
+    runtime = client.get(f"/internal/transcription/runtime?user_id={first}", headers=h).json()
+    assert runtime["counts"] == {"gipformer": 1, "viegem": 1}
+    assert "secret" not in str(runtime) and "asr-two" not in str(runtime)
+    assert client.get("/user/transcription", headers={"X-API-Key": two}).json()["backend"] == "viegem"
+    assert client.put(f"/internal/users/{first}/transcription-runtime", headers={"X-API-Key": two}, json=payload).status_code == 403
+    payload = {"backend": "gipformer", "enabled": "false", "expected_revision": runtime["account"]["revision"]}
+    assert client.put(f"/internal/users/{first}/transcription-runtime", headers=h, json=payload).status_code == 200
+    config = client.get(f"/internal/users/{first}/transcription", headers=h).json()
+    assert config["disabled"] is True and not config.get("url") and "token" not in config

@@ -13,7 +13,7 @@ import soundfile as sf
 from fastapi import HTTPException, Request
 
 import server
-from engine import GipformerEngine, AudioInputError, read_audio, speech_ranges
+from gipformer.engine import GipformerEngine, AudioInputError, read_audio, speech_ranges
 from telemetry import AsrMetrics
 
 
@@ -125,7 +125,7 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.transcribe(language='en')).status_code, 422)
         self.assertEqual((await self.transcribe(response_format='srt')).status_code, 422)
         self.assertEqual((await self.transcribe(min_silence_duration_ms=50)).status_code, 422)
-        with patch.object(server, 'MAX_BYTES', 100):
+        with patch.object(server.app.state, 'max_bytes', 100):
             self.assertEqual((await self.transcribe()).status_code, 413)
         self.assertEqual(len(self.engine.calls), 0)
 
@@ -135,7 +135,7 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
             yield b'x' * 700000
             yield b'x' * 700000
             yield b'\r\n--x--\r\n'
-        with patch.object(server, 'MAX_BYTES', 100):
+        with patch.object(server.app.state, 'max_bytes', 100):
             response = await self.client.post('/v1/audio/transcriptions', content=chunks(),
                 headers={'Authorization': 'Bearer ' + server.app.state.token, 'Content-Type': 'multipart/form-data; boundary=x'})
         self.assertEqual(response.status_code, 413)
@@ -153,9 +153,12 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.transcribe(response_format='text')).text, 'nội dung riêng tư')
         status = (await self.client.get('/status')).json()
         self.assertEqual(status['version'], 'asr-status.v1')
+        self.assertEqual(status['model']['device'], server.DEVICE)
+        self.assertEqual(status['model']['asr_model'], server.MODEL)
         self.assertNotIn('nội dung', json.dumps(status, ensure_ascii=False))
         self.assertNotIn('test-token', json.dumps(status))
         caps = (await self.client.get('/capabilities')).json()
+        self.assertEqual(caps['runtime'], server.DECODER)
         self.assertFalse(caps['word_timestamps']); self.assertFalse(caps['language_detection']); self.assertFalse(caps['prompt'])
 
     async def test_queue_and_model_failure(self):
@@ -175,7 +178,7 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('Private model failure', response.text)
 
     async def test_cancel_keeps_native_lock_until_thread_exits(self):
-        request = Mock(spec=Request); request.is_disconnected = AsyncMock(return_value=False); request.state = SimpleNamespace(asr_timing={})
+        request = Mock(spec=Request); request.is_disconnected = AsyncMock(return_value=False); request.state = SimpleNamespace(asr_timing={}); request.app = server.app
         self.engine.release.clear()
         task = asyncio.create_task(server.infer(request, self.audio, 800))
         for _ in range(100):
@@ -188,11 +191,51 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(asyncio.CancelledError): await task
         self.assertFalse(server.app.state.lock.locked()); self.assertEqual(server.app.state.requests, 0)
 
+    async def test_repeated_cancel_serializes_next_request_even_after_native_failure(self):
+        for native_failure in (False, True):
+            with self.subTest(native_failure=native_failure):
+                engine = FakeEngine()
+                engine.fail = native_failure
+                engine.release.clear()
+                server.app.state.engine = engine
+                request = Mock(spec=Request)
+                request.is_disconnected = AsyncMock(return_value=False)
+                request.state = SimpleNamespace(asr_timing={})
+                request.app = server.app
+                first = asyncio.create_task(server.infer(request, self.audio, 800))
+                second = None
+                try:
+                    for _ in range(100):
+                        if engine.started.is_set(): break
+                        await asyncio.sleep(.005)
+                    self.assertTrue(engine.started.is_set())
+                    for _ in range(3):
+                        first.cancel()
+                        await asyncio.sleep(.01)
+                        self.assertTrue(server.app.state.lock.locked())
+                        self.assertFalse(first.done())
+                        self.assertEqual(server.app.state.requests, 1)
+                    second = asyncio.create_task(server.infer(request, self.audio, 800))
+                    await asyncio.sleep(.02)
+                    self.assertEqual(len(engine.calls), 1)
+                    engine.release.set()
+                    with self.assertRaises(asyncio.CancelledError): await first
+                    if native_failure:
+                        with self.assertRaises(RuntimeError): await second
+                    else:
+                        self.assertTrue((await second)['text'])
+                    self.assertEqual(engine.max_active, 1)
+                    self.assertFalse(server.app.state.lock.locked())
+                    self.assertEqual(server.app.state.requests, 0)
+                finally:
+                    engine.release.set()
+                    await asyncio.gather(first, *([second] if second else []), return_exceptions=True)
+
     async def test_wait_timeout_and_disconnected_queue(self):
-        request = Mock(spec=Request); request.is_disconnected = AsyncMock(return_value=False); request.state = SimpleNamespace(asr_timing={})
+        request = Mock(spec=Request); request.is_disconnected = AsyncMock(return_value=False); request.state = SimpleNamespace(asr_timing={}); request.app = server.app
         await server.app.state.lock.acquire()
         try:
-            with patch.object(server, 'WAIT_SECONDS', .02):
+            with patch.object(server.app.state, 'wait_seconds', .02):
                 with self.assertRaises(HTTPException) as caught: await server.infer(request, self.audio, 800)
                 self.assertEqual(caught.exception.status_code, 503)
         finally: server.app.state.lock.release()

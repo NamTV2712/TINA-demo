@@ -1,8 +1,8 @@
 "use client";
 /** The ONE live-transcript render engine (P23: the terminal RENDERS, it does not re-derive). It paints a
  *  list of segments — CONFIRMED text is stable + append-only (consecutive same-speaker segments merge into
- *  one flowing block) and the in-flight PENDING text is a single dimmed "live" tail — so the body never
- *  flickers while the unconfirmed window re-forms. Fed RAW segments (transcript) or PROCESSED segments
+ *  one flowing block), while every in-flight PENDING speaker window stays visible as a dimmed live tail.
+ *  Fed RAW segments (transcript) or PROCESSED segments
  *  (the cleaned mirror, which also carry keyword `tags` to research) by exactly the same code; the toggle
  *  picks the source, not the engine.
  *
@@ -21,7 +21,7 @@ import type { PhraseTranslation } from "./translationGroups";
 export interface EngineTag { label: string; kind: string }
 export interface EngineEntity { id?: string; label: string; kind: string; docPath?: string }
 export interface EngineSignal { id: string; kind: string; label: string }
-export interface EngineSegment { speakerId?: string; speaker?: string; text: string; tsMs?: number; endTsMs?: number; id?: string; completed?: boolean; tags?: EngineTag[]; stale?: boolean; evidence?: unknown[]; translation?: PhraseTranslation }
+export interface EngineSegment { speakerId?: string; speakerKey?: string; speaker?: string; text: string; tsMs?: number; endTsMs?: number; id?: string; completed?: boolean; tags?: EngineTag[]; stale?: boolean; evidence?: unknown[]; translation?: PhraseTranslation }
 
 export function TranscriptEvidence({ evidence }: { evidence?: unknown[] }) {
   const [open, setOpen] = useState(false);
@@ -184,23 +184,20 @@ export function LiveTranscriptEngine({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [segments]);
   // Confirmed (completed !== false) = stable. Merge consecutive same-speaker confirmed segments into
-  // flowing blocks; keyword tags accumulate per block. Pending (completed === false) = the live edge.
-  const blocks: { speakerId?: string; speaker?: string; tsMs?: number; text: string; key: string; tags: EngineTag[]; stale: boolean; evidence: unknown[] }[] = [];
+  // flowing blocks; every speaker's pending segment remains visible as a separate live tail.
+  const blocks: { speakerId?: string; speakerKey?: string; speaker?: string; tsMs?: number; text: string; key: string; tags: EngineTag[]; stale: boolean; evidence: unknown[] }[] = [];
+  const identity = (value: Pick<EngineSegment, "speakerId" | "speakerKey" | "speaker">) =>
+    value.speakerId ? `id:${value.speakerId}` : value.speaker?.trim() ? `name:${value.speaker}` : value.speakerKey ? `key:${value.speakerKey}` : undefined;
   for (const s of segments) {
     if (s.completed === false) continue;
     const last = blocks[blocks.length - 1];
-    if (last && last.speaker === s.speaker && last.speakerId === s.speakerId && last.stale === !!s.stale) { last.text += " " + s.text; if (s.tags) last.tags.push(...s.tags); last.evidence.push(...(s.evidence ?? [])); }
-    else blocks.push({ speakerId: s.speakerId, speaker: s.speaker, tsMs: s.tsMs, text: s.text, key: s.id ?? `b${blocks.length}`, tags: [...(s.tags ?? [])], stale: !!s.stale, evidence: [...(s.evidence ?? [])] });
+    const currentIdentity = identity(s);
+    if (last && currentIdentity && identity(last) === currentIdentity && last.stale === !!s.stale) { last.text += " " + s.text; if (s.tags) last.tags.push(...s.tags); last.evidence.push(...(s.evidence ?? [])); }
+    else blocks.push({ speakerId: s.speakerId, speakerKey: s.speakerKey, speaker: s.speaker, tsMs: s.tsMs, text: s.text, key: s.id ?? `b${blocks.length}`, tags: [...(s.tags ?? [])], stale: !!s.stale, evidence: [...(s.evidence ?? [])] });
   }
-  const lastPending = [...segments].reverse().find((s) => s.completed === false);
-  const live = (lastPending?.text ?? "").trim();
-  const liveSpeaker = lastPending?.speaker;
+  const pending = segments.filter((s) => s.completed === false && s.text.trim());
 
-  const lastBlock = blocks[blocks.length - 1];
-  const liveJoinsLast = !!live && !!lastBlock && lastBlock.speaker === liveSpeaker && lastBlock.speakerId === lastPending?.speakerId;
-  const liveOwnBlock = !!live && !liveJoinsLast;
-
-  if (!blocks.length && !live) {
+  if (!blocks.length && !pending.length) {
     return <div style={{ color: "var(--t3)", fontSize: 13, padding: "8px 2px" }}>{emptyLabel}</div>;
   }
 
@@ -235,17 +232,28 @@ export function LiveTranscriptEngine({
       })}
     </div>;
   }
+  const pendingLine = (segment: EngineSegment, index: number) => (
+    <div key={segment.id ?? `pending-${index}`}>
+      {head(segment.speaker, segment.tsMs)}
+      <div style={{ fontSize: 13.5, color: "var(--t3)", lineHeight: 1.6, fontStyle: "italic" }}>
+        <BlockText text={segment.text.trim()} entities={entities} actions={actions} /> …
+      </div>
+    </div>
+  );
 
   // When a saved recording is available, keep the original ASR turns separate so each click maps to
   // that exact audio timestamp. The regular live transcript still merges same-speaker fragments.
   if (onSegmentClick && playableSegmentIds?.size) {
     const turns = segments.filter((segment) => segment.completed !== false);
-    let previousSpeaker: string | undefined;
+    let previousIdentity: string | undefined;
     return (
       <div className={styles.flow} style={{ gap: 5 }}>
         {turns.map((segment, index) => {
-          const showSpeaker = index === 0 || segment.speaker !== previousSpeaker;
-          previousSpeaker = segment.speaker;
+          const speakerIdentity = segment.speakerId ? `id:${segment.speakerId}`
+            : segment.speaker?.trim() ? `name:${segment.speaker}`
+              : segment.speakerKey ? `key:${segment.speakerKey}` : `segment:${segment.id ?? index}`;
+          const showSpeaker = index === 0 || speakerIdentity !== previousIdentity;
+          previousIdentity = speakerIdentity;
           const id = segment.id;
           const playable = !!id && playableSegmentIds.has(id);
           const active = !!id && id === activeSegmentId;
@@ -272,6 +280,7 @@ export function LiveTranscriptEngine({
             </div>
           );
         })}
+        {pending.map(pendingLine)}
       </div>
     );
   }
@@ -332,22 +341,14 @@ export function LiveTranscriptEngine({
             <div style={{ fontSize: 14, color: "var(--t1)", lineHeight: 1.65 }}>
               <BlockText text={b.text} entities={entities} actions={actions} />
               <TranscriptEvidence evidence={b.evidence} />
-              {isLast && liveJoinsLast && (
-                <span style={{ color: "var(--t3)", fontStyle: "italic" }}> {live} …</span>
-              )}
             </div>
             {chips(b.tags)}
-            {signalBadges(isLast && !liveOwnBlock)}
+            {signalBadges(isLast && pending.length === 0)}
           </div>
         );
       })}
-      {liveOwnBlock && (
-        <div>
-          {head(liveSpeaker)}
-          <div style={{ fontSize: 13.5, color: "var(--t3)", lineHeight: 1.6, fontStyle: "italic" }}>{live} …</div>
-          {signalBadges(true)}
-        </div>
-      )}
+      {pending.map(pendingLine)}
+      {pending.length > 0 && signalBadges(true)}
     </div>
   );
 }

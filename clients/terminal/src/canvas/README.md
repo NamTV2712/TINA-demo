@@ -57,3 +57,7 @@ live connection and error notices are retained. Recording loading/failure messag
 the same playback area. Audio loading, seek targets and all action payloads are unchanged.
 An empty ended meeting says no transcript is available rather than waiting for new speech;
 the live waiting state and empty search results keep their separate messages.
+
+Raw transcript segments preserve accepted source text, stable speaker keys and speaker status.
+The English overlay keeps its exact-source pairing while speaker corrections and live draft
+updates retain the same identity and original wording.

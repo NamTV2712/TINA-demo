@@ -91,7 +91,7 @@
    "unique-id": "agent-api",
    "node-type": "service",
    "name": "agent-api",
-   "description": "unit control-plane; dispatch -> runtime spawn; meeting copilot Per-user ChatGPT disconnect keeps TINA/ASR sessions separate. Terminal OAuth state is cancelled locally; authenticated internal Agent API owns profile writes, disconnect and generation checks under the same file lock as token refresh. Credentials stay in the private auth volume; callbacks from a disconnected generation cannot restore an old account. Existing in-flight workers may retain short-lived tokens. Owner-scoped meeting Q&A reads canonical transcript and explicitly selected linked private Wiki documents, validates source IDs, stores source fingerprints, and creates a new Wiki page only after explicit Apply; existing pages and canonical data are never overwritten. Routine files are owner-scoped active private-workspace resources: anchored no-symlink I/O, per-owner serialized reconcile, source SHA preconditions for explicit Edit/toggle/delete, and stable IDs per workspace/file. Delete removes the source before cancelling all related jobs; shared workspace files never grant schedules. Chat dispatch serializes configuration changes per thread in Redis using expiring locks and keyed model-configuration digests under agent:chat-config:*. Raw credentials are never stored in that metadata. An unchanged configuration reuses its warm worker; changed provider, credential or model waits for the previous turn-complete and requests cooperative stop through the existing chat input stream, confirms terminal state through runtime.v1 and replaces the idle workload before pre-delivering and spawning the next turn. Busy or unverifiable refreshes return actionable errors without sending the prompt to an old provider. The existing thread id, output stream and provider-session history are preserved. Bedrock model discovery reads paginated regional foundation-model/inference-profile lists; credential tests use native InvokeModel. The API image packages the same Python provider helpers and automatic thinking policy as the worker. All providers use automatic thinking; legacy effort pins are ignored, and the settings UI exposes no manual thinking field. Worker configuration digests include the deployed provider-adapter revision, so adapter fixes replace old warm workers without discarding conversation history. Gemini defaults to gemini-3.5-flash. Gemini, DeepSeek and Bedrock credential tests verify native function-call/result round trips before reporting success; Bedrock uses the same InvokeModelWithResponseStream protocol as its CLI and decodes complete AWS event-stream frames with checksum validation; custom API model registration supplies exact model IDs to the pinned CLI SDK rather than embedding endpoint URIs. Groq credential tests verify a real function-call/result round trip through the worker request adapter before testing summaries. Model discovery excludes speech-only Orpheus entries and marks known text-only ALLaM as summary-only, preventing chat selection while preserving meeting use.",
+   "description": "unit control-plane; dispatch -> runtime spawn; meeting copilot Per-user ChatGPT disconnect keeps TINA/ASR sessions separate. Terminal OAuth state is cancelled locally; authenticated internal Agent API owns profile writes, disconnect and generation checks under the same file lock as token refresh. Credentials stay in the private auth volume; callbacks from a disconnected generation cannot restore an old account. Existing in-flight workers may retain short-lived tokens. Owner-scoped meeting Q&A reads canonical transcript and explicitly selected linked private Wiki documents, validates source IDs, stores source fingerprints, and creates a new Wiki page only after explicit Apply; existing pages and canonical data are never overwritten. Routine files are owner-scoped active private-workspace resources: anchored no-symlink I/O, per-owner serialized reconcile, source SHA preconditions for explicit Edit/toggle/delete, and stable IDs per workspace/file. Delete removes the source before cancelling all related jobs; shared workspace files never grant schedules. Chat dispatch serializes configuration changes per thread in Redis using expiring locks and keyed model-configuration digests under agent:chat-config:*. Raw credentials are never stored in that metadata. An unchanged configuration reuses its warm worker; changed provider, credential or model waits for the previous turn-complete and requests cooperative stop through the existing chat input stream, confirms terminal state through runtime.v1 and replaces the idle workload before pre-delivering and spawning the next turn. Busy or unverifiable refreshes return actionable errors without sending the prompt to an old provider. The existing thread id, output stream and provider-session history are preserved. Bedrock model discovery reads paginated regional foundation-model/inference-profile lists; credential tests use native InvokeModel. The API image packages the same Python provider helpers and automatic thinking policy as the worker. All providers use automatic thinking; legacy effort pins are ignored, and the settings UI exposes no manual thinking field. Worker configuration digests include the deployed provider-adapter revision, so adapter fixes replace old warm workers without discarding conversation history. Gemini defaults to gemini-3.5-flash. Gemini, DeepSeek and Bedrock credential tests verify native function-call/result round trips before reporting success; Bedrock uses the same InvokeModelWithResponseStream protocol as its CLI and decodes complete AWS event-stream frames with checksum validation; custom API model registration supplies exact model IDs to the pinned CLI SDK rather than embedding endpoint URIs. Groq credential tests verify a real function-call/result round trip through the worker request adapter before testing summaries. Model discovery excludes speech-only Orpheus entries and marks known text-only ALLaM as summary-only, preventing chat selection while preserving meeting use. Explicit /research chat commands and document research requests resolve a private writable note destination from the authenticated active set. Private Codex history restores turn-scoped recorded source metadata and original opened URLs; missing reference mappings remain visibly unresolved.",
    "metadata": [
     {
      "path": "core/agent/services/agent-api"
@@ -203,7 +203,7 @@
    "unique-id": "transcription",
    "node-type": "service",
    "name": "transcription",
-   "description": "transcription — OpenAI-compatible /v1/audio/transcriptions boundary with selectable backends: faster-whisper/CTranslate2, Apple MLX/Metal, and loopback FunASR Qwen3-ASR with FSMN-VAD. Clients send bounded audio windows, continuity prompts and content-free capture-lag metadata. FunASR exposes asr-status.v1 with actual device, bounded request timing samples, queue and model percentiles; Terminal reads it through a verified admin proxy. Browser render timings remain local. Does not write any redis carrier (the bot XADDs segments). Optional native Rust backend runs Silero VAD and Qwen3-ASR-0.6B INT8 through sherpa-onnx on CPU at host loopback :18001; it preserves VAD segment offsets and the same ASR status contract. The FunASR adapter forwards min_silence_duration_ms to FSMN max_end_silence_time (100-2000 ms, default 800 ms, explicitly pinned), preserving per-VAD sentence offsets for downstream alignment. An isolated single-source Apple Silicon PoC under deploy/transcription/streaming-poc validates real Qwen Transformers decoder token callbacks and paced growing-window hypotheses on cached VI/EN evaluation clips. It is not a selected production endpoint, does not claim an incremental audio encoder, and never changes/restarts production services; private external artifacts record token timing, accuracy, RAM and before/after listener identities. Sub-200 ms FunASR inputs receive trailing silence only in the temporary inference file to avoid incomplete FSMN frames; source PCM, reported duration and sentence bounds retain the original source interval. Empty input and inference failures remain errors. Optional authenticated loopback :18002 backend composes FunASR FSMN-VAD CPU with hash-pinned Gipformer 1.5 INT8 via Sherpa-ONNX OfflineRecognizer. The root Compose asr profile runs that same CPU service, mounts the pinned model directory and owns host port 18002 while enabled; unload the host LaunchAgent to avoid a port conflict. Existing Custom endpoint settings select it for Desktop/Bot without altering the Qwen platform default. Original VAD sample offsets survive speech slicing; no word timing, prompt conditioning, language detection or token streaming is claimed. One inference plus three bounded waiters, no audio/text in diagnostics.",
+   "description": "transcription — OpenAI-compatible /v1/audio/transcriptions boundary with selectable backends: faster-whisper/CTranslate2, Apple MLX/Metal, and loopback FunASR Qwen3-ASR with FSMN-VAD. Clients send bounded audio windows, continuity prompts and content-free capture-lag metadata. FunASR exposes asr-status.v1 with actual device, bounded request timing samples, queue and model percentiles; Terminal reads it through a verified admin proxy. Browser render timings remain local. Does not write any redis carrier (the bot XADDs segments). Optional native Rust backend runs Silero VAD and Qwen3-ASR-0.6B INT8 through sherpa-onnx on CPU at host loopback :18001; it preserves VAD segment offsets and the same ASR status contract. The FunASR adapter forwards min_silence_duration_ms to FSMN max_end_silence_time (100-2000 ms, default 800 ms, explicitly pinned), preserving per-VAD sentence offsets for downstream alignment. An isolated single-source Apple Silicon PoC under deploy/transcription/streaming-poc validates real Qwen Transformers decoder token callbacks and paced growing-window hypotheses on cached VI/EN evaluation clips. It is not a selected production endpoint, does not claim an incremental audio encoder, and never changes/restarts production services; private external artifacts record token timing, accuracy, RAM and before/after listener identities. Sub-200 ms FunASR inputs receive trailing silence only in the temporary inference file to avoid incomplete FSMN frames; source PCM, reported duration and sentence bounds retain the original source interval. Empty input and inference failures remain errors. Optional authenticated loopback :18002 backend composes FunASR FSMN-VAD CPU with hash-pinned Gipformer 1.5 INT8 via Sherpa-ONNX OfflineRecognizer. The root Compose asr profile runs that same CPU service, mounts the pinned model directory and owns host port 18002 while enabled; unload the host LaunchAgent to avoid a port conflict. Existing Custom endpoint settings select it for Desktop/Bot without altering the Qwen platform default. Original VAD sample offsets survive speech slicing; no word timing, prompt conditioning, language detection or token streaming is claimed. One inference plus three bounded waiters, no audio/text in diagnostics. Optional native VieGem-ASR + KenLM endpoint at loopback :18005 uses separately pinned VieGem and EmbeddingGemma 2 assets, PyTorch FP32 on explicit MPS/CPU/CUDA, FSMN on CPU and upstream 4-gram CTC prefix beam decoding. It shares the authenticated bounded HTTP worker with Gipformer; inference is serialized and source VAD offsets stay on the original timeline. Installation does not select the endpoint globally. No incremental streaming, word alignment or automatic transcript polish is claimed; VieGem use is restricted by its non-commercial research license and Gemma terms. Identity also exposes the named viegem backend: administrators configure viegem_url in the platform transcription registry and a dotenvx-encrypted TINA_VIEGEM_TOKEN is injected at deployment startup (legacy database token supported only without that env); native startup decrypts its separate private env file strictly, user preferences select the backend name, and internal Bot/Desktop/dictation resolution carries only its registry-owned endpoint credential. Custom endpoints do not inherit the VieGem platform token; the browser-facing admin settings edge treats that credential as write-only. The source-build entrypoint resolves TINA_VIEGEM_DEVICE=auto to native MPS on Apple Silicon or Docker CUDA on Linux/Windows WSL2. Only the CTC model/encoder uses the GPU; FSMN and KenLM remain CPU. Actual MPS/CUDA compute and authenticated audio must pass before deployment succeeds; no silent CPU fallback. CUDA adds an owned Compose overlay with pinned cu130 wheels and one GPU reservation for inference only. MPS excludes the Docker VieGem profile and stops only the old owned CPU service before binding the same host endpoint; native startup failure attempts to restore that prior service while reporting failure. Explicit cpu remains available. Gipformer and token-free Docker model-install jobs are independent; native setup prepares the same pinned cache before activation. Inference mounts cached weights read-only, runtime tokens come from dotenvx and private keys are not mounted. make-down also removes/stops the owned MPS LaunchAgent. Only a fresh registry receives a VieGem default; existing preferences and foreign worker ownership are preserved. Per-account ASR runtime control keeps shared workers alive while any enabled account requests them. A derived-key authenticated drain fence refuses new requests and cannot stop a worker with active inference. CUDA hardware validation remains pending on a real NVIDIA host.",
    "metadata": [
     {
      "path": "core/meetings/services/transcription"
@@ -225,6 +225,12 @@
     },
     {
      "path": "deploy/transcription/gipformer"
+    },
+    {
+     "path": "deploy/transcription/viegem"
+    },
+    {
+     "path": "deploy/transcription/http_worker.py"
     }
    ],
    "interfaces": [
@@ -1216,7 +1222,7 @@
    "unique-id": "agent-worker",
    "node-type": "service",
    "name": "agent-worker",
-   "description": "spawned isolated workspace-agent worker; selectable Claude Code, Codex app-server, or Antigravity CLI (agy) harness; every dispatch mounts the ordered [_global, active workspaces, _system] stack, fails closed without _global, and loads its authoritative entry context. Groq mode reuses Codex against the fixed Groq Responses endpoint for chat and OpenAI-compatible Chat Completions for meeting summaries. A per-turn Groq model profile disables unsupported freeform patch tools and namespace delegation at the CLI source, with provider-neutral TINA instructions and file edits through the existing sandboxed function tools. DeepSeek mode reuses Claude Code against DeepSeek's Anthropic-compatible endpoint for chat and its Chat Completions endpoint for summaries. Gemini mode selects agy's Gemini API-key provider for chat and the Gemini OpenAI-compatible endpoint for summaries, without consumer/OAuth credentials or a synthetic Terms acknowledgment. Dispatch selects each effective per-user/platform key for both paths and clears other providers' credentials. A temporary authenticated loopback proxy inside the worker strips unsupported Responses fields and non-function tools, maps developer instructions to system messages for non-GPT-OSS chat templates without changing tool history, rejects known non-tool chat models, serializes function calls and preserves streamed events and HTTP errors; it never executes tools or expands the harness grants. Codex maps TINA write grants to app-server sandbox roots while excluding default temporary write roots, loads workspace instructions and skills, maps TINA auto/gate MCP grants to Codex approval modes, streams tool lifecycle events, pauses gate calls for owner-scoped, one-call decisions over chat streams using tool-approval.v1, and participates in the shared transcript-size resume cap. A private per-TINA-session provider-thread index preserves display history across provider restarts; reset removes this index, and legacy recovery uses only same-subject, same-session Redis events newer than session creation. Codex user-message events define visible human messages, excluding injected environment and developer context; restored tool names remain descriptive. Antigravity maps TINA mount grants to read_file/write_file permissions, sandboxes commands, loads governed skills, exposes only auto-granted non-secret MCP servers in headless mode, and normalizes streamed events and conversation ids. The legacy Antigravity model selection requires a persisted Terms warning acknowledgment; consumer OAuth access through third-party software is prohibited by Google's terms. The Gemini API-key provider has independent credential preflight. Harness-written kg/entities files are workspace.v1-validated before commit. Post-meeting summary uses a tool-less CompletionPort and a deterministic writer with a local generated-content fingerprint, inference-time compare-and-swap, workspace locking and atomic publication; user-edited or unmarked existing documents are preserved, and only the meeting entity path is committed. Meeting Q&A uses a private short-lived, tool-less CompletionPort job with read-only mounts and no public chat history.",
+   "description": "spawned isolated workspace-agent worker; selectable Claude Code, Codex app-server, or Antigravity CLI (agy) harness; every dispatch mounts the ordered [_global, active workspaces, _system] stack, fails closed without _global, and loads its authoritative entry context. Groq mode reuses Codex against the fixed Groq Responses endpoint for chat and OpenAI-compatible Chat Completions for meeting summaries. A per-turn Groq model profile disables unsupported freeform patch tools and namespace delegation at the CLI source, with provider-neutral TINA instructions and file edits through the existing sandboxed function tools. DeepSeek mode reuses Claude Code against DeepSeek's Anthropic-compatible endpoint for chat and its Chat Completions endpoint for summaries. Gemini mode selects agy's Gemini API-key provider for chat and the Gemini OpenAI-compatible endpoint for summaries, without consumer/OAuth credentials or a synthetic Terms acknowledgment. Dispatch selects each effective per-user/platform key for both paths and clears other providers' credentials. A temporary authenticated loopback proxy inside the worker strips unsupported Responses fields and non-function tools, maps developer instructions to system messages for non-GPT-OSS chat templates without changing tool history, rejects known non-tool chat models, serializes function calls and preserves streamed events and HTTP errors; it never executes tools or expands the harness grants. Codex pins explicit named per-turn filesystem profiles to TINA write grants, protects agent/Git metadata and excludes temporary write roots. Trusted chat/routine turns map WebSearch/WebFetch grants to cached/live hosted web tools; untrusted event/transcription turns disable web tools and remain read-only/offline. Shell networking requires Bash plus WebFetch and a root-owned exclusive GitHub-domain proxy policy, with private addresses, upstream proxies, Unix-socket forwarding and direct-network bypass blocked. Managed networking is not globally forced so offline turns remain isolated. Codex loads workspace instructions and skills, maps TINA auto/gate MCP grants to Codex approval modes, streams tool lifecycle events, pauses gate calls for owner-scoped, one-call decisions over chat streams using tool-approval.v1, and participates in the shared transcript-size resume cap. A private per-TINA-session provider-thread index preserves display history across provider restarts; reset removes this index, and legacy recovery uses only same-subject, same-session Redis events newer than session creation. Codex user-message events define visible human messages, excluding injected environment and developer context; restored tool names remain descriptive. Antigravity maps TINA mount grants to read_file/write_file permissions, sandboxes commands, loads governed skills, exposes only auto-granted non-secret MCP servers in headless mode, and normalizes streamed events and conversation ids. The legacy Antigravity model selection requires a persisted Terms warning acknowledgment; consumer OAuth access through third-party software is prohibited by Google's terms. The Gemini API-key provider has independent credential preflight. Harness-written kg/entities files are workspace.v1-validated before commit. Post-meeting summary uses a tool-less CompletionPort and a deterministic writer with a local generated-content fingerprint, inference-time compare-and-swap, workspace locking and atomic publication; user-edited or unmarked existing documents are preserved, and only the meeting entity path is committed. Meeting Q&A uses a private short-lived, tool-less CompletionPort job with read-only mounts and no public chat history. Web-enabled Codex turns render explicit source metadata as final Markdown links and persist bounded per-turn source records in private continuity; missing citation mappings are never guessed. Explicit Knowledge research instructions create a new private Markdown note with meeting/repo/web source rows, evidence versions and verification dates, preserving other files and canonical transcript/audio.",
    "metadata": [
     {
      "path": "core/agent/worker"
@@ -1836,6 +1842,23 @@
      "domain": "agent"
     }
    ]
+  },
+  {
+   "unique-id": "asr-control",
+   "node-type": "service",
+   "name": "ASR host controller",
+   "description": "Local host lifecycle bridge installed by make-all as an owned LaunchAgent on Mac or detached process on WSL2. Terminal verifies its auth cookie and forwards only the current user id with a derived control key. Identity owns per-account enabled/backend/revision preferences and aggregate demand; the controller starts and audio-tests known ASR workers before CAS preference commits. It serializes changes, waits ten idle seconds, conservatively retains both workers while any meeting bot or local Desktop capture exists, drains only with a distinct derived worker key and rechecks demand before stopping an owned Docker service or native MPS LaunchAgent. No arbitrary commands, endpoints, secret values or other user records reach the browser. A private state file records desired backend names and is rebuilt from Identity after restart. make-down stops the controller before shutting down services. Unavailable health or drain checks retain workers rather than force-stop.",
+   "metadata": [
+    {
+     "path": "deploy/compose/bin/asr_control.py"
+    }
+   ],
+   "interfaces": [
+    {
+     "unique-id": "asr-control-rest",
+     "type": "api"
+    }
+   ]
   }
  ],
  "relationships": [
@@ -1954,7 +1977,8 @@
       "stt-foundation.v1",
       "stt-metrics.v1",
       "transcript-sync",
-      "diarization-worker"
+      "diarization-worker",
+      "asr-control"
      ]
     }
    }
@@ -3159,7 +3183,8 @@
       "redis",
       "postgres",
       "object-store",
-      "transcription"
+      "transcription",
+      "asr-control"
      ]
     }
    }
@@ -4010,6 +4035,69 @@
     }
    },
    "description": "Meeting Bot viewer requests the same gateway-authorized translation cache; provider secrets remain server-side.",
+   "metadata": [
+    {
+     "access": "call"
+    }
+   ]
+  },
+  {
+   "unique-id": "terminal-asr-control",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "terminal-app"
+     },
+     "destination": {
+      "node": "asr-control",
+      "interface": "asr-control-rest"
+     }
+    }
+   },
+   "description": "Authenticated account-only ASR start/stop and safe resource status through Terminal proxy; private derived host key.",
+   "protocol": "HTTP",
+   "metadata": [
+    {
+     "access": "call"
+    }
+   ]
+  },
+  {
+   "unique-id": "asr-control-identity",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "asr-control"
+     },
+     "destination": {
+      "node": "admin-api",
+      "interface": "admin-api-rest"
+     }
+    }
+   },
+   "description": "Internal account preference CAS and aggregate enabled demand; no user list or credential projection.",
+   "protocol": "HTTP",
+   "metadata": [
+    {
+     "access": "call"
+    }
+   ]
+  },
+  {
+   "unique-id": "asr-control-workers",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "asr-control"
+     },
+     "destination": {
+      "node": "transcription",
+      "interface": "stt-endpoint"
+     }
+    }
+   },
+   "description": "Authenticated real audio readiness and derived-key drain fencing before owned process/container stop.",
+   "protocol": "HTTP",
    "metadata": [
     {
      "access": "call"

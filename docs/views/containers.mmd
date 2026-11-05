@@ -12,6 +12,7 @@ flowchart LR
     desktop_journal["Desktop transcript journal"]
     transcript_sync["Owner transcript synchronization CLI"]
     diarization_worker["Local speaker diarization worker"]
+    asr_control["ASR host controller"]
   end
   subgraph agent["agent"]
     agent_api["agent-api"]
@@ -96,3 +97,5 @@ flowchart LR
   agent_api -->|"HTTP"| meeting_api
   agent_api -->|"write"| meeting_translation_cache
   extension -->|"call"| agent_api
+  asr_control -->|"HTTP"| admin_api
+  asr_control -->|"HTTP"| transcription

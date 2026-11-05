@@ -7,6 +7,13 @@ card beats via `CompletionPort` (a direct HTTP completion), workspace turns via 
 `TINA_RUNNER`-selected CLI agent); no vendor name lives in this package. Spawned by the control
 plane; liveness = workload lifecycle.
 
+The image installs the operator-owned Codex command-network policy from
+`codex-requirements.toml` at `/etc/codex/requirements.toml`. It limits online shell traffic to the
+listed GitHub hosts and prevents workspace configuration from widening that list. The adapter
+selects an offline profile for untrusted/read-only turns; keep the managed `enabled` field unset.
+See [Codex networking](../llm/README.md#codex-web-and-command-networking) for the separate hosted
+web-search grant, credential boundaries and verification scope.
+
 Terminal dictation polish is a one-shot, read-only `CompletionPort` job in the worker. It has no
 harness tools and does not write chat history or workspace files.
 

@@ -294,6 +294,7 @@ class ChatContextBody(BaseModel):
 class ChatBody(BaseModel):
     model_config = {"extra": "forbid"}
     prompt: str
+    research: bool = False
     # subject is DERIVED server-side from X-User-Id (P20) — kept here only so a client that still sends it
     # doesn't 422 (extra=forbid); the value is IGNORED. Dropped from the client in Stage 4.
     subject: Optional[str] = None
@@ -1479,6 +1480,9 @@ def create_app(
         if stream_reader is None:
             raise HTTPException(status_code=501, detail="stream relay not wired")
         subject = subject_of(request)  # server-derived (P20); body.subject is ignored
+        research_command = re.match(r'^/research(?:\s|$)', body.prompt.strip(), re.IGNORECASE)
+        if research_command and not body.prompt.strip()[research_command.end():].strip():
+            raise HTTPException(422, 'Nhập chủ đề sau /research.')
         session = body.session or units.DEFAULT_CHAT_SESSION
         # A reconnect carries Last-Event-ID (the last Stream cursor the client rendered). On resume we
         # DON'T re-dispatch — we re-attach to the existing warm unit and read from the cursor onward.
@@ -1494,6 +1498,9 @@ def create_app(
                                       + shared_active_mounts(wsr.root, subject, mindex.list(subject))),
         )
         tools = list(dict.fromkeys([*tools, *_configured_chat_toolbelt()]))
+        if body.research or research_command:
+            from control_plane.knowledge_research import research_instructions
+            prompt = research_instructions(active_workspaces(wsr.root, subject)) + prompt
         # Mark the grounding→user boundary so the terminal strips ALL folded context in one cut. Every
         # branch returns `<grounding> + body.prompt`, so the user's words are the exact suffix; insert the
         # sentinel right before them (no-op when nothing was folded). The kg/mounts preambles the worker
@@ -2271,7 +2278,9 @@ def create_app(
                             "text": seg.get("text"), "t": seg.get("start"),
                             "tsMs": seg.get("abs_start_ms"),
                             "completed": seg.get("completed", True),
-                            "id": seg.get("segment_id"), **({"speakerId": seg["speaker_id"], "speakerRevision": seg.get("speaker_revision")} if seg.get("speaker_id") else {})}, cursor())
+                            "id": seg.get("segment_id"), **({"speakerKey": seg["speaker_key"]} if seg.get("speaker_key") else {}),
+                            **({"speakerStatus": seg["speaker_status"]} if seg.get("speaker_status") else {}),
+                            **({"speakerId": seg["speaker_id"], "speakerRevision": seg.get("speaker_revision")} if seg.get("speaker_id") else {})}, cursor())
 
             def retract_event(payload):
                 """A `retract` marker (the collector withdrew superseded/over-extended pending drafts) →
@@ -2730,7 +2739,9 @@ def create_app(
                                            settings.internal_api_secret.get_secret_value()})
                 with _ur.urlopen(req, timeout=5) as r:
                     t = json.loads(r.read())
-                if t.get("backend") in ("apple", "nvidia", "custom", "funasr", "sherpa"):
+                if t.get("disabled"):
+                    return {"ok": False, "source": "settings", "summary": "Transcription is stopped for this account; start it in Settings"}
+                if t.get("backend") in ("apple", "nvidia", "custom", "funasr", "sherpa", "gipformer", "viegem"):
                     # An explicitly selected backend must be the one tested. Never green the
                     # selection by falling back to a different env endpoint when it is absent.
                     url, token, source = t.get("url") or "", t.get("token") or "", "settings"

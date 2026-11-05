@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { ASK_CHAT_EVENT, type AskChatDetail } from '../../canvas/actions';
 import { ServicesProvider, createContainer, reg } from '../../platform';
 import { LayoutServiceId, createLayoutService } from '../../workbench/layout';
 import { registry } from '../../contributions';
@@ -7,10 +8,31 @@ import * as api from '../workspaceApi';
 import '../workspace';
 
 vi.mock('../workspaceApi', async (original) => ({
-  ...(await original<typeof import('../workspaceApi')>()), readWorkspaceFile: vi.fn(),
+  ...(await original<typeof import('../workspaceApi')>()), readWorkspaceFile: vi.fn(), readActiveSet: vi.fn(),
 }));
 vi.mock('../../ui-kit/MdxDoc', () => ({ MdxDoc: ({ children }: { children: string }) => <div>{children}</div> }));
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+
+it('researches the document in its exact active mount with an explicit save request', async () => {
+  Object.defineProperty(HTMLElement.prototype, 'scrollTo', { configurable: true, value: vi.fn() });
+  vi.mocked(api.readWorkspaceFile).mockResolvedValue('REPO_SOURCE');
+  vi.mocked(api.readActiveSet).mockResolvedValue({ subject: 'u', active: [{
+    slug: 'repo', path: '/workspaces/.attached/u/repo', role: 'private', write: true,
+    primary: false, repo: 'https://github.com/example/repo', ref: 'main',
+  }] });
+  let received: AskChatDetail | undefined;
+  const accept = (event: Event) => { received = (event as CustomEvent<AskChatDetail>).detail; received.onAccepted?.(); };
+  window.addEventListener(ASK_CHAT_EVENT, accept);
+  try {
+    const Comp = registry.tabComponent('doc')!;
+    const container = createContainer([reg(LayoutServiceId, () => createLayoutService('files'))]);
+    render(<ServicesProvider container={container}><Comp id="doc:repo" params={{ path: 'docs/design.md', slug: 'repo' }} active /></ServicesProvider>);
+    await screen.findByText('REPO_SOURCE');
+    fireEvent.click(screen.getByRole('button', { name: 'Nghiên cứu & lưu' }));
+    await waitFor(() => expect(received?.research).toBe(true));
+    expect(received?.prompt).toContain('/workspaces/.attached/u/repo/docs/design.md');
+  } finally { window.removeEventListener(ASK_CHAT_EVENT, accept); }
+});
 
 it.each(['initial', 'focus'])('ignores a late %s read after switching documents', async (kind) => {
   Object.defineProperty(HTMLElement.prototype, 'scrollTo', { configurable: true, value: vi.fn() });

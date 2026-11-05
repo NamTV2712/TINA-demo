@@ -283,7 +283,7 @@ _MODELS_FIELDS = ("mode", "model", "meeting_model", "base_url", "api_key", "effo
 _DIRECT_API_MODES = frozenset(("groq", "deepseek", "gemini"))
 _API_PROVIDER_FIELDS = ("model", "meeting_model", "base_url", "api_key", "effort", "region")
 _TRANSCRIPTION_FIELDS = (
-    "default_backend", "url", "token", "funasr_url", "sherpa_url", "apple_url", "apple_token", "nvidia_url", "nvidia_token",
+    "default_backend", "url", "token", "funasr_url", "sherpa_url", "apple_url", "apple_token", "nvidia_url", "nvidia_token", "gipformer_url", "gipformer_token", "viegem_url", "viegem_token",
 )
 # "setup" tracks the admin first-run wizard: per-step state ("done" / "skipped") + overall
 # completion — the terminal re-surfaces the wizard until it reads completed. Plain strings,
@@ -347,6 +347,7 @@ class TranscriptionPrefsUpdate(BaseModel):
     backend: Optional[str] = None
     url: Optional[str] = None
     token: Optional[str] = None
+    runtime_enabled: Optional[str] = None
 
 
 def _mask_secret(secret: Optional[str]) -> Optional[str]:
@@ -377,18 +378,20 @@ def _validate_config_fields(update: dict, *, kind: str) -> dict:
         if field == "mode" and value not in MODEL_MODES:
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
                                 detail=f"mode must be one of {sorted(MODEL_MODES)}")
-        if field == "backend" and value not in ("default", "apple", "nvidia", "funasr", "sherpa", "custom"):
+        if field == "runtime_enabled" and value not in ("true", "false"):
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail="runtime_enabled must be true or false")
+        if field == "backend" and value not in ("default", "apple", "nvidia", "funasr", "sherpa", "gipformer", "viegem", "custom"):
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
-                                detail="backend must be default, apple, nvidia, funasr, sherpa, or custom")
-        if field == "default_backend" and value not in ("deployment", "apple", "nvidia", "funasr", "sherpa"):
+                                detail="backend must be default, apple, nvidia, funasr, sherpa, gipformer, viegem, or custom")
+        if field == "default_backend" and value not in ("deployment", "apple", "nvidia", "funasr", "sherpa", "gipformer", "viegem"):
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
-                                detail="default_backend must be deployment, apple, nvidia, funasr, or sherpa")
+                                detail="default_backend must be deployment, apple, nvidia, funasr, sherpa, gipformer, or viegem")
         if field == "region" and (
             len(value) > 32 or not value.islower() or not value.replace("-", "").isalnum()
         ):
             raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
                                 detail="region must be a lowercase AWS region name")
-        if field in ("base_url", "url", "funasr_url", "sherpa_url", "apple_url", "nvidia_url"):
+        if field in ("base_url", "url", "funasr_url", "sherpa_url", "apple_url", "nvidia_url", "gipformer_url", "viegem_url"):
             parsed = urlparse(value)
             if parsed.scheme not in ("http", "https") or not parsed.hostname:
                 raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -450,7 +453,7 @@ def _effective_transcription(user_cfg: dict, platform_cfg: dict) -> dict:
         backend = "custom" if user_cfg.get("url") else (platform_cfg.get("default_backend") or "deployment")
     elif user_backend == "default":
         backend = platform_cfg.get("default_backend") or "deployment"
-    elif user_backend in ("apple", "nvidia", "funasr", "sherpa", "custom"):
+    elif user_backend in ("apple", "nvidia", "funasr", "sherpa", "gipformer", "viegem", "custom"):
         backend = user_backend
     else:
         backend = "deployment"
@@ -458,7 +461,7 @@ def _effective_transcription(user_cfg: dict, platform_cfg: dict) -> dict:
     if backend == "custom":
         source, owner = user_cfg, "customer"
         keys = ("url", "token")
-    elif backend in ("apple", "nvidia"):
+    elif backend in ("apple", "nvidia", "gipformer", "viegem"):
         source, owner = platform_cfg, "tina"
         keys = (f"{backend}_url", f"{backend}_token")
     elif backend in ("funasr", "sherpa"):
@@ -474,6 +477,14 @@ def _effective_transcription(user_cfg: dict, platform_cfg: dict) -> dict:
             result[output] = source[key]
     if backend in ("funasr", "sherpa"):
         result["model"] = "custom"
+    if backend == "viegem":
+        result["model"] = "5CD-AI/VieGem-ASR"
+    if backend == "gipformer":
+        result["model"] = "g-group-ai-lab/gipformer1.5-68M-rnnt"
+    if user_cfg.get("runtime_enabled") == "false":
+        result["disabled"] = True
+        result.pop("token", None)
+        result["url"] = ""
     return result
 
 
@@ -487,7 +498,7 @@ def _transcription_summary(user_cfg: dict, platform_cfg: dict) -> dict:
     labels = {"funasr": "FunASR · Qwen3-ASR-0.6B + FSMN-VAD",
               "sherpa": "Sherpa · Qwen3-ASR-0.6B INT8 + Silero",
               "apple": "Apple GPU (MLX/Metal)", "nvidia": "NVIDIA GPU (CUDA)",
-              "custom": "Custom endpoint", "deployment": "Deployment endpoint"}
+              "gipformer": "Gipformer 1.5 · FSMN-VAD", "viegem": "VieGem + LM", "custom": "Custom endpoint", "deployment": "Deployment endpoint"}
     return {"backend": backend, "label": labels[backend],
             "model": config.get("model"), "source": source}
 
@@ -938,6 +949,8 @@ def create_app() -> FastAPI:
         cleaned = _validate_config_fields(update_fields, kind=data_key)
         data = dict(user.data or {})
         data[data_key] = _apply_config_update(data.get(data_key) or {}, cleaned)
+        if data_key == "transcription_prefs":
+            data["transcription_revision"] = int(data.get("transcription_revision", 0)) + 1
         if not data[data_key]:
             data.pop(data_key, None)  # fully cleared → back to platform/env defaults
         user.data = data
@@ -986,7 +999,7 @@ def create_app() -> FastAPI:
                                      user: User = Depends(get_current_user_for_update),
                                      db: AsyncSession = Depends(get_db)):
         """Set the caller's transcription backend override. ``token`` is a SECRET — masked on read."""
-        if update.backend in ("apple", "nvidia"):
+        if update.backend in ("apple", "nvidia", "gipformer", "viegem"):
             platform = await _platform_setting("transcription", db)
             prefix = f"{update.backend}_"
             if not (platform.get(prefix + "url") and platform.get(prefix + "token")):
@@ -997,7 +1010,10 @@ def create_app() -> FastAPI:
             if not platform.get(f"{update.backend}_url"):
                 raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
                                     detail=f"The {update.backend} backend is not configured")
-        await _put_user_prefs(update.model_dump(exclude_unset=True), "transcription_prefs", user, db)
+        fields = update.model_dump(exclude_unset=True)
+        if update.backend and "runtime_enabled" not in fields:
+            fields["runtime_enabled"] = "true"
+        await _put_user_prefs(fields, "transcription_prefs", user, db)
         return await get_user_transcription(user, db)
 
     @app.get("/user/transcription")
@@ -1016,8 +1032,14 @@ def create_app() -> FastAPI:
             available.append("funasr")
         if platform.get("sherpa_url"):
             available.append("sherpa")
+        if platform.get("viegem_url") and platform.get("viegem_token"):
+            available.append("viegem")
+        if platform.get("gipformer_url") and platform.get("gipformer_token"):
+            available.append("gipformer")
         return {
             "backend": backend,
+            "runtime_enabled": prefs.get("runtime_enabled") != "false",
+            "revision": int(data.get("transcription_revision", 0)),
             "default_backend": platform.get("default_backend") or "deployment",
             "available_backends": available,
             "effective": _transcription_summary(prefs, platform),
@@ -1275,7 +1297,13 @@ def create_app() -> FastAPI:
     #     Same shape /internal/validate returns for those fields, keyed by user id. ---
     async def _platform_setting(key: str, db: AsyncSession) -> dict:
         row = await db.get(PlatformSetting, key)
-        return dict(row.value) if row is not None and isinstance(row.value, dict) else {}
+        value = dict(row.value) if row is not None and isinstance(row.value, dict) else {}
+        if key == "transcription" and os.environ.get("TINA_VIEGEM_TOKEN"):
+            value["viegem_token"] = os.environ["TINA_VIEGEM_TOKEN"]
+        if key == "transcription" and os.environ.get("TINA_GIPFORMER_TOKEN"):
+            value["gipformer_token"] = os.environ["TINA_GIPFORMER_TOKEN"]
+            value["gipformer_url"] = os.environ.get("TINA_GIPFORMER_URL", "http://host.docker.internal:18002")
+        return value
 
 
     @app.get("/internal/users/{user_id}/settings", include_in_schema=False)
@@ -1414,7 +1442,7 @@ def create_app() -> FastAPI:
         # The legacy deployment/custom shape stays byte-compatible. Named GPU selections carry
         # `backend`; a missing selected endpoint is returned so callers fail closed.
         backend = transcription["backend"]
-        if backend in ("apple", "nvidia", "funasr", "sherpa") or (backend == "custom" and not transcription.get("url")):
+        if transcription.get("disabled") or backend in ("apple", "nvidia", "funasr", "sherpa", "gipformer", "viegem") or (backend == "custom" and not transcription.get("url")):
             resp["transcription"] = transcription
         elif transcription.get("url") or transcription.get("token"):
             transcription.pop("backend")
@@ -1431,6 +1459,51 @@ def create_app() -> FastAPI:
         return _effective_transcription(
             data.get("transcription_prefs") or {}, await _platform_setting("transcription", db)
         )
+
+    @app.get("/internal/transcription/runtime", include_in_schema=False)
+    async def transcription_runtime(request: Request, user_id: str = "", db: AsyncSession = Depends(get_db)):
+        """Only aggregate resource demand crosses to the host controller; no user list or credentials."""
+        _check_internal_no_dev_bypass(request)
+        platform = await _platform_setting("transcription", db)
+        counts = {"gipformer": 0, "viegem": 0}
+        account = None
+        users = (await db.execute(select(
+            User.id.label("user_id"),
+            User.data["transcription_prefs"].label("transcription_prefs"),
+            User.data["transcription_revision"].label("transcription_revision"),
+        ))).mappings()
+        for user in users:
+            prefs = user["transcription_prefs"] or {}
+            config = _effective_transcription({**prefs, "runtime_enabled": "true"}, platform)
+            backend = config["backend"]
+            if backend not in counts:
+                endpoint = config.get("url")
+                backend = next((name for name in counts if endpoint and endpoint == platform.get(name + "_url")), None)
+                if not backend and config["backend"] == "deployment" and not endpoint and platform.get("gipformer_token"):
+                    backend = "gipformer"
+            enabled = prefs.get("runtime_enabled") != "false"
+            if enabled and backend in counts:
+                counts[backend] += 1
+            if str(user["user_id"]) == user_id:
+                account = {"backend": backend, "enabled": enabled, "revision": int(user["transcription_revision"] or 0)}
+        if user_id and account is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, detail="User not found")
+        return {"counts": counts, "account": account}
+
+    @app.put("/internal/users/{user_id}/transcription-runtime", include_in_schema=False)
+    async def update_transcription_runtime(user_id: str, request: Request, payload: dict,
+                                           db: AsyncSession = Depends(get_db)):
+        _check_internal_no_dev_bypass(request)
+        if (set(payload) != {"backend", "enabled", "expected_revision"}
+                or not isinstance(payload["backend"], str) or payload["enabled"] not in ("", "true", "false")
+                or type(payload["expected_revision"]) is not int or payload["expected_revision"] < 0):
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid runtime update")
+        user = await _load_user(user_id, db, for_update=True)
+        data = user.data if isinstance(user.data, dict) else {}
+        if int(data.get("transcription_revision", 0)) != payload["expected_revision"]:
+            raise HTTPException(status.HTTP_409_CONFLICT, detail="Transcription settings changed; refresh and retry")
+        return await set_user_transcription(TranscriptionPrefsUpdate(
+            backend=payload["backend"], runtime_enabled=payload["enabled"]), user, db)
 
     @app.post("/internal/transcription/resolve", include_in_schema=False)
     async def resolve_capture_transcription(request: Request, payload: dict,
@@ -1460,7 +1533,9 @@ def create_app() -> FastAPI:
         if key not in SETTING_KEYS:
             raise HTTPException(status.HTTP_404_NOT_FOUND,
                                 detail=f"Unknown setting key. Known: {sorted(SETTING_KEYS)}")
-        return {"key": key, "value": await _platform_setting(key, db)}
+        row = await db.get(PlatformSetting, key)
+        return {"key": key, "value": await _platform_setting(key, db),
+                "configured": bool(row is not None and row.value)}
 
     @app.put("/internal/settings/{key}", include_in_schema=False)
     async def put_platform_setting(key: str, payload: dict, request: Request,
@@ -1473,6 +1548,11 @@ def create_app() -> FastAPI:
                                 detail=f"Unknown setting key. Known: {sorted(SETTING_KEYS)}")
         update = {f: payload.get(f) for f in fields if f in payload}
         cleaned = _validate_config_fields(update, kind=key)
+        if key == "transcription" and os.environ.get("TINA_VIEGEM_TOKEN") and cleaned.get("viegem_token"):
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
+                                detail="VieGem token is managed by deployment; update its dotenvx environment instead")
+        if key == "transcription" and os.environ.get("TINA_GIPFORMER_TOKEN") and cleaned.get("gipformer_token"):
+            raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Gipformer token is managed by deployment")
         row = await db.get(PlatformSetting, key)
         merged = _apply_config_update(dict(row.value) if row is not None else {}, cleaned)
         if key == "transcription":
@@ -1483,6 +1563,13 @@ def create_app() -> FastAPI:
             if default_backend == "nvidia" and not (merged.get("nvidia_url") and merged.get("nvidia_token")):
                 raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
                                     detail="Configure the NVIDIA GPU URL and token before making it the default")
+            if default_backend == "viegem" and not (merged.get("viegem_url") and
+                    (os.environ.get("TINA_VIEGEM_TOKEN") or merged.get("viegem_token"))):
+                raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
+                                    detail="Configure the VieGem URL and token before making it the default")
+            if default_backend == "gipformer" and not (os.environ.get("TINA_GIPFORMER_TOKEN") or
+                    (merged.get("gipformer_url") and merged.get("gipformer_token"))):
+                raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Configure Gipformer before making it the default")
             if default_backend in ("funasr", "sherpa") and not merged.get(f"{default_backend}_url"):
                 raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY,
                                     detail=f"Configure the {default_backend} URL before making it the default")

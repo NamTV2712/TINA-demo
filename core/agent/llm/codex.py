@@ -18,6 +18,7 @@ from typing import Callable, Iterable, Iterator, Optional
 from llm.errors import LLMError, looks_like_auth_failure
 from llm.model_capabilities import groq_chat_model_error, normalized_effort
 from llm.ports import harness_subprocess_env
+from llm.citations import render_citations, web_sources
 
 
 _CLIENT = {"name": "tina", "title": "TINA", "version": "0.12.0"}
@@ -88,6 +89,28 @@ class CodexHarness:
             except OSError:
                 continue
         return total
+
+    def _save_sources(self, thread_id: str, turn_id: str, sources: list[dict]) -> bool:
+        if not sources or self._codex_home is None:
+            return True
+        if not all(re.fullmatch(r'[A-Za-z0-9_-]{1,128}', value) for value in (thread_id, turn_id)):
+            return False
+        root = self._codex_home.resolve()
+        target = root / 'tina-sources' / thread_id / f'{turn_id}.json'
+        if root not in target.resolve().parents:
+            return False
+        try:
+            target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(dir=target.parent, mode='w', encoding='utf-8', delete=False) as out:
+                temporary = Path(out.name)
+                json.dump(sources[:50], out, ensure_ascii=False)
+            try:
+                os.replace(temporary, target)
+            finally:
+                temporary.unlink(missing_ok=True)
+            return True
+        except OSError:
+            return False
 
     @staticmethod
     def _workspace_instructions(work: Path) -> Optional[str]:
@@ -232,8 +255,8 @@ class CodexHarness:
             pass
         return config, sorted(shell_environment_excludes)
 
-    def _argv(self, shell_environment_excludes: Iterable[str] = (), *,
-              groq_base_url: Optional[str] = None,
+    def _argv(self, shell_environment_excludes: Iterable[str] = (), *, web_search: str = "disabled",
+              writable_roots: Iterable[str] = (), groq_base_url: Optional[str] = None,
               groq_model_catalog: Optional[Path] = None) -> list[str]:
         mode = (os.environ.get("TINA_CODEX_AUTH_MODE") or "api-key").strip()
         argv = [self._executable, "app-server", "--listen", "stdio://"]
@@ -285,6 +308,19 @@ class CodexHarness:
         # Keep Codex on its default bubblewrap sandbox. TINA's Codex worker is configured to permit
         # nested user namespaces; the legacy Landlock path cannot isolate app-server Unix sockets.
         settings["features.use_legacy_landlock"] = "false"
+        settings["features.network_proxy"] = "true"
+        settings["web_search"] = self._toml_string(web_search)
+        filesystem = {":root": "read"}
+        for root in writable_roots:
+            filesystem[root] = "write"
+            for metadata in (".git", ".codex", ".agents"):
+                filesystem[str(Path(root) / metadata)] = "read"
+        rules = "{" + ", ".join(f"{self._toml_string(path)} = {self._toml_string(access)}"
+                                  for path, access in filesystem.items()) + "}"
+        settings["default_permissions"] = '"tina-offline"'
+        for profile in ("tina-offline", "tina-online"):
+            settings[f"permissions.{profile}.filesystem"] = rules
+            settings[f"permissions.{profile}.network.enabled"] = "true" if profile == "tina-online" else "false"
         for key, value in settings.items():
             argv.extend(["-c", f"{key}={value}"])
         return argv
@@ -323,6 +359,8 @@ class CodexHarness:
 
     @staticmethod
     def _content_text(item: dict) -> str:
+        if isinstance(item.get('text'), str):
+            return item['text']
         chunks: list[str] = []
         for part in item.get("content", []) or []:
             if part.get("type") in ("output_text", "text") and isinstance(part.get("text"), str):
@@ -466,6 +504,11 @@ class CodexHarness:
         if self._codex_home is not None:
             env["CODEX_HOME"] = str(self._codex_home)
         allowed = set(allowed_tools)
+        trusted_trigger = os.environ.get("TINA_UNIT_TRIGGER", "message") in {"message", "scheduled"}
+        web_search = (
+            ("live" if "WebFetch" in allowed else "cached")
+            if trusted_trigger and "WebSearch" in allowed else "disabled"
+        )
         try:
             mounts = json.loads(os.environ.get("TINA_MOUNTS", "[]"))
         except (TypeError, ValueError):
@@ -478,10 +521,17 @@ class CodexHarness:
             and Path(mount["path"]).is_absolute()
         )) if isinstance(mounts, list) else []
         read_only = (
-            not {"Write", "Edit", "Bash"}.intersection(allowed)
+            not trusted_trigger
+            or not {"Write", "Edit", "Bash"}.intersection(allowed)
             or not writable_roots
         )
         developer_instructions = self._workspace_instructions(work)
+        if web_search != 'disabled':
+            developer_instructions = (developer_instructions or '') + (
+                '\n\nFor web research, include a Sources list with direct Markdown links and page titles '
+                'for the sources you actually used. Do not rely only on opaque provider citation ids. '
+                'If a URL or title is unavailable, say so instead of inventing it.'
+            )
         gated_servers = set(gated_mcp_servers)
         config_path, shell_environment_excludes = self._prepare_mcp_config(
             mcp_config, allowed, env, gated_mcp_servers=gated_servers,
@@ -491,8 +541,9 @@ class CodexHarness:
         # the TINA turn policy so a read-only event cannot write through that shell.
         try:
             proc = subprocess.Popen(
-                self._argv(shell_environment_excludes, groq_base_url=groq_base_url,
-                           groq_model_catalog=groq_model_catalog),
+                self._argv(shell_environment_excludes, web_search=web_search,
+                           writable_roots=[] if read_only else writable_roots,
+                           groq_base_url=groq_base_url, groq_model_catalog=groq_model_catalog),
                 cwd=str(work), env=env, stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1,
             )
@@ -526,15 +577,34 @@ class CodexHarness:
 
         try:
             send({"method": "initialize", "id": request_id,
-                  "params": {"clientInfo": _CLIENT}})
+                  "params": {"clientInfo": _CLIENT, "capabilities": {"experimentalApi": True}}})
             receive_until(request_id)
             request_id += 1
             send({"method": "initialized", "params": {}})
 
+            send({"method": "configRequirements/read", "id": request_id, "params": {}})
+            requirements = receive_until(request_id).get("requirements") or {}
+            network = requirements.get("network") or {}
+            # A globally forced proxy in Codex 0.149 overrides offline turns; refuse that policy.
+            if network.get("enabled") is True:
+                raise LLMError("Codex managed network policy must leave enabled unset so offline turns stay offline.")
+            network_access = (
+                not read_only and {"Bash", "WebFetch"}.issubset(allowed)
+                and network.get("enabled") is None
+                and network.get("managedAllowedDomainsOnly") is True
+                and not network.get("allowUnixSockets")
+                and not any(access == "allow" for access in (network.get("unixSockets") or {}).values())
+                and all(network.get(key) is False for key in (
+                    "allowLocalBinding", "allowUpstreamProxy",
+                    "dangerouslyAllowNonLoopbackProxy", "dangerouslyAllowAllUnixSockets",
+                ))
+            )
+            profile = "tina-online" if network_access else "tina-offline"
+            request_id += 1
+
             if session:
-                # excludeTurns requires Codex's experimentalApi handshake; ordinary resume
-                # works on the pinned CLI without expanding the API surface we depend on.
-                params = {"threadId": session}
+                params = {"threadId": session, "excludeTurns": True, "permissions": profile,
+                          "config": {"web_search": web_search}}
                 if developer_instructions:
                     params["developerInstructions"] = developer_instructions
                 send({"method": "thread/resume", "id": request_id, "params": params})
@@ -543,7 +613,8 @@ class CodexHarness:
             else:
                 params: dict = {
                     "cwd": str(work), "approvalPolicy": "never",
-                    "sandbox": "read-only" if read_only else "workspace-write",
+                    "permissions": profile,
+                    "config": {"web_search": web_search},
                     "serviceName": "tina",
                 }
                 if developer_instructions:
@@ -562,16 +633,7 @@ class CodexHarness:
                 "input": [{"type": "text", "text": prompt}],
                 "cwd": str(work),
                 "approvalPolicy": "never",
-                "sandboxPolicy": (
-                    {"type": "readOnly", "networkAccess": False}
-                    if read_only else {
-                        "type": "workspaceWrite",
-                        "writableRoots": writable_roots,
-                        "networkAccess": False,
-                        "excludeTmpdirEnvVar": True,
-                        "excludeSlashTmp": True,
-                    }
-                ),
+                "permissions": profile,
             }
             effort_mode = "groq" if os.environ.get("TINA_CODEX_AUTH_MODE") == "groq" else "openai-api"
             effort = normalized_effort(effort_mode, model or os.environ.get("TINA_AGENT_MODEL", ""),
@@ -581,11 +643,13 @@ class CodexHarness:
             if model:
                 turn_params["model"] = model
             send({"method": "turn/start", "id": request_id, "params": turn_params})
-            receive_until(request_id)
+            started = receive_until(request_id)
+            turn_id = str((started.get('turn') or {}).get('id') or '')
 
             reply_parts: list[str] = []
             saw_delta = False
             started_tools: set[str] = set()
+            sources: list[dict] = []
             assert proc.stdout is not None
             while True:
                 raw = proc.stdout.readline()
@@ -643,6 +707,7 @@ class CodexHarness:
                         yield {"type": "message-delta", "text": delta}
                 elif method == "item/completed":
                     item = params.get("item") or {}
+                    sources = [*sources, *web_sources(item)][:50]
                     if item.get("type") == "agentMessage" and not saw_delta:
                         text = self._content_text(item)
                         if text:
@@ -662,7 +727,9 @@ class CodexHarness:
                     turn = params.get("turn") or {}
                     ok = turn.get("status") == "completed"
                     detail = self._redact_secrets(str((turn.get("error") or {}).get("message") or ""))
-                    reply = "".join(reply_parts)
+                    reply = render_citations("".join(reply_parts), sources)
+                    if not self._save_sources(thread_id, turn_id, sources):
+                        reply += '\n\nKhông lưu được metadata nguồn; liên kết có thể thiếu sau khi tải lại.'
                     if not ok:
                         if looks_like_auth_failure(detail):
                             reply = self._auth_failure_reply()

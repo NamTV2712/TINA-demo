@@ -11,10 +11,11 @@ it('decodes fragmented Vietnamese and resumes without duplicate events or a seco
     controller.close();
   } })));
   const events: AgentEvent[] = [];
-  await readAgentTurn({ prompt: 'hello', session: 'mine' }, new AbortController().signal, e => events.push(e), fetch);
+  await readAgentTurn({ prompt: 'hello', session: 'mine', research: true }, new AbortController().signal, e => events.push(e), fetch);
   expect(events.map(e => e.type)).toEqual(['message-delta', 'turn-complete']);
   expect(events[0].text).toBe('Tiếng Việt');
   expect(fetch.mock.calls[0][1]?.body).toBe(fetch.mock.calls[1][1]?.body);
+  expect(JSON.parse(fetch.mock.calls[0][1]?.body as string).research).toBe(true);
   expect(fetch.mock.calls[1][1]?.headers).toMatchObject({ 'Last-Event-ID': '1-0' });
 });
 it('surfaces authentication and model failures', async () => {

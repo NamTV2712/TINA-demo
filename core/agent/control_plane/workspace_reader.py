@@ -11,6 +11,7 @@ import os
 import re
 from pathlib import Path
 from typing import Optional
+from llm import render_citations, web_sources
 
 
 def _tool_op(name: str) -> dict:
@@ -227,12 +228,18 @@ class WorkspaceReader:
 
             turns: list[dict] = []
             cur_agent: Optional[dict] = None
+            sources: list[dict] = []
+            source_turns: set[str] = set()
+            current_turn_id: str | None = None
 
             def flush_agent() -> None:
-                nonlocal cur_agent
+                nonlocal cur_agent, sources, source_turns
                 if cur_agent is not None:
+                    cur_agent['text'] = render_citations(cur_agent['text'], sources)
                     turns.append(cur_agent)
                     cur_agent = None
+                sources = []
+                source_turns = set()
 
             for path in safe_files:
                 try:
@@ -249,6 +256,9 @@ class WorkspaceReader:
                         records.append(record)
                 user_events = any(r.get('type') == 'event_msg' and r['payload'].get('type') == 'user_message' for r in records)
                 for record in records:
+                    if record.get('type') == 'event_msg' and record['payload'].get('type') == 'task_started':
+                        value = record['payload'].get('turn_id')
+                        current_turn_id = value if isinstance(value, str) else None
                     if record.get('type') == 'event_msg' and record['payload'].get('type') == 'user_message':
                         text = record['payload'].get('message')
                         if isinstance(text, str) and text.strip():
@@ -261,6 +271,7 @@ class WorkspaceReader:
                     if not isinstance(item, dict):
                         continue
                     item_type = item.get("type")
+                    sources = [*sources, *web_sources(item)][:50]
                     if item_type == "message":
                         text = _codex_block_text(item.get("content"))
                         if not text.strip():
@@ -271,6 +282,19 @@ class WorkspaceReader:
                             flush_agent()
                             turns.append({"role": "user", "text": text})
                         elif item.get("role") == "assistant":
+                            turn_id = current_turn_id or (item.get('internal_chat_message_metadata_passthrough') or {}).get('turn_id')
+                            if isinstance(turn_id, str) and re.fullmatch(r'[A-Za-z0-9_-]{1,128}', turn_id) and turn_id not in source_turns:
+                                source_turns.add(turn_id)
+                                cached = self._workspace_child(ws, Path('.codex/tina-sources') / session_id / f'{turn_id}.json')
+                                if cached is not None and cached.is_file():
+                                    try:
+                                        with cached.open('rb') as stream:
+                                            raw_sources = stream.read(500001)
+                                        stored = json.loads(raw_sources) if len(raw_sources) <= 500000 else None
+                                        if isinstance(stored, list):
+                                            sources = [*stored[:50], *sources][:50]
+                                    except (OSError, ValueError):
+                                        pass
                             if cur_agent is None:
                                 cur_agent = {"role": "agent", "text": "", "ops": []}
                             cur_agent["text"] += ('\n\n' if cur_agent['text'] else '') + text
