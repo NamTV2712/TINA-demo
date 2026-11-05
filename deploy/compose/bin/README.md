@@ -40,6 +40,10 @@ installed symlink follows this checkout; keep it in place or rerun the installer
 No separate CLI credential/profile database is created. API meeting/transcript/routine commands
 are outside this release.
 
+The ASR controller reports disabled Compose profiles as stopped instead of failing the whole
+runtime status request. A Gipformer-only deployment remains controllable without VieGem;
+native MPS VieGem is still checked through its host endpoint without a Compose service.
+
 ### First installation (CLI 0.4.0)
 
 Clone `https://github.com/poor-frog/TINA.git` or use an existing checkout. On macOS install and

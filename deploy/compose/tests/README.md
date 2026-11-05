@@ -4,6 +4,9 @@
 atomic private config creation, confirmation, deploy reuse, recovery and optional ASR verification.
 It uses doubles and runs in `tina check cli`; it never starts or stops the production stack.
 
+`test_asr_control.py` also checks that an absent optional VieGem profile cannot break Gipformer
+runtime status, while native MPS status remains available without a Compose VieGem service.
+
 `stack_test.py` brings up the **real** v0.12 compose stack (see `../docker-compose.yml`), proves it
 is ready to run the tina bot, and tears it all down (`down -v`) in a guaranteed finally — the
 "fully tested / proven ready" deliverable, run via `make -C deploy/compose stack-test`.

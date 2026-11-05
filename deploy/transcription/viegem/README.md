@@ -45,8 +45,8 @@ Docker Desktop Linux integration and a supported NVIDIA Windows driver.
 compute before activation: native MPS executes a tensor operation after dependencies are ready;
 CUDA verifies Docker NVIDIA access and then a CUDA operation in the pinned runtime image.
 Missing/incompatible GPUs cause a clear failure rather than silent CPU fallback. The subsequent
-model/audio probe must also pass. The CUDA path is implemented with tested configuration/failure
-paths, but has not been validated on real NVIDIA hardware in this Mac-only workspace.
+model/audio probe must also pass. The original Mac-only checks covered configuration/failure
+paths; the Windows WSL2 CUDA verification below records the subsequent NVIDIA hardware check.
 
 For MPS, setup installs missing uv/cmake through Homebrew, creates Python 3.11 and prepares the
 same hash-verified cache. Docker's VieGem profile is omitted from the active Mac services; its
@@ -204,6 +204,21 @@ KenLM/FSMN CPU placement, dotenvx credentials, cached weights and account select
 CUDA Compose resolution and mocked driver/kernel failure paths passed; no real NVIDIA hardware
 was available to build/run/benchmark the CUDA image. Evidence:
 `~/tina-test-rig/viegem-auto-gpu-20261104/`.
+
+## Windows WSL2 CUDA verification — 2026-11-05
+
+The local deployment passed a CUDA tensor computation on an NVIDIA GeForce RTX 5060 Laptop GPU
+(8 GB) with the source-built PyTorch 2.14.1/cu130 image. All pinned model assets passed their
+SHA-256 checks. One public FLEURS Vietnamese validation clip (14.94 seconds) returned nonempty
+speech and four source-clock segments in 2.19 seconds; silence returned empty text and a request
+without credentials returned HTTP 401. This is a startup/integration check, not a WER benchmark.
+
+This host uses an 8 GB WSL2 memory ceiling and 4 GB swap. The local VieGem service has a 4 GB
+memory limit (5 GB including swap); the earlier 6 GB WSL2 ceiling was insufficient while a live
+bot, development Terminal and both ASR workers were active. Raising a WSL2 limit requires a WSL
+restart: finish active meetings first. After restarting WSL, recreate any service whose stale
+Docker Desktop bind mount no longer resolves its host files before declaring it healthy.
+Installation preserves global defaults and other accounts' transcription choices.
 
 ## ASR start/stop by account
 
