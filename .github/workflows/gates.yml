@@ -1,6 +1,6 @@
 name: gates
-# push+pull_request unrestricted ran the suite TWICE per PR-branch push (both events
-# fire) — pure duplication. Push covers main + release tags; pull_request covers PRs.
+# Push validates main, the live-translation feature branch, and release tags.
+# Other feature branches run through pull_request to avoid duplicate runs.
 #
 # SPLIT INTO 3 PARALLEL JOBS (wall-clock law): static / python / node run concurrently
 # (~5 min serial → ~2.5 min), joined by the `gates` job — the ONE required-check context
@@ -8,7 +8,7 @@ name: gates
 # (if:always() + explicit check, because a skipped required check would read as satisfied).
 on:
   push:
-    branches: [main]
+    branches: [main, 'Feat/LivetranslationVi2En']
     tags: ['v*']
   pull_request:
   # merge queue: the queue's temporary merge-group ref must run (and report) `gates`,

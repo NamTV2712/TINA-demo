@@ -57,6 +57,7 @@ system meetings  # capture → transcribe → record; owns the raw transcript
   data-asset speech.v1
   data-asset speech-playback [writers: meeting-api]
   data-asset speech-room.v1
+  service asr-control
 
 system agent  # the execution domain: a trigger becomes one governed agent turn over a workspace.v1 git repo; owns no transcript
   service agent-api
@@ -76,6 +77,9 @@ system agent  # the execution domain: a trigger becomes one governed agent turn 
   data-asset va-chat
   data-asset meeting-knowledge-pages
   data-asset workspace-human-documents
+  contract meeting-translation.v1
+  database meeting-translation-cache [writers: agent-api]
+  contract meeting-translation.v2
 
 system gateway-system  # the one public edge (api.v1, ws.v1)
   service conformance
@@ -104,7 +108,7 @@ system service-authority-system  # optional operator-owned admission and active-
 system system-webhook-system  # optional operator-owned terminal-event consumer; absent in stock OSS and never selected from customer or meeting data
   service system-webhook
 
-system completion-provider  # the deployment or per-user model endpoint selected by TINA_LLM_PROVIDER; may be tenant-hosted or an external provider
+system completion-provider  # the deployment or per-user model endpoint; may be tenant-hosted or an external provider. Groq uses Codex Responses at https://api.groq.com/openai/v1 for chat, DeepSeek uses the Claude Code Anthropic-compatible endpoint at https://api.deepseek.com/anthropic, and Gemini uses agy with its Gemini API-key provider. Their tool-less meeting jobs use OpenAI-compatible Chat Completions at the respective fixed Groq, DeepSeek and Gemini endpoints. The same masked per-user/platform provider credential selects both paths; TINA transcript API tokens remain separate.
 
 system platform  # shared infra backing the services
   service redis
@@ -229,8 +233,14 @@ edges:
   speech-coordinator -req-> transcription  # Bounded consented question WAV including up to two seconds wake pre-roll; existing authenticated OpenAI-compatible STT.
   bot -req-> meeting-api  # Internal-secret-authenticated speech.v1 receipts bound to the recorded bot session.
   meeting-api -req-> speech-playback  # Meeting API alone owns the ephemeral Redis playback state.
+  agent-api -write-> meeting-translation-cache  # Owner-scoped SQLite phrase cache, live-tail observations and job leases; every HTTP access first reauthorizes canonical transcript and meeting status.
+  terminal-app -call-> agent-api  # Authenticated English/bilingual view reads and advances the shared translation overlay; original ASR remains independent.
+  extension -call-> agent-api  # Meeting Bot viewer requests the same gateway-authorized translation cache; provider secrets remain server-side.
+  terminal-app -call-> asr-control  # Authenticated account-only ASR start/stop and safe resource status through Terminal proxy; private derived host key.
+  asr-control -call-> admin-api  # Internal account preference CAS and aggregate enabled demand; no user list or credential projection.
+  asr-control -call-> transcription  # Authenticated real audio readiness and derived-key drain fencing before owned process/container stop.
   bot, agent-worker deployed-in runtime
-  gateway, meeting-api, agent-api, admin-api, runtime, redis, postgres, object-store, transcription deployed-in deploy
+  gateway, meeting-api, agent-api, admin-api, runtime, redis, postgres, object-store, transcription, asr-control deployed-in deploy
   flows-api, flows-worker deployed-in deploy
 
 flows:

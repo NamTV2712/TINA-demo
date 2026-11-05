@@ -98,6 +98,9 @@ def _coerce_segment(raw: dict) -> Optional[dict]:
         # name. Preserve it in the live hash so downstream policy can distinguish Teams CSRC rows
         # without parsing human labels or widening behavior for every source='merged' producer.
         "speaker_key": raw.get("speaker_key"),
+        "speaker_id": raw.get("speaker_id"),
+        "speaker_revision": raw.get("speaker_revision"),
+        "speaker_status": raw.get("speaker_status"),
         **({"participant_id": raw["participant_id"]} if isinstance(raw.get("participant_id"), str) and 0 < len(raw["participant_id"]) <= 512 else {}),
         "completed": completed,
         "source": source,
@@ -127,13 +130,17 @@ def _to_native_wire(native: str, seg: dict) -> dict:
     return {
         "type": "transcription", "session_uid": native, "meeting_id": native,
         "segments": [{
-            "speaker": seg.get("speaker") or "Speaker", "text": (seg.get("text") or "").strip(),
+            "speaker": seg.get("speaker") if isinstance(seg.get("speaker"), str) else "",
+            "speaker_key": seg.get("speaker_key"),
+            "text": (seg.get("text") or "").strip(),
             "start": round(raw, 1), "end": round(max(raw, end), 1),
             "abs_start_ms": round(raw * 1000),
             "absolute_start_time": seg.get("absolute_start_time"),
             "completed": bool(seg.get("completed")), "language": seg.get("language") or "en",
             "segment_id": seg.get("segment_id"),
-            **({"speaker_id": seg["speaker_id"], "speaker_revision": seg["speaker_revision"]} if seg.get("speaker_id") else {}),
+            **({"speaker_status": seg["speaker_status"]} if seg.get("speaker_status") else {}),
+            **({"speaker_id": seg["speaker_id"]} if seg.get("speaker_id") else {}),
+            **({"speaker_revision": seg["speaker_revision"]} if seg.get("speaker_revision") is not None else {}),
         }],
     }
 

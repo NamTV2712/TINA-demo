@@ -52,7 +52,7 @@ function displayStatus(d: MeetingRowDTO): string {
 interface SegmentDTO {
   segment_id?: string;
   revision?: number;
-  speaker_id?: string; speaker_revision?: number;
+  speaker_id?: string; speaker_key?: string; speaker_status?: "unknown" | "observed" | "confirmed"; speaker_revision?: number;
   start?: number | null;
   end?: number | null;
   session_uid?: string | null;
@@ -364,8 +364,8 @@ export async function fetchDurableTranscript(meetingId: string, strict = false):
     const lines = list
       .filter((s) => (s.text ?? "").trim() || (s.revision ?? 0) > 0)
       .map((s) => ({
-        t: formatTranscriptTime(s.start), speaker: s.speaker || "Speaker", text: s.text ?? "",
-        id: s.segment_id, revision: s.revision ?? 0, speakerId: s.speaker_id,
+        t: formatTranscriptTime(s.start), speaker: s.speaker ?? "Speaker", text: s.text ?? "",
+        id: s.segment_id, revision: s.revision ?? 0, speakerId: s.speaker_id, speakerKey: s.speaker_key, speakerStatus: s.speaker_status,
         speakerRevision: s.speaker_revision ?? 0, tsMs: epochMs(s.start), endTsMs: epochMs(s.end),
         sessionUid: s.session_uid ?? undefined,
       }));

@@ -60,6 +60,7 @@ COPY core/agent/contracts ./contracts
 # the tool registry. workspace-seeds/<name>/ — one validated seed per subdir (today: default, finos).
 COPY core/agent/workspace-seeds ./workspace-seeds
 COPY core/agent/tools-seed ./tools-seed
+COPY core/agent/worker/codex-requirements.toml /etc/codex/requirements.toml
 
 # The sealed contracts loaded BY PATH at import (walk-up resolves repo_root == /app).
 COPY core/meetings/contracts/transcript.v1/transcript.schema.json  ./meetings/contracts/transcript.v1/transcript.schema.json

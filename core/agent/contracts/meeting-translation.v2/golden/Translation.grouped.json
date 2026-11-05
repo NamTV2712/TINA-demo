@@ -1,0 +1,31 @@
+{
+  "version": "meeting-translation.v2",
+  "meeting_id": 6,
+  "target_language": "en",
+  "status": "complete",
+  "retry_after": 0,
+  "total": 1,
+  "completed": 1,
+  "groups": [
+    {
+      "group_id": "phrase:example",
+      "members": [
+        {
+          "segment_id": "s1",
+          "source_text": "Mục tiêu cuộc họp"
+        },
+        {
+          "segment_id": "s2",
+          "source_text": "là tối ưu các mô hình học máy."
+        }
+      ],
+      "source_text": "Mục tiêu cuộc họp là tối ưu các mô hình học máy.",
+      "translated_text": "The meeting aims to optimize machine learning models.",
+      "ready": true,
+      "speaker_id": "nam",
+      "speaker_name": "Nam",
+      "start_ms": 0,
+      "end_ms": 6000
+    }
+  ]
+}

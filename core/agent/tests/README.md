@@ -7,5 +7,36 @@
 | `test_contracts_consumer.py` | L1 contract | transcript.v1 + workspace.v1 goldens validate by-path; meetings internals are un-importable |
 | `test_core_run.py` | L2 unit | `core.run()` with **faked ports**: reads a transcript.v1 golden → emits the stub action → would-commit a workspace.v1-conformant entity |
 | `test_config.py` | unit | `TINA_*` env validates + fails fast; secrets stay out of repr; worker `env` matches `runtime.v1` golden |
+| `test_translation_groups.py` | unit | fragmented speech joins into phrases; speaker identity, pauses, sentence/size boundaries, source timestamps and stable group IDs are preserved |
+| `test_meeting_translation.py` | API + unit | owner authorization, durable shared phrase cache, edit invalidation, lease deduplication/expiry, provider backoff/retry, live-tail buffering, stop flush, legacy cache separation, saved Meeting model and visible-only output |
 | `fakes.py` | — | in-memory `WorkspacePort` / `RuntimePort` — the seam that makes L2 possible |
 | `conftest.py` | — | loads transcript.v1 goldens by path (the spec, P8) |
+
+Focused translation checks, from `core/agent`:
+
+```bash
+uv run pytest tests/test_meeting_translation.py tests/test_translation_groups.py -q
+```
+
+These tests fake provider calls and do not need API keys or consume inference quota. The broader
+agent suite includes POSIX file locks and symlinks; run it on Linux/WSL or in the existing Docker
+test environment when developing on Windows. Frontend behavior belongs to the Terminal canvas
+and extension suites, not these backend tests.
+
+Codex network/web probes run explicitly in an isolated built worker image. They do not use model
+credentials or production workspace volumes. Run from the repository root (use the appropriate
+Docker context for the host):
+
+```sh
+for probe in codex_network_smoke.py codex_web_smoke.py; do
+  docker run --rm --read-only --tmpfs /tmp --tmpfs /work \
+    --security-opt seccomp=unconfined --security-opt no-new-privileges --cap-drop SYS_ADMIN \
+    -v "$PWD/core/agent/tests/$probe:/smoke.py:ro" \
+    --entrypoint python tina/v012-agent-worker:dev /smoke.py || exit 1
+done
+```
+
+The network probe checks allowed HTTPS/Git, blocked domains/private addresses/proxy bypass,
+offline/read-only turns and metadata/credential protection. The web probe uses a local Responses
+fixture to inspect real Codex requests on new/resumed threads: live, cached and disabled modes.
+It does not claim that a live model/account actually performed a search.

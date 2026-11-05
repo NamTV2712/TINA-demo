@@ -18,7 +18,10 @@ const check = (name: string, cond: boolean) => {
 // Structural rules (deterministic, no list dependency)
 check("empty → dropped", isHallucination("") === true);
 check("whitespace → dropped", isHallucination("   ") === true);
-check("short single word → dropped", isHallucination("ok") === true);
+for (const reply of ["Có", "Không", "Được", "Ừ", "ĐÂY", "ok", "yes", "no", "3", "Không.", "Ừ!"]) {
+  check(`short reply kept: ${reply}`, isHallucination(reply) === false);
+}
+check("punctuation-only → dropped", isHallucination("...?!") === true);
 check("long single word kept", isHallucination("internationalization") === false);
 check("clean sentence kept", isHallucination("the quick brown fox jumps over") === false);
 check("repetition loop (3+ ×) → dropped", isHallucination("i love it i love it i love it i love it") === true);
@@ -45,4 +48,4 @@ check("real Spanish speech still kept (no over-filter)",
   isHallucination("empecemos con el bounded context de facturacion") === false);
 
 if (failed) { console.error(`\n❌ hallucination-filter: ${failed} checks FAILED.`); process.exit(1); }
-console.log(`\n✅ hallucination-filter: all checks pass — phrase-list + short/repetition junk dropped, real speech kept.`);
+console.log(`\n✅ hallucination-filter: all checks pass — phrase-list + punctuation/repetition junk dropped, real speech kept.`);

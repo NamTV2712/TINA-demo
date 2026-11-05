@@ -13,10 +13,12 @@ flowchart LR
     transcript_sync["Owner transcript synchronization CLI"]
     diarization_worker["Local speaker diarization worker"]
     tts_sidecar["Optional Vietnamese TTS sidecar"]
+    asr_control["ASR host controller"]
   end
   subgraph agent["agent"]
     agent_api["agent-api"]
     agent_worker["agent-worker"]
+    meeting_translation_cache["Private meeting translation SQLite cache"]
   end
   subgraph gateway_system["gateway"]
     conformance["conformance"]
@@ -99,3 +101,7 @@ flowchart LR
   speech_coordinator -->|"HTTP"| gateway
   speech_coordinator -->|"HTTP"| transcription
   bot -->|"HTTP"| meeting_api
+  agent_api -->|"write"| meeting_translation_cache
+  extension -->|"call"| agent_api
+  asr_control -->|"HTTP"| admin_api
+  asr_control -->|"HTTP"| transcription

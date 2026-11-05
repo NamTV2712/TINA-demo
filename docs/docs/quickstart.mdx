@@ -1,11 +1,11 @@
 ---
 title: "Quickstart"
-description: "Clone TINA-KT, unlock its private deployment config, and start the configured Gipformer stack."
+description: "Clone TINA, unlock its private deployment config, and start the configured Gipformer stack."
 ---
 
 ---
 
-This walkthrough starts the configured TINA-KT deployment: its Compose project, Google sign-in,
+This walkthrough starts the configured TINA deployment: its Compose project, Google sign-in,
 Gipformer speech recognition, and agent services. It preserves the deployment's existing data.
 
 ## Prerequisites
@@ -19,8 +19,8 @@ Gipformer speech recognition, and agent services. It preserves the deployment's 
 ## 1. Clone the repository
 
 ```bash
-git clone https://github.com/poor-frog/TINA-KT.git
-cd TINA-KT
+git clone https://github.com/poor-frog/TINA.git
+cd TINA
 ```
 
 ## 2. Install Dotenvx
@@ -79,7 +79,7 @@ the matching Dotenvx key, do not invent a replacement: use the separate [fresh-i
   <Step title="Configure speech recognition">
     The `asr` Compose profile starts Gipformer 1.5 + FSMN-VAD. If your account has a transcription
     preference that overrides the platform default, select Gipformer under Settings → Models. See
-    the [Gipformer guide](https://github.com/poor-frog/TINA-KT/blob/main/deploy/transcription/gipformer/README.md)
+    the [Gipformer guide](https://github.com/poor-frog/TINA/blob/main/deploy/transcription/gipformer/README.md)
     and [transcription configuration](/configuration#transcription-stt).
   </Step>
   <Step title="Send a bot to a meeting">

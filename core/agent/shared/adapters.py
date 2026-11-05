@@ -316,9 +316,24 @@ class RuntimeHttpClient(RuntimePort):
 
     def await_done(self, workload_id: str, timeout_sec: float = 0.0) -> str:
         req = urllib.request.Request(f"{self._base}/workloads/{workload_id}", method="GET")
-        with urllib.request.urlopen(req, timeout=self._timeout) as r:
-            status = json.loads(r.read())
+        try:
+            with urllib.request.urlopen(req, timeout=self._timeout) as r:
+                status = json.loads(r.read())
+        except urllib.error.HTTPError as exc:
+            if exc.code == 404:
+                return "unknown"
+            raise
         return status.get("state", "unknown")
+
+    def stop(self, workload_id: str) -> None:
+        req = urllib.request.Request(f"{self._base}/workloads/{workload_id}/stop", data=b"{}",
+                                     headers={"Content-Type": "application/json"}, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=self._timeout):
+                pass
+        except urllib.error.HTTPError as exc:
+            if exc.code != 404:
+                raise
 
 
 def _b64u(raw: bytes) -> str:

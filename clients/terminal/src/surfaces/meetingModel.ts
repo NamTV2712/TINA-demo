@@ -15,7 +15,7 @@ export interface MeetingAudioRecording {
   media_files?: { type: string; duration_seconds?: number | null }[];
 }
 export interface ProposedAction { id: string; label: string; detail: string }
-export interface TranscriptLine { t: string; speaker: string; text: string; id?: string; revision?: number; speakerId?: string; speakerRevision?: number; tsMs?: number; endTsMs?: number; sessionUid?: string }
+export interface TranscriptLine { t: string; speaker: string; text: string; id?: string; revision?: number; speakerId?: string; speakerKey?: string; speakerStatus?: "unknown" | "observed" | "confirmed"; speakerRevision?: number; tsMs?: number; endTsMs?: number; sessionUid?: string }
 export interface MeetingMock {
   id: string;
   session_uid?: string;       // set on a LIVE-backend meeting → the tab subscribes to the real Stream

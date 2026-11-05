@@ -12,6 +12,7 @@ Config (constructor args win over env): ``TINA_LLM_BASE_URL`` (default ``https:/
 from __future__ import annotations
 
 import os
+from urllib.parse import quote, urlparse
 from typing import Optional
 
 import httpx
@@ -21,6 +22,18 @@ from llm.ports import CompletionResult
 
 _DEFAULT_BASE = "https://api.anthropic.com"
 _API_VERSION = "2023-06-01"
+
+
+def bedrock_request(base: str, key: str, model: str, payload: dict) -> tuple[str, dict, dict] | None:
+    """Adapt the Messages body to Bedrock InvokeModel, including older Claude models."""
+    parsed = urlparse(base)
+    if (parsed.scheme != "https" or not (parsed.hostname or "").startswith("bedrock-runtime.")
+            or not (parsed.hostname or "").endswith(".amazonaws.com") or parsed.path != "/anthropic"):
+        return None
+    body = {k: v for k, v in payload.items() if k != "model"}
+    body["anthropic_version"] = "bedrock-2023-05-31"
+    return (f"https://{parsed.netloc}/model/{quote(model, safe='')}/invoke", body,
+            {"Authorization": f"Bearer {key}"})
 
 
 def _max_tokens() -> int:
@@ -60,8 +73,12 @@ class AnthropicCompletion:
         if system:
             payload["system"] = system
         headers = {"x-api-key": self._key, "anthropic-version": _API_VERSION}
+        url = f"{self._base}/v1/messages"
+        native = bedrock_request(self._base, self._key, target, payload)
+        if native:
+            url, payload, headers = native
         try:
-            r = self._client.post(f"{self._base}/v1/messages", json=payload, headers=headers)
+            r = self._client.post(url, json=payload, headers=headers)
         except httpx.HTTPError as exc:
             raise LLMError(f"completion transport failure against {self._base}: {exc}") from exc
         if r.status_code in (401, 403):

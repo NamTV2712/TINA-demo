@@ -1,0 +1,21 @@
+# Selected automatically by make all on Linux/WSL2 when the resolved device is CUDA.
+services:
+  viegem-models:
+    image: tina/v012-viegem-cuda:${IMAGE_TAG:-dev}
+    build:
+      args:
+        TORCH_VARIANT: cu130
+  viegem:
+    image: tina/v012-viegem-cuda:${IMAGE_TAG:-dev}
+    build:
+      args:
+        TORCH_VARIANT: cu130
+    environment:
+      TINA_VIEGEM_DEVICE: cuda
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]

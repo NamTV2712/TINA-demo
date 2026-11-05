@@ -1,8 +1,8 @@
 "use client";
 /** The ONE live-transcript render engine (P23: the terminal RENDERS, it does not re-derive). It paints a
  *  list of segments — CONFIRMED text is stable + append-only (consecutive same-speaker segments merge into
- *  one flowing block) and the in-flight PENDING text is a single dimmed "live" tail — so the body never
- *  flickers while the unconfirmed window re-forms. Fed RAW segments (transcript) or PROCESSED segments
+ *  one flowing block), while every in-flight PENDING speaker window stays visible as a dimmed live tail.
+ *  Fed RAW segments (transcript) or PROCESSED segments
  *  (the cleaned mirror, which also carry keyword `tags` to research) by exactly the same code; the toggle
  *  picks the source, not the engine.
  *
@@ -14,11 +14,14 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { recordAsrTiming } from "../lib/asrTelemetry";
 import { splitTextIntoSpans, type SpanEntity } from "./inlineSpans";
 import { entityColor } from "../ui-kit/docLinks";
+import styles from "./MeetingTranscript.module.css";
+import type { TranscriptLanguage } from "./MeetingTranslation";
+import type { PhraseTranslation } from "./translationGroups";
 
 export interface EngineTag { label: string; kind: string }
 export interface EngineEntity { id?: string; label: string; kind: string; docPath?: string }
 export interface EngineSignal { id: string; kind: string; label: string }
-export interface EngineSegment { speakerId?: string; speaker?: string; text: string; tsMs?: number; endTsMs?: number; id?: string; completed?: boolean; tags?: EngineTag[]; stale?: boolean; evidence?: unknown[] }
+export interface EngineSegment { speakerId?: string; speakerKey?: string; speaker?: string; text: string; tsMs?: number; endTsMs?: number; id?: string; completed?: boolean; tags?: EngineTag[]; stale?: boolean; evidence?: unknown[]; translation?: PhraseTranslation }
 
 export function TranscriptEvidence({ evidence }: { evidence?: unknown[] }) {
   const [open, setOpen] = useState(false);
@@ -155,6 +158,8 @@ export function LiveTranscriptEngine({
   onSegmentClick,
   playableSegmentIds,
   activeSegmentId,
+  language = "vi",
+  translationPaused = false,
 }: {
   segments: EngineSegment[];
   emptyLabel?: string;
@@ -164,6 +169,8 @@ export function LiveTranscriptEngine({
   onSegmentClick?: (segmentId: string) => void;
   playableSegmentIds?: ReadonlySet<string>;
   activeSegmentId?: string | null;
+  language?: TranscriptLanguage;
+  translationPaused?: boolean;
 }) {
   const renderedAt = performance.now();
   useLayoutEffect(() => {
@@ -177,46 +184,76 @@ export function LiveTranscriptEngine({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [segments]);
   // Confirmed (completed !== false) = stable. Merge consecutive same-speaker confirmed segments into
-  // flowing blocks; keyword tags accumulate per block. Pending (completed === false) = the live edge.
-  const blocks: { speakerId?: string; speaker?: string; tsMs?: number; text: string; key: string; tags: EngineTag[]; stale: boolean; evidence: unknown[] }[] = [];
+  // flowing blocks; every speaker's pending segment remains visible as a separate live tail.
+  const blocks: { speakerId?: string; speakerKey?: string; speaker?: string; tsMs?: number; text: string; key: string; tags: EngineTag[]; stale: boolean; evidence: unknown[] }[] = [];
+  const identity = (value: Pick<EngineSegment, "speakerId" | "speakerKey" | "speaker">) =>
+    value.speakerId ? `id:${value.speakerId}` : value.speaker?.trim() ? `name:${value.speaker}` : value.speakerKey ? `key:${value.speakerKey}` : undefined;
   for (const s of segments) {
     if (s.completed === false) continue;
     const last = blocks[blocks.length - 1];
-    if (last && last.speaker === s.speaker && last.speakerId === s.speakerId && last.stale === !!s.stale) { last.text += " " + s.text; if (s.tags) last.tags.push(...s.tags); last.evidence.push(...(s.evidence ?? [])); }
-    else blocks.push({ speakerId: s.speakerId, speaker: s.speaker, tsMs: s.tsMs, text: s.text, key: s.id ?? `b${blocks.length}`, tags: [...(s.tags ?? [])], stale: !!s.stale, evidence: [...(s.evidence ?? [])] });
+    const currentIdentity = identity(s);
+    if (last && currentIdentity && identity(last) === currentIdentity && last.stale === !!s.stale) { last.text += " " + s.text; if (s.tags) last.tags.push(...s.tags); last.evidence.push(...(s.evidence ?? [])); }
+    else blocks.push({ speakerId: s.speakerId, speakerKey: s.speakerKey, speaker: s.speaker, tsMs: s.tsMs, text: s.text, key: s.id ?? `b${blocks.length}`, tags: [...(s.tags ?? [])], stale: !!s.stale, evidence: [...(s.evidence ?? [])] });
   }
-  const lastPending = [...segments].reverse().find((s) => s.completed === false);
-  const live = (lastPending?.text ?? "").trim();
-  const liveSpeaker = lastPending?.speaker;
+  const pending = segments.filter((s) => s.completed === false && s.text.trim());
 
-  const lastBlock = blocks[blocks.length - 1];
-  const liveJoinsLast = !!live && !!lastBlock && lastBlock.speaker === liveSpeaker && lastBlock.speakerId === lastPending?.speakerId;
-  const liveOwnBlock = !!live && !liveJoinsLast;
-
-  if (!blocks.length && !live) {
+  if (!blocks.length && !pending.length) {
     return <div style={{ color: "var(--t3)", fontSize: 13, padding: "8px 2px" }}>{emptyLabel}</div>;
   }
 
   const head = (speaker?: string, tsMs?: number) =>
     speaker ? (
-      <div style={{ fontSize: 12, fontWeight: 700, color: "var(--t2)", marginBottom: 3 }}>
+      <div className={styles.speaker}>
         {speaker}
         {typeof tsMs === "number" && (
-          <span style={{ fontWeight: 400, color: "var(--t3)", marginLeft: 8 }}>{new Date(tsMs).toLocaleTimeString()}</span>
+          <time>{new Date(tsMs).toLocaleTimeString()}</time>
         )}
       </div>
     ) : null;
+
+  if (language !== "vi") {
+    return <div className={styles.flow}>
+      {segments.map((segment, index) => {
+        const translated = segment.translation?.text;
+        const draft = segment.completed === false;
+        const originalVisible = language === "bilingual" || !translated;
+        const playable = !!segment.id && playableSegmentIds?.has(segment.id) && !!onSegmentClick;
+        return <article className={styles.turn} data-active={!!segment.id && segment.id === activeSegmentId} key={segment.translation?.groupId ?? segment.id ?? index}>
+          {head(segment.speaker, segment.tsMs)}
+          {originalVisible && <div className={styles.original} data-draft={draft}>
+            {playable ? <button type="button" onClick={() => onSegmentClick?.(segment.id!)} aria-label="Play transcript segment"
+              className={styles.play} aria-current={segment.id === activeSegmentId ? "true" : undefined}>{segment.text}</button> : segment.text}
+          </div>}
+          <div lang="en" className={styles.english}>
+            <span className={styles.languageLabel}>EN</span>
+            {translated || (draft ? "Chờ đoạn nói hoàn tất…" : translationPaused ? "Chưa dịch được · bản gốc vẫn được giữ" : segment.translation?.ready ? "Đang dịch…" : "Đang gom câu…")}
+          </div>
+        </article>;
+      })}
+    </div>;
+  }
+  const pendingLine = (segment: EngineSegment, index: number) => (
+    <div key={segment.id ?? `pending-${index}`}>
+      {head(segment.speaker, segment.tsMs)}
+      <div style={{ fontSize: 13.5, color: "var(--t3)", lineHeight: 1.6, fontStyle: "italic" }}>
+        <BlockText text={segment.text.trim()} entities={entities} actions={actions} /> …
+      </div>
+    </div>
+  );
 
   // When a saved recording is available, keep the original ASR turns separate so each click maps to
   // that exact audio timestamp. The regular live transcript still merges same-speaker fragments.
   if (onSegmentClick && playableSegmentIds?.size) {
     const turns = segments.filter((segment) => segment.completed !== false);
-    let previousSpeaker: string | undefined;
+    let previousIdentity: string | undefined;
     return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 5, maxWidth: 760 }}>
+      <div className={styles.flow} style={{ gap: 5 }}>
         {turns.map((segment, index) => {
-          const showSpeaker = index === 0 || segment.speaker !== previousSpeaker;
-          previousSpeaker = segment.speaker;
+          const speakerIdentity = segment.speakerId ? `id:${segment.speakerId}`
+            : segment.speaker?.trim() ? `name:${segment.speaker}`
+              : segment.speakerKey ? `key:${segment.speakerKey}` : `segment:${segment.id ?? index}`;
+          const showSpeaker = index === 0 || speakerIdentity !== previousIdentity;
+          previousIdentity = speakerIdentity;
           const id = segment.id;
           const playable = !!id && playableSegmentIds.has(id);
           const active = !!id && id === activeSegmentId;
@@ -243,6 +280,7 @@ export function LiveTranscriptEngine({
             </div>
           );
         })}
+        {pending.map(pendingLine)}
       </div>
     );
   }
@@ -293,7 +331,7 @@ export function LiveTranscriptEngine({
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 13, maxWidth: 760 }}>
+    <div className={styles.flow}>
       {blocks.map((b, idx) => {
         const isLast = idx === blocks.length - 1;
         return (
@@ -303,22 +341,14 @@ export function LiveTranscriptEngine({
             <div style={{ fontSize: 14, color: "var(--t1)", lineHeight: 1.65 }}>
               <BlockText text={b.text} entities={entities} actions={actions} />
               <TranscriptEvidence evidence={b.evidence} />
-              {isLast && liveJoinsLast && (
-                <span style={{ color: "var(--t3)", fontStyle: "italic" }}> {live} …</span>
-              )}
             </div>
             {chips(b.tags)}
-            {signalBadges(isLast && !liveOwnBlock)}
+            {signalBadges(isLast && pending.length === 0)}
           </div>
         );
       })}
-      {liveOwnBlock && (
-        <div>
-          {head(liveSpeaker)}
-          <div style={{ fontSize: 13.5, color: "var(--t3)", lineHeight: 1.6, fontStyle: "italic" }}>{live} …</div>
-          {signalBadges(true)}
-        </div>
-      )}
+      {pending.map(pendingLine)}
+      {pending.length > 0 && signalBadges(true)}
     </div>
   );
 }

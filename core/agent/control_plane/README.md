@@ -2,6 +2,12 @@
 
 The agent control plane: the FastAPI app (`api.py`) and orchestration that dispatches work to workers and reconciles routine/meeting lifecycle. Owns request handling, routine bookkeeping, transcription watching, and event relay — distinct from the `worker/` that runs a single agent workload.
 
+A leading chat `/research <topic>` (or explicit `research: true` from document actions) uses `knowledge_research.py` to select an active private writable
+destination and instruct the existing agent to save a new sourced note. Meeting/repo/web rows carry
+evidence versions and verification dates; absent evidence and partial failures remain visible.
+The server does not treat the agent's synthesis as independently verified facts. Private Codex chat
+history restores source URLs from the matching turn's metadata, never from another shared mount.
+
 ChatGPT plan credentials live in the private `openai-auth` volume. Terminal completes OAuth;
 `/internal/openai-auth/{subject}` requires the internal secret and owns generation reads, credential
 saves and disconnect. Saves and refresh share a file lock with disconnect. Disconnect rotates the
@@ -9,6 +15,26 @@ generation before removing the profile, so a callback started before disconnect 
 This clears the selected TINA user's connection, not browser sessions or tokens already copied to
 running workers. Meeting model labels resolve personal settings before deployment defaults, with
 an explicit workspace model pin taking precedence; labels describe configuration, not inference health.
+
+Meeting translation: `GET/POST /api/meeting-translations/{meeting_id}` exposes the
+`meeting-translation.v2` English phrase overlay. Every request first authorizes canonical transcript
+and meeting status through Meeting API. GET observes live-tail stability without inference;
+POST advances one ready phrase, joining consecutive ASR fragments of the same speaker
+through the existing tool-less translation worker and the user's saved Meeting model.
+SQLite results and atomic 120-second leases live outside workspace Git trees on the existing
+workspace volume. Web/extension share cache entries by owner, meeting, phrase and exact source members.
+Sentence endings, speaker changes and pauses close a phrase; size/time limits bound latency.
+An unfinished live tail waits five seconds without new finalized text. Stopping the meeting
+flushes it immediately. Old fragment cache entries remain on disk but are not reused.
+Failures back off 15/60/300 seconds; an explicit retry bypasses the backoff. Drafts, raw ASR,
+canonical revisions and capture continue independently. With all translated views closed,
+new translation calls pause until a client reopens one.
+
+Settings → Models lists come from the provider itself (`model_catalog.py` behind
+`POST /api/models/catalog`): fixed first-party endpoints selected by `mode`, the caller's draft or
+saved key used for that single request, non-chat entries filtered out, and a rejected key reported as
+401 instead of an empty list. Callers supply `mode` only — never a base URL — so this route cannot be
+turned into an egress proxy.
 
 ## Workspace membership + invites + roles (Lane M — the access layer for shared workspaces)
 

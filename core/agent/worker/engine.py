@@ -48,6 +48,7 @@ from llm import (
 from llm.errors import _AUTH_SIGNATURE_RE  # noqa: F401 — re-exported for the worker.worker shim
 from shared.seeding import resolve_seed_dir, seed_workspace, validate_seed
 from shared.units import DICTATION_POLISH_PREFIX, DICTATION_TRANSLATE_PREFIX
+from shared.translation_text import visible_translation
 
 log = logging.getLogger("agent_api.worker")
 
@@ -728,8 +729,9 @@ def _run_dictation_translate(stream, out_topic: str, start: dict) -> None:
         )
         result = completion_from_env(timeout=30.0).complete(
             json.dumps({"source_transcript": text}, ensure_ascii=False), system=system,
+            model=os.environ.get("TINA_MEETING_MODEL") or None,
         )
-        translated = result.text.strip()
+        translated = visible_translation(result.text)
         if not translated or len(translated) > 50000:
             raise ValueError("invalid translation result")
         event = {"type": "message-delta", "text": translated}

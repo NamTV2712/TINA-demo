@@ -468,22 +468,21 @@ def test_dispatcher_model_config_overrides_deployment_models():
     assert env["TINA_MEETING_MODEL"] == "my-meeting"
 
 
-def test_dispatcher_model_config_stamps_reasoning_effort():
-    """Settings → Models effort pin reaches the worker env as TINA_AGENT_EFFORT (the claude-code
-    harness passes it through as --effort). Absent ⇒ no env key ⇒ the CLI's own default."""
+def test_dispatcher_uses_auto_even_with_a_legacy_reasoning_effort():
+    """Old saved effort pins must not override automatic provider thinking."""
     rt = _FakeRuntime()
     mc = _FakeModelConfig({"model": "my-model", "effort": "medium"})
     d = dispatch.Dispatcher(load_settings(), rt, _FakeIdentity(), model_config=mc)
     d.dispatch(VALID_INV)
     _, _profile, env = rt.spawned[0]
-    assert env["TINA_AGENT_EFFORT"] == "medium"
+    assert env["TINA_AGENT_EFFORT"] == ""
     # no effort configured ⇒ no env key at all (unset must mean "don't touch the CLI default")
     rt2 = _FakeRuntime()
     d2 = dispatch.Dispatcher(load_settings(), rt2, _FakeIdentity(),
                            model_config=_FakeModelConfig({"model": "my-model"}))
     d2.dispatch(VALID_INV)
     _, _profile2, env2 = rt2.spawned[0]
-    assert "TINA_AGENT_EFFORT" not in env2
+    assert env2["TINA_AGENT_EFFORT"] == ""
 
 
 def test_dispatcher_antigravity_mode_isolates_agent_model_and_requires_ack(monkeypatch):
@@ -529,6 +528,75 @@ def test_dispatcher_model_config_custom_mode_stamps_both_call_shapes():
     assert env["TINA_LLM_BASE_URL"] == "https://gw.example.com"
     assert env["TINA_LLM_API_KEY"] == "sk-user"
     assert env["TINA_AGENT_MODEL"] == "qwen3"
+
+
+def test_groq_overlay_routes_chat_and_summaries_with_isolated_credentials(monkeypatch):
+    monkeypatch.setenv("TINA_LLM_API_KEY", "deployment-secret")
+    env = {key: "other-provider-secret" for key in dispatch.MODEL_AUTH_ENV_ALLOWLIST}
+    env.update(TINA_AGENT_MODEL="sonnet", TINA_MEETING_MODEL="haiku")
+    dispatch.overlay_model_config(env, {"mode": "groq", "api_key": "groq-user-key",
+                                        "base_url": "https://unrelated.invalid"})
+
+    assert env["TINA_RUNNER"] == "codex"
+    assert env["TINA_CODEX_AUTH_MODE"] == "groq"
+    assert env["TINA_LLM_PROVIDER"] == "openai-compat"
+    assert env["TINA_LLM_BASE_URL"] == "https://api.groq.com/openai/v1"
+    assert env["TINA_LLM_API_KEY"] == "groq-user-key"
+    assert env["TINA_AGENT_MODEL"] == "openai/gpt-oss-20b"
+    assert env["TINA_LLM_MODEL"] == "openai/gpt-oss-20b"
+    assert env["TINA_MEETING_MODEL"] == "openai/gpt-oss-20b"
+    for key in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL",
+                "OPENAI_API_KEY", "ACCESS_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "GEMINI_API_KEY"):
+        assert env[key] == ""
+
+    dispatch.overlay_model_config(env, {"mode": "groq"})
+    assert env["TINA_LLM_API_KEY"] == ""  # no deployment/provider credential fallback
+
+
+def test_groq_overlay_preserves_meeting_override_and_honors_model_allowlist():
+    env = {}
+    dispatch.overlay_model_config(env, {"mode": "groq", "model": "openai/gpt-oss-120b",
+                                        "meeting_model": "llama-3.3-70b-versatile"})
+    assert env["TINA_AGENT_MODEL"] == "openai/gpt-oss-120b"
+    assert env["TINA_MEETING_MODEL"] == "llama-3.3-70b-versatile"
+    dispatch.overlay_model_config(env, {"mode": "groq", "model": "denied-model"},
+                                  allowlist="allowed-model")
+    assert env["TINA_AGENT_MODEL"] == ""
+    assert env["TINA_MEETING_MODEL"] == ""
+
+
+@pytest.mark.parametrize("mode,runner,base,default", [
+    ("deepseek", "claude-code", "https://api.deepseek.com", "deepseek-flash"),
+    ("gemini", "antigravity", "https://generativelanguage.googleapis.com/v1beta/openai", "gemini-3.5-flash"),
+])
+def test_api_providers_route_both_call_shapes_and_isolate_defaults(mode, runner, base, default):
+    env = {key: "foreign-secret" for key in dispatch.MODEL_AUTH_ENV_ALLOWLIST}
+    env.update(TINA_AGENT_MODEL="foreign-chat", TINA_MEETING_MODEL="foreign-summary")
+    dispatch.overlay_model_config(env, {"mode": mode, "api_key": "own-key"})
+    assert env["TINA_RUNNER"] == runner
+    assert env["TINA_LLM_PROVIDER"] == "openai-compat"
+    assert env["TINA_LLM_BASE_URL"] == base
+    assert env["TINA_LLM_API_KEY"] == "own-key"
+    assert env["TINA_AGENT_MODEL"] == env["TINA_MEETING_MODEL"] == default
+    assert env["OPENAI_API_KEY"] == env["ACCESS_TOKEN"] == env["CLAUDE_CODE_OAUTH_TOKEN"] == ""
+    if mode == "deepseek":
+        assert env["ANTHROPIC_BASE_URL"] == "https://api.deepseek.com/anthropic"
+        assert env["ANTHROPIC_AUTH_TOKEN"] == "own-key"
+        assert env["ANTHROPIC_API_KEY"] == env["GEMINI_API_KEY"] == ""
+        assert env["ANTHROPIC_DEFAULT_SONNET_MODEL"] == default
+    else:
+        assert env["GEMINI_API_KEY"] == "own-key"
+        assert env["TINA_ANTIGRAVITY_AUTH_MODE"] == "gemini-api"
+        assert env["TINA_ANTIGRAVITY_TERMS_ACKNOWLEDGED"] == ""
+        assert env["ANTHROPIC_BASE_URL"] == env["ANTHROPIC_AUTH_TOKEN"] == ""
+
+    dispatch.overlay_model_config(env, {"mode": mode, "model": "chat-override",
+                                        "meeting_model": "summary-override"})
+    assert env["TINA_AGENT_MODEL"] == "chat-override"
+    assert env["TINA_MEETING_MODEL"] == "summary-override"
+    assert env["TINA_LLM_API_KEY"] == ""
+    dispatch.overlay_model_config(env, {"mode": mode}, allowlist="another-model")
+    assert env["TINA_AGENT_MODEL"] == env["TINA_MEETING_MODEL"] == ""
 
 
 def test_dispatcher_model_config_subscription_mode_keeps_deployment_credentials(monkeypatch):

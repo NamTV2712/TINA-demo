@@ -13,6 +13,7 @@ from llm.errors import (
     preflight_provider_guard,
     provider_host,
 )
+from llm.citations import render_citations, web_sources
 from llm.ports import (
     CompletionPort,
     CompletionResult,
@@ -28,6 +29,8 @@ from llm.registry import (
 )
 
 __all__ = [
+    "render_citations",
+    "web_sources",
     "LLMAuthError",
     "LLMConfigError",
     "LLMError",

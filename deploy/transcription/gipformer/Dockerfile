@@ -17,7 +17,10 @@ RUN pip install --no-cache-dir --extra-index-url https://download.pytorch.org/wh
 COPY deploy/transcription/gipformer/server.py \
      deploy/transcription/gipformer/engine.py \
      deploy/transcription/gipformer/telemetry.py \
+     deploy/transcription/gipformer/install-models.py \
      deploy/transcription/gipformer/model-assets.json ./
+
+COPY deploy/transcription/http_worker.py /app/http_worker.py
 
 EXPOSE 8000
 CMD ["python", "server.py"]

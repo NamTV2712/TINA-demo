@@ -4,6 +4,7 @@ import {
   type BotMeeting,
 } from './bot-transcript';
 import type { TranscriptSegment } from './transcript-rendering';
+import { watchTranslation, type TranscriptLanguage, type TranslationSnapshot } from './translation';
 
 type Source = 'bot' | 'desktop';
 type Config = Record<'apiKey' | 'deployment' | 'ingestUrl' | 'gatewayUrl' | 'dashboardUrl' | 'botGatewayUrl' | 'terminalUrl' | 'language', string>;
@@ -24,6 +25,52 @@ let stopWatching = () => {};
 let listRequest: AbortController | null = null;
 let scope = 0;
 let theme: 'system' | 'light' | 'dark' = 'system';
+let language: TranscriptLanguage = 'bilingual';
+let translation: TranslationSnapshot | null = null;
+let translationError = false;
+let stopTranslation = () => {};
+
+function renderTranslationControls(): void {
+  const supported = !!selected && source === 'bot';
+  const selector = $('transcriptLanguage') as HTMLSelectElement;
+  selector.disabled = !supported;
+  selector.value = language;
+  const displayLanguage = source === 'desktop' ? 'vi' : language;
+  ($('displayLanguage') as HTMLButtonElement).disabled = !supported;
+  $('displayLanguage').textContent = { vi: 'Tiếng Việt', en: 'English', bilingual: 'VI + EN' }[displayLanguage];
+  $('translationControls').dataset.state = translationError ? 'error' : translation?.status || 'pending';
+  $('translationStatus').textContent = !selected ? '' : source === 'desktop' ? 'Dịch hiện hỗ trợ Meeting Bot.' : language === 'vi' ? ''
+    : translationError ? 'Dịch chưa khả dụng · transcript tiếng Việt vẫn hoạt động'
+    : translation?.status === 'paused' ? 'Dịch tạm dừng · sẽ tự thử lại'
+    : translation ? `VI → EN · ${translation.completed}/${translation.total} cụm${translation.groups.some(g => !g.ready) ? ' · Đang gom câu…' : ''}` : 'Đang tải bản dịch…';
+  $('retryTranslation').hidden = language === 'vi' || !(translationError || translation?.status === 'paused');
+}
+
+function startTranslation(retry = false): void {
+  stopTranslation(); stopTranslation = () => {};
+  renderTranslationControls();
+  if (!selected || source !== 'bot' || language === 'vi') return;
+  const token = scope, id = selected.id;
+  stopTranslation = watchTranslation(config, id, snapshot => {
+    if (scope !== token || selected?.id !== id) return;
+    translation = snapshot; translationError = false; renderTranscript();
+  }, () => {
+    if (scope !== token || selected?.id !== id) return;
+    translationError = true; renderTranscript();
+  }, retry, () => segments.filter(segment => segment.completed !== false && !!segment.segment_id).map(segment => segment.segment_id!));
+}
+
+$('transcriptLanguage').addEventListener('change', () => {
+  language = ($('transcriptLanguage') as HTMLSelectElement).value as TranscriptLanguage;
+  renderTranscript(); startTranslation();
+});
+$('retryTranslation').addEventListener('click', () => startTranslation(true));
+$('displayLanguage').addEventListener('click', () => {
+  const selector = $('transcriptLanguage') as HTMLSelectElement;
+  if (selector.disabled) return;
+  ($('meetingControls') as HTMLDetailsElement).open = true;
+  selector.focus();
+});
 
 function currentKey(meeting: BotMeeting): string {
   return `${meeting.id}|${meeting.platform}|${meeting.nativeMeetingId}`;
@@ -58,7 +105,8 @@ function clearTranscript(): void {
 function renderTranscript(status?: string): void {
   const hasText = segments.some(row => row.text?.trim());
   $('emptyState').hidden = hasText;
-  feed.render(segments, 'Draft');
+  feed.render(segments, 'Draft', source === 'bot' ? language : 'vi', translation?.groups ?? [], translationError || translation?.status === 'paused');
+  renderTranslationControls();
   if (selected && !hasText) $('emptyStateText').textContent = 'Waiting for transcript text…';
   $('transcriptStatus').textContent = status || (selected ? selected.status === 'active' ? 'Live transcript' : 'Saved transcript' : 'Choose a meeting to view its transcript.');
   $('updatedAt').textContent = hasText ? `Updated ${new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}` : '';
@@ -81,6 +129,7 @@ function renderMeetings(): void {
     ? 'No Bot meetings yet. Send a meeting from TINA Terminal, then refresh.'
     : 'No saved Desktop transcripts were found.';
   updateDestinations();
+  renderTranslationControls();
 }
 
 function updateDestinations(): void {
@@ -94,6 +143,7 @@ function updateDestinations(): void {
 
 function stopCurrentWatch(clear = false): number {
   scope++;
+  stopTranslation(); stopTranslation = () => {}; translation = null; translationError = false;
   stopWatching(); stopWatching = () => {};
   if (clear) clearTranscript();
   return scope;
@@ -101,6 +151,7 @@ function stopCurrentWatch(clear = false): number {
 
 function watchMeeting(meeting: BotMeeting, token: number): void {
   selected = meeting;
+  startTranslation();
   updateDestinations();
   $('meetingTitle').textContent = meeting.title;
   $('meetingMeta').textContent = `${meeting.platform.replace(/_/g, ' ')} · ${meeting.status}`;
@@ -197,9 +248,21 @@ function openDestination(destination: 'terminal' | 'dashboard'): void {
 }
 
 function showSettings(show: boolean): void {
-  $('settings').hidden = !show;
-  $('viewer').hidden = show;
-  $('settings').setAttribute('aria-hidden', String(!show));
+  const settings = $('settings');
+  const viewer = $('viewer');
+  if (show) {
+    settings.hidden = false;
+    settings.inert = false;
+    viewer.hidden = true;
+    viewer.inert = true;
+    $('backBtn').focus();
+  } else {
+    viewer.hidden = false;
+    viewer.inert = false;
+    $('gearBtn').focus();
+    settings.hidden = true;
+    settings.inert = true;
+  }
 }
 
 async function init(): Promise<void> {

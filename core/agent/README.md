@@ -3,7 +3,7 @@
 ## Purpose
 This module is the **execution domain**: it turns a trigger (a chat turn, a fired
 schedule, an external event, a live transcript beat) into a **governed agent action**
-committed to a user's `workspace.v1` git repo. It owns 9 control-plane contracts and houses
+committed to a user's `workspace.v1` git repo. It owns the [agent contracts](contracts/README.md) and houses
 the `agent-api` service — the one Dispatcher that funnels every trigger through a single
 `unit.v1` envelope and spawns an isolated `runtime.v1` agent worker. The worker reaches models
 and coding-agent CLIs only through the provider-agnostic [`llm`](llm) module (completion +
@@ -44,10 +44,18 @@ lives in the cookbook layer *above* both domains, never inside this one. See
 [`workspace.v1`](contracts/workspace.v1) · [`event.v1`](contracts/event.v1) ·
 [`tool.v1`](contracts/tool.v1) · [`task.v1`](contracts/task.v1) ·
 [`invoke.v1`](contracts/invoke.v1) · [`proactive-card.v1`](contracts/proactive-card.v1) ·
-[`tool-approval.v1`](contracts/tool-approval.v1).
+[`tool-approval.v1`](contracts/tool-approval.v1) ·
+[`meeting-translation.v2`](contracts/meeting-translation.v2/README.md) (current phrase overlay) ·
+[`meeting-translation.v1`](contracts/meeting-translation.v1/README.md) (historical fragment overlay).
 Published schemas are pinned in `contracts.seal.json`; `tool-approval.v1` governs owner-scoped,
 one-call decisions for gated MCP tools. **Consumes:** `meetings/contracts/transcript.v1`,
 `runtime/contracts/runtime.v1`, `identity/contracts/identity.v1`, `gateway/contracts/ws.v1`.
+
+Meeting translation reads authorized canonical transcript snapshots and meeting status through
+Meeting API's HTTP boundary. The [control plane](control_plane/README.md) groups finalized source
+fragments, coordinates the private phrase cache and dispatches tool-less completion jobs using the
+saved Meeting model. Web and extension render the same v2 groups. This derived overlay writes
+neither raw/canonical transcripts nor workspace Git history.
 
 ## Isolated evaluation
 - **Contracts** (L1): each `contracts/*.v1` ships a `validate.mjs`; `gate:schema` checks goldens ≡ schema.

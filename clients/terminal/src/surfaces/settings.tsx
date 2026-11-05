@@ -4,7 +4,7 @@
  *  "API Tokens" activity-bar item retired into here (its panels are imported, not duplicated);
  *  the Meetings sidebar keeps its own first-connect calendar card at the point of need — this is
  *  the durable home (multi-calendar management lives in `calendarConnections.tsx`). Sections are a left nav with local state. */
-import { Fragment, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { Fragment, useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { registerTab } from "../contributions";
 import { Icon } from "../ui-kit";
 import { Modal } from "../ui-kit/Modal";
@@ -12,26 +12,38 @@ import { GitHubTokenCard, TokensPanel } from "./tokens";
 import { presentError } from "./apiClient";
 import { CalendarConnectionsPanel } from "./calendarConnections";
 import { ChatGPTModelInput } from "./chatGPTModelInput";
+import { ModelPicker } from "./modelPicker";
+import { BEDROCK_REGIONS, fallbackChoicesForMode } from "./modelCatalog";
 import { AsrStatusPanel } from "./asrStatus";
-import { canSaveModelPrefs, getModelPrefs, setModelPrefs, getTranscriptionPrefs, setTranscriptionPrefs, getGlobalSetting, setGlobalSetting, testModels, testTranscription, type ConfigTestResult } from "./settingsApi";
+import { TranscriptionPicker } from "./transcriptionPicker";
+import transcriptionStyles from "./transcriptionPicker.module.css";
+import { apiModelProvider, canSaveModelPrefs, getModelPrefs, setModelPrefs, getTranscriptionPrefs, setTranscriptionPrefs, getGlobalSetting, setGlobalSetting, testModels, testTranscription, type ConfigTestResult } from "./settingsApi";
+import { getAsrRuntime, setAsrRuntime, type AsrRuntime } from "./settingsApi";
 
 type SectionId = "calendar" | "models" | "asr" | "tokens" | "github" | "account";
 type ModelSettingsScope = "agent" | "transcription" | "global";
-// shortcut: Gipformer uses the existing custom backend record; update this preset if Compose's host port changes.
-const GIPFORMER_URL = "http://host.docker.internal:18002";
-const GIPFORMER_LABEL = "Gipformer 1.5 · FSMN-VAD";
+// shortcut: recognize legacy custom URLs; managed VieGem selections resolve their endpoint on the server.
+const TRANSCRIPTION_PRESETS: Record<string, { url: string; label: string }> = {
+  gipformer: { url: "http://host.docker.internal:18002", label: "Gipformer 1.5 · FSMN-VAD" },
+  viegem: { url: "http://host.docker.internal:18005", label: "VieGem + LM" },
+};
 
 function transcriptionFormValues(value: object): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [key, item] of Object.entries(value)) if (typeof item === "string" && item) out[key] = item;
-  if (out.backend === "custom" && out.url === GIPFORMER_URL) out.backend = "gipformer";
+  if (out.backend === "custom") {
+    const preset = Object.entries(TRANSCRIPTION_PRESETS).find(([key, item]) => key !== "viegem" && item.url === out.url);
+    if (preset) out.backend = preset[0];
+  }
   return out;
 }
 
 function transcriptionDisplay(value: { backend?: string | null; url?: string | null; effective?: { label: string; source: string } | null }) {
   return value.effective ? {
     ...value.effective,
-    label: value.backend === "custom" && value.url === GIPFORMER_URL ? GIPFORMER_LABEL : value.effective.label,
+    label: value.backend === "custom"
+      ? Object.values(TRANSCRIPTION_PRESETS).find((item) => item.url === value.url)?.label ?? value.effective.label
+      : value.effective.label,
   } : null;
 }
 
@@ -186,8 +198,8 @@ export function ChatGPTPlanConnection() {
 /** Shared models/transcription form. Callers provide scope-specific fields for per-user or admin
  *  global settings. Secrets arrive MASKED (********abcd): an untouched masked value is never sent
  *  back, typing replaces it, and emptying a previously-set field clears it. */
-function ConfigForm({ fields, load, save, note, savedNote = "Saved — next agent turn uses it", chatGPTModelCatalog = false, chatGPTConnection = false, onValues, renderWarning, saveGuard }: {
-  fields: Array<{ key: string; label: string; placeholder?: string; secret?: boolean; checkbox?: boolean; options?: Array<{ value: string; label: string; disabled?: boolean }>; showIf?: (v: Record<string, string>) => boolean }>;
+function ConfigForm({ fields, load, save, note, savedNote = "Saved — next agent turn uses it", chatGPTModelCatalog = false, chatGPTConnection = false, onValues, renderWarning, saveGuard, footer }: {
+  fields: Array<{ key: string; label: string; placeholder?: string | ((v: Record<string, string>) => string); secret?: boolean; checkbox?: boolean; options?: Array<{ value: string; label: string; disabled?: boolean }> | ((v: Record<string, string>) => Array<{ value: string; label: string; disabled?: boolean }>); hint?: (v: Record<string, string>) => string; showIf?: (v: Record<string, string>) => boolean; modelPicker?: (v: Record<string, string>) => boolean; modelEmptyLabel?: (v: Record<string, string>) => string }>;
   load: () => Promise<Record<string, string>>;
   save: (update: Record<string, string>) => Promise<Record<string, string>>;
   note?: string;
@@ -197,8 +209,10 @@ function ConfigForm({ fields, load, save, note, savedNote = "Saved — next agen
   onValues?: (values: Record<string, string>) => void;
   renderWarning?: (values: Record<string, string>) => ReactNode;
   saveGuard?: (values: Record<string, string>) => boolean;
+  footer?: (state: { dirty: boolean; values: Record<string, string> }) => ReactNode;
 }) {
   const [values, setValues] = useState<Record<string, string>>({});
+  const regionSuggestionsId = useId();
   const [initial, setInitial] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -215,6 +229,13 @@ function ConfigForm({ fields, load, save, note, savedNote = "Saved — next agen
   const dirty = fields.some((f) => (values[f.key] ?? "") !== (initial[f.key] ?? ""));
   const updateField = (key: string, value: string) => {
     const next = { ...values, [key]: value };
+    if (key === "mode" && value !== values.mode) {
+      // An API provider is a different endpoint + credential + model namespace, so switching into or
+      // out of one must not carry the previous provider's values across.
+      if (apiModelProvider(value) || apiModelProvider(values.mode)) {
+        for (const providerField of ["api_key", "base_url", "model", "meeting_model"]) next[providerField] = "";
+      }
+    }
     setSaved(false);
     setValues(next);
     onValues?.(next);
@@ -247,15 +268,18 @@ function ConfigForm({ fields, load, save, note, savedNote = "Saved — next agen
             </label>
           );
         }
+        const useModelPicker = f.modelPicker?.(values) ?? false;
+        const options = typeof f.options === "function" ? f.options(values) : f.options;
+        const hint = f.hint?.(values);
         return (
           <Fragment key={f.key}>
-            <label style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 13.5, color: "var(--t2)" }}>
-              <span style={{ width: 128, flex: "none", color: "var(--t3)" }}>{f.label}</span>
-              {f.options ? (
+            <label style={{ display: "flex", alignItems: useModelPicker ? "flex-start" : "center", gap: 12, fontSize: 13.5, color: "var(--t2)" }}>
+              <span style={{ width: 128, flex: "none", color: "var(--t3)", ...(useModelPicker ? { paddingTop: 9 } : {}) }}>{f.label}</span>
+              {options ? (
                 <select value={values[f.key] ?? ""}
                   onChange={(e) => updateField(f.key, e.target.value)}
                   style={{ ...field, width: "auto", flex: 1 }}>
-                  {f.options.map((o) => <option key={o.value} value={o.value} disabled={o.disabled}>{o.label}</option>)}
+                  {options.map((o) => <option key={o.value} value={o.value} disabled={o.disabled}>{o.label}</option>)}
                 </select>
               ) : chatGPTModelCatalog && f.key === "model" && values.mode === "openai-subscription" ? (
                 <ChatGPTModelInput
@@ -263,13 +287,34 @@ function ConfigForm({ fields, load, save, note, savedNote = "Saved — next agen
                   onChange={(value) => updateField(f.key, value)}
                   style={field}
                 />
+              ) : useModelPicker ? (
+                <ModelPicker
+                  key={values.mode}
+                  ariaLabel={f.label}
+                  value={values[f.key] ?? ""}
+                  onChange={(value) => updateField(f.key, value)}
+                  mode={values.mode ?? ""}
+                  apiKey={values.api_key}
+                  region={values.region}
+                  requiresTools={f.key === "model"}
+                  suggestDefault={values.mode === "bedrock" && f.key === "model"}
+                  emptyLabel={f.modelEmptyLabel?.(values) ?? "Provider default"}
+                  style={field}
+                />
               ) : (
-                <input value={values[f.key] ?? ""} placeholder={f.placeholder}
+                <><input value={values[f.key] ?? ""} aria-label={f.label} placeholder={typeof f.placeholder === "function" ? f.placeholder(values) : f.placeholder}
                   type={f.secret ? "password" : "text"}
+                  list={f.key === "region" ? regionSuggestionsId : undefined}
                   onChange={(e) => updateField(f.key, e.target.value)}
                   style={field} />
+                  {f.key === "region" && <datalist id={regionSuggestionsId}>
+                    {BEDROCK_REGIONS.map((region) => <option key={region.value} value={region.value}>{region.label}</option>)}
+                  </datalist>}</>
               )}
             </label>
+            {hint && (
+              <p style={{ margin: "0 0 0 140px", fontSize: 11.5, color: "var(--t3)", lineHeight: 1.5 }}>{hint}</p>
+            )}
             {chatGPTConnection && f.key === "mode" && values.mode === "openai-subscription" && <ChatGPTPlanConnection />}
           </Fragment>
         );
@@ -281,6 +326,7 @@ function ConfigForm({ fields, load, save, note, savedNote = "Saved — next agen
         </button>
         {saved && <span style={{ fontSize: 11.5, color: "var(--green)" }}>{savedNote}</span>}
       </div>
+      {footer?.({ dirty, values })}
     </div>
   );
 }
@@ -288,7 +334,14 @@ function ConfigForm({ fields, load, save, note, savedNote = "Saved — next agen
 /** On-demand credential test row (fail-loud surface): runs the EFFECTIVE config — the same
  *  user > global > env resolution a chat turn / bot spawn applies — against the real backend
  *  and prints the verdict inline, remedy included. What Save can't tell you, Test does. */
-function TestRow({ label, run }: { label: string; run: () => Promise<ConfigTestResult> }) {
+function TestRow({ label, run, disabled = false, hint }: {
+  label: string;
+  run: () => Promise<ConfigTestResult>;
+  /** The probe uses the SAVED config; while the form is dirty it would report the previous
+   *  provider/key — the exact mismatch that reads as "the key worked elsewhere". */
+  disabled?: boolean;
+  hint?: string;
+}) {
   const [busy, setBusy] = useState(false);
   const [res, setRes] = useState<ConfigTestResult | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -302,10 +355,13 @@ function TestRow({ label, run }: { label: string; run: () => Promise<ConfigTestR
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4, maxWidth: 460, marginTop: 6 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <button disabled={busy} onClick={() => void doTest()}
-          style={{ ...btn, opacity: busy ? 0.5 : 1 }}>
+        <button disabled={busy || disabled} onClick={() => void doTest()}
+          style={{ ...btn, opacity: busy || disabled ? 0.5 : 1 }}>
           {busy ? "Testing…" : label}
         </button>
+        {disabled && hint && (
+          <span role="status" style={{ fontSize: 11.5, color: "var(--t3)" }}>{hint}</span>
+        )}
         {res && (
           <span style={{ fontSize: 11.5, color: res.ok ? "var(--green)" : "var(--danger)" }}>
             {res.ok ? "✓" : "✗"} {provenance && <span style={{ color: "var(--t3)" }}>[{provenance}] </span>}
@@ -321,7 +377,7 @@ function TestRow({ label, run }: { label: string; run: () => Promise<ConfigTestR
 /** Models — which LLM the agent runs on and which STT backend the bot transcribes with; your own
  *  settings first, the deployment-wide defaults below for admins. Empty fields = the level below
  *  decides (global settings, then the deployment env). */
-function ModelsSection() {
+export function ModelsSection() {
   const [globalAdmin, setGlobalAdmin] = useState(false);
   const [scope, setScope] = useState<ModelSettingsScope>("agent");
   const [modelSummary, setModelSummary] = useState<Record<string, string>>({});
@@ -329,6 +385,34 @@ function ModelsSection() {
   const [effectiveTranscription, setEffectiveTranscription] = useState<{ label: string; source: string } | null>(null);
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const [availableTranscriptionBackends, setAvailableTranscriptionBackends] = useState<string[]>(["default", "custom"]);
+  const [runtime, setRuntime] = useState<AsrRuntime | null>(null);
+  const [runtimeError, setRuntimeError] = useState("");
+  const [runtimeFetchError, setRuntimeFetchError] = useState("");
+  const [runtimeTarget, setRuntimeTarget] = useState<"gipformer" | "viegem" | null>(null);
+  const [runtimeBusy, setRuntimeBusy] = useState(false);
+  const [runtimeVersion, setRuntimeVersion] = useState(0);
+  const [otherProvidersOpen, setOtherProvidersOpen] = useState(false);
+  useEffect(() => {
+    if (scope !== "transcription") return;
+    let active = true;
+    const refresh = () => getAsrRuntime().then(value => { if (active) { setRuntime(value); setRuntimeFetchError(""); } })
+      .catch(() => { if (active) setRuntimeFetchError("ASR control is unavailable. Retry shortly."); });
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 3000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [scope]);
+  const changeRuntime = async (backend: "gipformer" | "viegem", enabled: boolean) => {
+    setRuntimeBusy(true); setRuntimeTarget(backend); setRuntimeError("");
+    try {
+      const current = await getAsrRuntime();
+      const saved = await setAsrRuntime(backend, enabled, current.account.revision);
+      setRuntime(saved);
+      const prefs = await getTranscriptionPrefs();
+      setEffectiveTranscription(transcriptionDisplay(prefs));
+      return prefs;
+    } catch (error) { setRuntimeError(presentError(error).headline); throw error; }
+    finally { setRuntimeBusy(false); setRuntimeTarget(null); }
+  };
   useEffect(() => {
     let on = true;
     // Admin probe: the global card renders only when /api/admin/settings answers (404 = not admin).
@@ -344,38 +428,52 @@ function ModelsSection() {
       { value: "subscription", label: "Claude subscription (deployment credentials)" },
       { value: "openai-subscription", label: "ChatGPT plan (Sign in with ChatGPT)" },
       { value: "openai-api", label: "OpenAI API key" },
+      { value: "groq", label: "Groq API key" },
+      { value: "deepseek", label: "DeepSeek API key" },
+      { value: "gemini", label: "Gemini API key" },
       { value: "antigravity", label: "Google Antigravity CLI (agy)" },
       { value: "bedrock", label: "AWS Bedrock" },
       { value: "custom", label: "Custom endpoint (open-source / gateway)" },
     ] },
     { key: "base_url", label: "Base URL", placeholder: "https://… (Anthropic/OpenAI-compatible gateway)", showIf: (v: Record<string, string>) => v.mode === "custom" },
-    { key: "region", label: "AWS Region", placeholder: "e.g. us-east-1", showIf: (v: Record<string, string>) => v.mode === "bedrock" },
-    { key: "api_key", label: "Credential", placeholder: "unchanged unless typed", secret: true, showIf: (v: Record<string, string>) => ["antigravity", "custom", "bedrock", "openai-api"].includes(v.mode) },
+    { key: "region", label: "AWS Region", placeholder: "Choose or enter a region", showIf: (v: Record<string, string>) => v.mode === "bedrock",
+      hint: () => "Use the region where your Bedrock key was generated. Model suggestions refresh for this region; you can also enter another AWS region." },
+    { key: "api_key", label: "Credential", placeholder: (v: Record<string, string>) => apiModelProvider(v.mode) ? `${apiModelProvider(v.mode)!.label} API key — unchanged unless typed` : "unchanged unless typed", secret: true, showIf: (v: Record<string, string>) => ["antigravity", "custom", "bedrock", "openai-api", "groq", "deepseek", "gemini"].includes(v.mode) },
     { key: "antigravity_terms_acknowledged", label: "I have read this warning and acknowledge the account risk.", checkbox: true, showIf: (v: Record<string, string>) => v.mode === "antigravity" },
-    { key: "model", label: "Chat model", placeholder: "deployment default (e.g. sonnet)" },
-    { key: "meeting_model", label: "Meeting model", placeholder: "defaults to chat model", showIf: (v: Record<string, string>) => v.mode !== "antigravity" },
-    { key: "effort", label: "Reasoning effort", placeholder: "CLI default (e.g. medium)", options: [
-      { value: "", label: "CLI default" },
-      { value: "low", label: "low" },
-      { value: "medium", label: "medium" },
-      { value: "high", label: "high" },
-      { value: "xhigh", label: "xhigh" },
-    ] },
+    { key: "model", label: "Chat model", placeholder: (v: Record<string, string>) => apiModelProvider(v.mode) ? `${apiModelProvider(v.mode)!.model} (default)` : "deployment default (e.g. sonnet)",
+      modelPicker: (v: Record<string, string>) => fallbackChoicesForMode(v.mode) !== null,
+      modelEmptyLabel: (v: Record<string, string>) => {
+        const provider = apiModelProvider(v.mode);
+        if (provider) return `Provider default — ${provider.model}`;
+        if (v.mode === "subscription") return "Deployment default (e.g. sonnet)";
+        if (v.mode === "antigravity") return "CLI default";
+        if (v.mode === "bedrock") return "Choose a regional model (required)";
+        return "Provider default";
+      } },
+    { key: "meeting_model", label: "Meeting model", placeholder: "defaults to chat model", showIf: (v: Record<string, string>) => v.mode !== "antigravity",
+      modelPicker: (v: Record<string, string>) => fallbackChoicesForMode(v.mode) !== null,
+      modelEmptyLabel: () => "Same as chat model" },
   ];
   const renderModelWarning = (values: Record<string, string>) => values.mode === "antigravity" ? (
     <div role="alert" style={{ border: "1px solid var(--danger)", borderRadius: 8, padding: "10px 12px", background: "color-mix(in srgb, var(--danger) 8%, transparent)", color: "var(--t2)", fontSize: 12.5, lineHeight: 1.55 }}>
       Google says third-party access to Antigravity violates its Terms of Service; wrapping <code>agy</code> in TINA with a consumer-plan login is unsupported and may lead to account suspension or termination. Acknowledging this warning does not make that use permitted. Use a Gemini API key or Gemini Enterprise credential for TINA. This choice affects agent turns only; meeting summaries continue using the deployment completion provider. CLI authentication and model access are checked on the first agent turn.
     </div>
+  ) : apiModelProvider(values.mode) ? (
+    <div role="status" style={{ fontSize: 12.5, color: "var(--t3)", lineHeight: 1.55 }}>
+      Use your <a href={apiModelProvider(values.mode)!.keyUrl} target="_blank" rel="noopener noreferrer" style={{ color: "var(--t1)" }}>{apiModelProvider(values.mode)!.label} API key</a> for chat and meeting notes.
+      {" "}Leave Chat model blank to use <code>{apiModelProvider(values.mode)!.model}</code>; Meeting model follows Chat model unless specified.
+      {" "}Save, then test model credentials. Speech-to-text is configured separately in Transcription.
+    </div>
   ) : null;
   const modelSaveGuard = canSaveModelPrefs;
   const transcriptionFields = [
     { key: "backend", label: "Backend", options: [
+      { value: "managed", label: "Model selected above", disabled: true },
       { value: "default", label: "Follow platform default" },
       { value: "apple", label: availableTranscriptionBackends.includes("apple") ? "Apple GPU (MLX/Metal)" : "Apple GPU (MLX/Metal) — not configured", disabled: !availableTranscriptionBackends.includes("apple") },
       { value: "nvidia", label: availableTranscriptionBackends.includes("nvidia") ? "NVIDIA GPU (CUDA)" : "NVIDIA GPU (CUDA) — not configured", disabled: !availableTranscriptionBackends.includes("nvidia") },
       { value: "funasr", label: availableTranscriptionBackends.includes("funasr") ? "FunASR · Qwen + FSMN-VAD" : "FunASR · Qwen + FSMN-VAD — not configured", disabled: !availableTranscriptionBackends.includes("funasr") },
       { value: "sherpa", label: availableTranscriptionBackends.includes("sherpa") ? "Sherpa · Qwen INT8 + Silero" : "Sherpa · Qwen INT8 + Silero — not configured", disabled: !availableTranscriptionBackends.includes("sherpa") },
-      { value: "gipformer", label: GIPFORMER_LABEL },
       { value: "custom", label: "Custom endpoint" },
     ] },
     { key: "url", label: "Service URL", placeholder: "https://…", showIf: (v: Record<string, string>) => v.backend === "custom" },
@@ -386,6 +484,7 @@ function ModelsSection() {
       { value: "deployment", label: "Deployment endpoint" },
       { value: "funasr", label: "FunASR · Qwen + FSMN-VAD" },
       { value: "sherpa", label: "Sherpa · Qwen INT8 + Silero" },
+      { value: "viegem", label: "VieGem + LM" },
       { value: "apple", label: "Apple GPU (MLX/Metal)" },
       { value: "nvidia", label: "NVIDIA GPU (CUDA)" },
     ] },
@@ -393,6 +492,8 @@ function ModelsSection() {
     { key: "token", label: "Deployment token", placeholder: "unchanged unless typed", secret: true },
     { key: "funasr_url", label: "FunASR URL", placeholder: "http://host.docker.internal:18000" },
     { key: "sherpa_url", label: "Sherpa native URL", placeholder: "http://host.docker.internal:18001" },
+    { key: "viegem_url", label: "VieGem + LM URL", placeholder: "http://host.docker.internal:18005" },
+    { key: "viegem_token", label: "VieGem worker token", placeholder: "unchanged unless typed", secret: true },
     { key: "apple_url", label: "Apple GPU (MLX/Metal) URL", placeholder: "http://host.docker.internal:8084" },
     { key: "apple_token", label: "Apple GPU token", placeholder: "unchanged unless typed", secret: true },
     { key: "nvidia_url", label: "NVIDIA GPU URL", placeholder: "CUDA transcription worker URL" },
@@ -411,11 +512,11 @@ function ModelsSection() {
   ];
   const providerLabels: Record<string, string> = {
     "": "Deployment default", subscription: "Claude subscription", "openai-subscription": "ChatGPT plan",
-    "openai-api": "OpenAI API", bedrock: "AWS Bedrock", custom: "Custom endpoint",
+    "openai-api": "OpenAI API", groq: "Groq", deepseek: "DeepSeek", gemini: "Gemini", bedrock: "AWS Bedrock", custom: "Custom endpoint",
   };
   const transcriptionLabels: Record<string, string> = {
     "": "Deployment default", default: "Follow platform default", deployment: "Deployment endpoint", apple: "Apple GPU (MLX/Metal)",
-    nvidia: "NVIDIA GPU (CUDA)", funasr: "FunASR · Qwen + FSMN-VAD", sherpa: "Sherpa · Qwen INT8 + Silero", gipformer: GIPFORMER_LABEL, custom: "Custom endpoint",
+    nvidia: "NVIDIA GPU (CUDA)", funasr: "FunASR · Qwen + FSMN-VAD", sherpa: "Sherpa · Qwen INT8 + Silero", ...Object.fromEntries(Object.entries(TRANSCRIPTION_PRESETS).map(([key, item]) => [key, item.label])), custom: "Custom endpoint",
   };
   const activeTranscriptionBackend = transcriptionSummary.backend === "default"
     ? transcriptionSummary.default_backend || "deployment"
@@ -427,7 +528,7 @@ function ModelsSection() {
 
   return (
     <div style={{ maxWidth: 720 }}>
-      <div aria-label="Current model settings" style={{ display: "flex", gap: 12, marginBottom: 22 }}>
+      {scope !== "transcription" && <div aria-label="Current model settings" style={{ display: "flex", gap: 12, marginBottom: 22 }}>
         <div style={summaryTile}>
           <span style={{ fontSize: 11.5, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".07em" }}>Agent model</span>
           <strong style={{ fontSize: 14.5, color: "var(--t1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{modelSummary.model || "Deployment default"}</strong>
@@ -438,7 +539,7 @@ function ModelsSection() {
           <strong style={{ fontSize: 14.5, color: "var(--t1)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{effectiveTranscription?.label ?? transcriptionLabels[activeTranscriptionBackend] ?? "Deployment default"}</strong>
           <span style={{ fontSize: 12, color: "var(--t3)" }}>{effectiveTranscription ? { user: "Personal preference", platform: "Platform default", environment: "Deployment environment" }[effectiveTranscription.source] : "Choose and save a backend"} · next session</span>
         </div>
-      </div>
+      </div>}
       <div role="tablist" aria-label="Model settings scope" style={{ display: "flex", gap: 4, borderBottom: "1px solid var(--line)", marginBottom: 16 }}>
         {scopeTabs.map((tab, index) => {
           const selected = scope === tab.id;
@@ -460,24 +561,30 @@ function ModelsSection() {
         <div style={head}>Your models</div>
         <ConfigForm fields={modelFields} load={async () => asStrings(await getModelPrefs())}
           save={async (u) => { const saved = await setModelPrefs(u); window.dispatchEvent(new Event("tina-models-changed")); return asStrings(saved); }} chatGPTModelCatalog chatGPTConnection onValues={setModelSummary}
-          renderWarning={renderModelWarning} saveGuard={modelSaveGuard} />
-        {modelSummary.mode === "antigravity"
-          ? <div role="status" style={{ fontSize: 11.5, color: "var(--t3)", lineHeight: 1.5 }}>Antigravity CLI authentication and model availability are validated on the first agent turn.</div>
-          : <TestRow label="Test model credentials" run={testModels} />}
+          renderWarning={renderModelWarning} saveGuard={modelSaveGuard}
+          footer={({ dirty }) => modelSummary.mode === "antigravity"
+            ? <div role="status" style={{ fontSize: 11.5, color: "var(--t3)", lineHeight: 1.5 }}>Antigravity CLI authentication and model availability are validated on the first agent turn.</div>
+            : <TestRow label="Test model credentials" run={testModels} disabled={dirty}
+                hint="Save first — Test checks the saved configuration." />} />
       </div>
       <div id="models-panel-transcription" role="tabpanel" aria-labelledby="models-tab-transcription" hidden={scope !== "transcription"}>
-        <div style={head}>Your transcription backend</div>
-        <ConfigForm fields={transcriptionFields} load={async () => transcriptionFormValues(await getTranscriptionPrefs())}
-          save={async (u) => {
-            const value = await setTranscriptionPrefs(u.backend === "gipformer"
-              ? { ...u, backend: "custom", url: GIPFORMER_URL }
-              : u);
+        <TranscriptionPicker runtime={runtime} available={availableTranscriptionBackends} busy={runtimeBusy}
+          target={runtimeTarget} error={runtimeError || runtimeFetchError} unavailable={!!runtimeFetchError}
+          onChange={(backend, enabled) => void changeRuntime(backend, enabled)
+            .then(() => setRuntimeVersion(value => value + 1)).catch(() => undefined)} />
+        <details className={transcriptionStyles.advanced} onToggle={event => setOtherProvidersOpen(event.currentTarget.open)}>
+          <summary><Icon name="chevR" size={13} />Other providers</summary>
+          {otherProvidersOpen && <ConfigForm key={runtimeVersion} fields={transcriptionFields} load={async () => {
+            const values = transcriptionFormValues(await getTranscriptionPrefs());
+            if (values.backend in TRANSCRIPTION_PRESETS) values.backend = "managed";
+            return values;
+          }} save={async (update) => {
+            const value = await setTranscriptionPrefs(update);
             setEffectiveTranscription(transcriptionDisplay(value));
+            void getAsrRuntime().then(setRuntime).catch(() => undefined);
             return transcriptionFormValues(value);
-          }} onValues={setTranscriptionSummary}
-          savedNote="Saved — applies to new capture and bot sessions"
-          note="Meeting bots and Desktop capture use this preference when connected with your API key. Unbound TINA Capture follows the platform default. Running capture sessions keep their backend. The selected service must be running." />
-        <TestRow label="Test transcription backend" run={testTranscription} />
+          }} onValues={setTranscriptionSummary} savedNote="Saved — applies to new sessions" />}
+        </details>
       </div>
       {globalAdmin && <div id="models-panel-global" role="tabpanel" aria-labelledby="models-tab-global" hidden={scope !== "global"}>
         <div style={{ ...head, marginTop: 10, color: "var(--accent)" }}>Global defaults (admin — every user without own settings)</div>

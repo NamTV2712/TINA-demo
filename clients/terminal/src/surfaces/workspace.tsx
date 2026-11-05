@@ -9,7 +9,7 @@ import { registerList, registerTab, type TabProps } from "../contributions";
 import { meetingsOnly } from "../app/mode";
 import { Icon, Checkbox } from "../ui-kit";
 import { Modal } from "../ui-kit/Modal";
-import { OPEN_ENTITY_EVENT, ASK_CHAT_EVENT } from "../canvas/actions";
+import { OPEN_ENTITY_EVENT, requestChat } from "../canvas/actions";
 import { ENTITY_CHIP, DEFAULT_ENTITY_CHIP, DocMetaContext, DocNavContext, resolveDocRef, type DocNavigate } from "../ui-kit/docLinks";
 import { ContextMenu, copyText } from "../ui-kit/ContextMenu";
 import { MdxDoc } from "../ui-kit/MdxDoc";
@@ -1019,15 +1019,28 @@ function NavArrow({ dir, enabled, onGo }: { dir: -1 | 1; enabled: boolean; onGo:
  *  the canvas keyword chips use, so the persistent chat rail receives it verbatim — the reference
  *  `@file:<path>` is already how the composer carries the active-tab reference, so no new plumbing. */
 function AskAboutDoc({ path, slug }: { path: string; slug?: string }) {
-  const ask = () => {
-    const detail: Record<string, unknown> = { prompt: `What does this document say? ${path}` };
-    if (slug) detail.slug = slug;
-    window.dispatchEvent(new CustomEvent(ASK_CHAT_EVENT, { detail }));
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const ask = async (research = false) => {
+    setBusy(true); setError('');
+    try {
+      const { active } = await readActiveSet();
+      const mount = slug ? active.find(m => m.slug === slug) : active.find(m => m.primary) || active[0];
+      if (!mount) throw new Error('Enable this workspace before asking about its documents.');
+      const file = JSON.stringify(`${mount.path}/${path}`);
+      requestChat({ research, prompt: research
+        ? `Nghiên cứu tài liệu ${file} trong workspace ${JSON.stringify(mount.slug)}. Đối chiếu tài liệu liên quan và nguồn web, rồi lưu ghi chú có nguồn và ngày xác minh.`
+        : `What does this document say? Read ${file} in workspace ${JSON.stringify(mount.slug)}.` });
+    } catch (e) { setError((e as Error).message); }
+    finally { setBusy(false); }
   };
   return (
-    <span onClick={ask} title="Ask the agent about this document"
-      style={{ flex: "none", display: "inline-flex", alignItems: "center", gap: 4, cursor: "pointer", fontSize: 11.5, color: "var(--accent)" }}>
-      <Icon name="msg" size={12} />Ask about
+    <span style={{ flex: 'none', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+      <button type="button" disabled={busy} onClick={() => void ask()} title="Ask the agent about this document"
+        style={{ background: 'none', border: 0, cursor: 'pointer', fontSize: 11.5, color: 'var(--accent)' }}>Ask about</button>
+      <button type="button" disabled={busy} onClick={() => void ask(true)} title="Research this document and save a sourced private note"
+        style={{ background: 'none', border: 0, cursor: 'pointer', fontSize: 11.5, color: 'var(--accent)' }}>Nghiên cứu &amp; lưu</button>
+      {error && <span role="alert" style={{ fontSize: 11.5, color: 'var(--danger)' }}>{error}</span>}
     </span>
   );
 }

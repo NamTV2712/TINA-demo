@@ -168,8 +168,9 @@ function gateGraph() {
   if (!packageDirs().length) { console.log("  ✓ gate:graph — no packages yet (green-on-empty)"); return true; }
   const targets = ["core", "integrations", "clients", "sdks", "schemas", "tools"]
     .filter((d) => existsSync(join(ROOT, d)));
-  // Invoke the installed JS entrypoint: npx is a .cmd shim on Windows, not an executable.
-  try { execFileSync(process.execPath, [join(ROOT, "node_modules/dependency-cruiser/bin/dependency-cruise.mjs"), "--config", ".dependency-cruiser.cjs", "--no-progress", ...targets], { stdio: "pipe" }); }
+  // Run the installed JS entry point directly: npx is a .cmd shim on Windows,
+  // which execFileSync cannot execute without introducing a shell.
+  try { execFileSync(process.execPath, [join(ROOT, "node_modules", "dependency-cruiser", "bin", "dependency-cruise.mjs"), "--config", ".dependency-cruiser.cjs", "--no-progress", ...targets], { stdio: "pipe" }); }
   catch (e) { return fail([`dependency-cruiser:\n${errText(e)}`]); }
   console.log("  ✓ gate:graph — acyclic + allowed-edges");
   return true;

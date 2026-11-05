@@ -33,6 +33,16 @@ The STT service is the **GPU workload, deployed separately** from this stack —
 [Deployment → Transcription](/deployment#transcription-the-separate-gpu-unit). The main stack
 stays GPU-free and reaches it over the network via the two variables above.
 
+### Managed VieGem for TINA Terminal
+
+The Terminal's **VieGem + LM** backend is separate from bot STT. `make all` selects native MPS on
+Apple Silicon, Docker CUDA on Linux/WSL2, or Docker CPU only when `TINA_VIEGEM_DEVICE=cpu` is
+explicitly set. With OrbStack, the native MPS worker binds to OrbStack's private `bridge100`
+address so Docker services can reach it; the worker still requires its bearer token. Its
+managed ASR controller is refreshed during deployment before the worker starts, so readiness checks
+and idle start/stop use the same endpoint. Its device-specific setup and verification are documented in
+[`deploy/transcription/viegem/README.md`](https://github.com/poor-frog/TINA/blob/main/deploy/transcription/viegem/README.md).
+
 ### When the backend is wrong, you learn at configure time
 
 A URL or token that does not work is refused where you set it, not by an empty transcript hours
@@ -202,6 +212,87 @@ Point the agent at your own model so no inference leaves the network.
 | `HOST_CLAUDE_CREDENTIALS` | — | Host path to Claude credentials mounted into agent containers (see below). |
 | `TINA_AGENT_DEFAULT_SUBJECT` | `u_live` | Fallback subject before the gateway fronts agent-api. |
 | `TINA_ALLOW_LOCAL_REPO_ROOT` | — | `os.pathsep`-separated directories a workspace repo may be attached from as a local path (`POST /agent/workspace/swap`). Unset refuses local paths. |
+
+### Groq, DeepSeek and Gemini for chat and meeting summaries
+
+In **Settings → Models → Agent model**, choose **Groq**, **DeepSeek** or **Gemini**, enter
+that provider's API key in **Credential**, then save and run **Test model credentials**.
+An empty **Meeting model** uses the chat model. An administrator can set the same provider
+under the platform defaults. Personal model preferences take precedence.
+
+**Chat model** and **Meeting model** are pickers fed by the provider's own model list: once a
+key is entered (or saved), the field asks that provider which models the credential can use, so
+the list is not a maintained guess. A short built-in list stays visible while the request is in
+flight or when the provider is unreachable; **Custom model…** accepts any ID the list does not
+carry (a newer release, an account-only model, or a pinned snapshot).
+
+Thinking is **Auto for every provider**. There is no Intelligence/Thinking field in Settings.
+Legacy saved effort values are ignored at dispatch and by the CLI adapters. No manual
+`--effort` or Codex effort pin is sent; the Groq compatibility proxy also removes inherited
+reasoning parameters, so non-reasoning models cannot receive a GPT-OSS-specific override.
+Auto preserves the model/runner default and does not mean thinking is disabled.
+
+Gemini API model IDs outside the pinned agy CLI registry (including Gemini 3.5 Flash) are
+registered as custom models on the fixed Google endpoint. Their native thinking defaults are
+preserved without inventing CLI effort variants. The pinned CLI receives the exact API model
+ID when registering custom Gemini models. Credential tests check both the native Gemini
+chat API and the meeting completion API; a successful HTTP probe does not claim to run
+the CLI/tool workflow. Provider adapter updates automatically refresh a warm chat worker
+on its next message, even if its saved model settings did not change.
+
+| Provider | Default model | Chat harness | Meeting summaries |
+|---|---|---|---|
+| Groq | `openai/gpt-oss-20b` | Codex using `https://api.groq.com/openai/v1/responses` | Chat Completions at `https://api.groq.com/openai/v1` |
+| DeepSeek | `deepseek-flash` | Claude Code using `https://api.deepseek.com/anthropic` | Chat Completions at `https://api.deepseek.com` |
+| Gemini | `gemini-3.5-flash` | `agy` using its Gemini API-key provider | Chat Completions at `https://generativelanguage.googleapis.com/v1beta/openai` |
+
+Groq chat requires function tool support. Qwen requests adapt Codex's developer instructions
+to the system role accepted by Groq's chat template; tool history and permissions are preserved.
+**Test model credentials** checks a no-op tool call, the matching tool result, and a completed
+reply before testing meeting summaries. A plain text completion is insufficient. ALLaM 2 7B
+does not support the required tools, so it is disabled for **Chat model** and remains available
+for **Meeting model**. Speech-only Orpheus models are omitted from these text model lists.
+
+The endpoints are fixed by the selected provider. Groq's
+[Responses API](https://console.groq.com/docs/responses-api) is currently in beta. DeepSeek
+documents its [Claude Code integration](https://api-docs.deepseek.com/quick_start/agent_integrations/claude_code/)
+and [Anthropic-compatible API](https://api-docs.deepseek.com/guides/anthropic_api/); Gemini
+documents its [OpenAI-compatible API](https://ai.google.dev/gemini-api/docs/openai). Choose
+a model available to your account, test the credentials, then send a short chat message to
+check the harness as well. Gemini's API-key selection uses the Gemini provider directly;
+it does not use an Antigravity consumer/OAuth sign-in.
+
+These are **provider API keys**, separate from the TINA API token used by the transcript
+extension. They are stored in the existing per-user/platform model settings and masked on
+reads. The model credential field accepts up to 32,768 characters to accommodate long
+Bedrock bearer tokens; other model-setting strings remain limited to 2,048 characters.
+Chat and meeting text are sent to the selected provider. Speech-to-text keeps using
+the separately configured transcription backend.
+
+### AWS Bedrock
+
+Select **AWS Bedrock**, enter a Bedrock API key and the region where it was generated,
+then choose a Claude model or system inference profile from that region's live catalogue.
+The list uses Bedrock's `ListFoundationModels` and `ListInferenceProfiles` control-plane
+operations; listing a model does not guarantee permission to invoke it. If listing is denied,
+**Custom model…** accepts the exact ID from working AWS code. Do not substitute a model ID
+from a different account or region.
+
+Chat uses Claude Code's native Bedrock integration with the selected region and bearer key.
+Meeting summaries and credential tests use the native `InvokeModel` endpoint with the
+Anthropic body format, so Claude models that do not expose `/anthropic/v1/messages` still
+work. A distinct Meeting model is tested separately. No AWS access-key pair is required for
+this API-key setup. Provider errors retain AWS's explanation, including model access denial.
+
+Region suggestions are common regions, not a promise of model availability. Thinking
+is automatic for every model.
+Auto preserves the model's own thinking behavior and does not mean thinking is disabled.
+Bedrock short-term keys are region-bound and expire with the issuing session (at most 12 hours).
+Saving a new provider, key or model refreshes an idle worker on the next message in the same
+chat; its history is preserved. A previous response is allowed to finish before replacement.
+Chat workers stop cooperatively through their existing input stream, avoiding the long
+Docker shutdown grace used by meeting bots. Busy refreshes report a retryable error. See [Bedrock API keys](https://docs.aws.amazon.com/bedrock/latest/userguide/api-keys.html)
+and [model discovery](https://docs.aws.amazon.com/bedrock/latest/userguide/models-get-info.html).
 
 ### Claude subscription credentials (`HOST_CLAUDE_CREDENTIALS`)
 

@@ -3,7 +3,8 @@
 // lastTranscriptAt / issues[]) are already tracked per live meeting and exposed as
 // `meeting.diagnostics`; this is the LOUD surface that makes a broken feed unmissable to an operator
 // instead of silently showing stale lines.
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
+import styles from "./MeetingTranscript.module.css";
 import { useMeeting } from "./useMeeting";
 import { formatElapsed, meetingHealth, STALE_MS, type MeetingHealthKind } from "./meetingHealth";
 
@@ -16,8 +17,8 @@ const TONE: Record<Exclude<MeetingHealthKind, "ok">, { color: string; bg: string
   ended: { color: "var(--t2)", bg: "var(--panel2)" },
   disconnected: { color: "var(--t2)", bg: "var(--panel2)" },
   stalled: { color: "var(--t2)", bg: "var(--panel2)" },
-  // Warm amber (brand accent) — noticeable but not the alarming blood-red of a fatal failure.
-  error: { color: "var(--accent)", bg: "var(--accentbg)" },
+  // A failed model/parse operation needs attention without implying capture has stopped.
+  error: { color: "var(--warn)", bg: "var(--warnbg)" },
 };
 
 function issueLabel(kind: "stream" | "model" | "parse"): string {
@@ -26,7 +27,7 @@ function issueLabel(kind: "stream" | "model" | "parse"): string {
   return "Stream error";
 }
 
-export function MeetingHealthBanner() {
+export function MeetingHealthBanner({ hideEnded = false }: { hideEnded?: boolean }) {
   const meeting = useMeeting();
   const diagnostics = meeting.diagnostics;
   const status = String(meeting.meeting.status ?? "").toLowerCase();
@@ -44,7 +45,7 @@ export function MeetingHealthBanner() {
   const [dismissedAt, setDismissedAt] = useState<number | undefined>(undefined);
 
   const health = meetingHealth(diagnostics, now, live, STALE_MS);
-  if (health.kind === "ok") return null;
+  if (health.kind === "ok" || (hideEnded && health.kind === "ended")) return null;
 
   // The error chip (model/parse/stream issue) is dismissible; the headline failure states are not.
   const issue = health.latestIssue;
@@ -75,43 +76,19 @@ export function MeetingHealthBanner() {
       break;
   }
 
+  const heading = <span className={styles.healthHeading}>
+    {dot && <span className={styles.healthDot} aria-hidden="true" />}
+    <span>{headline}</span>
+  </span>;
+  const showIssue = health.kind !== "ended" && issue && !issueDismissed;
   return (
-    <div
-      role="status"
-      aria-live="polite"
-      style={{
-        display: "flex", flexDirection: "column", gap: 4,
-        margin: "8px 18px 0", padding: "8px 11px", borderRadius: 8,
-        background: tone.bg, border: `1px solid ${tone.color}`, color: tone.color,
-        fontSize: 12.5, lineHeight: 1.4,
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        {dot && <span style={{ width: 7, height: 7, borderRadius: "50%", background: tone.color, flex: "none", boxShadow: `0 0 0 3px ${tone.bg}` }} />}
-        <span style={{ fontWeight: health.kind === "error" ? 700 : 600 }}>{headline}</span>
-      </div>
-
-      {/* For stalled/disconnected, still surface the most recent underlying issue if there is one. */}
-      {health.kind !== "ended" && health.kind !== "error" && issue && !issueDismissed && (
-        <div style={{ fontSize: 11.5, opacity: 0.92 }}>
-          {issueLabel(issue.kind)}{issue.status ? ` (${issue.status})` : ""}: {issue.message}
-        </div>
-      )}
-
-      {/* The error chip carries the message + a dismiss control. */}
-      {health.kind === "error" && issue && (
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ fontSize: 11.5, opacity: 0.92, flex: 1, minWidth: 0 }}>{issue.message}</span>
-          <button
-            type="button"
-            onClick={() => setDismissedAt(issue.at)}
-            title="Dismiss"
-            style={{ flex: "none", background: "transparent", border: `1px solid ${tone.color}`, color: tone.color, borderRadius: 6, padding: "1px 7px", fontSize: 11, cursor: "pointer", fontWeight: 600 }}
-          >
-            Dismiss
-          </button>
-        </div>
-      )}
+    <div role="status" aria-live="polite" className={styles.health}
+      style={{ "--health-color": tone.color, "--health-bg": tone.bg } as CSSProperties}>
+      {showIssue ? <details className={styles.healthDetails} key={issue.at}>
+        <summary>{heading}<span className={styles.detailHint}>Details</span></summary>
+        <p className={styles.issueMessage}>{issueLabel(issue.kind)}{issue.status ? ` (${issue.status})` : ""}: {issue.message}</p>
+      </details> : heading}
+      {health.kind === "error" && issue && <button type="button" onClick={() => setDismissedAt(issue.at)} title="Dismiss">Dismiss</button>}
     </div>
   );
 }

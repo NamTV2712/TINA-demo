@@ -9,11 +9,12 @@ import { useService } from "../platform";
 import { LayoutServiceId, type TabDescriptor } from "../workbench/layout";
 import { registerList, registerTab, registerCommand, type TabProps } from "../contributions";
 import { Icon } from "../ui-kit";
+import pageStyles from "./meetingPage.module.css";
 import { MeetingKnowledge } from './MeetingKnowledge';
 import { meetingsOnly } from '../app/mode';
 import { ContextMenu, copyText } from "../ui-kit/ContextMenu";
 import { MEETING_CANVAS_CONTENT_INSET, MeetingCanvasView } from "../canvas/MeetingCanvasView";
-import { type MeetingMock } from "./meetingModel";
+import { meetingPhase, type MeetingMock } from "./meetingModel";
 import { ApiError, presentError, readApiFailure } from "./apiClient";
 import { resolveJoinError, serviceDenialFromError, type ServiceDenialPresentation } from "./serviceDenial";
 import { ServiceDenialPanel } from "./ServiceDenialPanel";
@@ -953,6 +954,15 @@ function meetingDurationLabel(m?: MeetingMock): string | undefined {
   return hours ? (rest ? `${hours}h ${rest}m` : `${hours}h`) : `${minutes}m`;
 }
 
+/** The recap must not repeat a cached live-only placeholder after the run ends. */
+export function meetingWhenLabel(m: MeetingMock): string {
+  if (meetingPhase(m) !== "post" || !/^(?:Bot session in progress|Now\s*·\s*live|now)$/i.test(m.when.trim())) return m.when;
+  const started = Date.parse(m.start_time ?? "");
+  return Number.isFinite(started)
+    ? new Date(started).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
+    : "";
+}
+
 /** Whether a requested meeting id has RESOLVED, is still resolving, or does not exist for this user.
  *  `listLoaded` is the meetings list having answered at least once — without it an id that simply hasn't
  *  been fetched yet is indistinguishable from one that doesn't exist, and an addressable URL
@@ -1003,7 +1013,9 @@ function MeetingTab({ id, params }: TabProps) {
   // id with a neutral header (never a wrong/mock meeting), so the header can't disagree with the body.
   const m = liveList.find((x) => x.id === requestedMeetingId || x.native_id === requestedMeetingId);
   const header = meetingHeaderState(m, connected);
+  const ended = !!m && meetingPhase(m) === "post";
   const durationLabel = meetingDurationLabel(m);
+  const whenLabel = m ? meetingWhenLabel(m) : "";
   const canDeleteMeeting = !!m && m.status === "past" && !!m.native_id && !m.shared
     && ["completed", "failed", "stopped"].includes(m.live_status ?? "");
   const deleteMeeting = async (): Promise<string | null> => {
@@ -1036,9 +1048,9 @@ function MeetingTab({ id, params }: TabProps) {
   }
 
   return (
-    <div style={{ width: "100%", height: "100%", minHeight: 0, display: "flex", flexDirection: "column", padding: "16px 0 24px", boxSizing: "border-box" }}>
-      <header style={{ flex: "none", marginBottom: 12, padding: `0 ${MEETING_CANVAS_CONTENT_INSET}px 12px`, boxSizing: "border-box", borderBottom: "1px solid var(--line)" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0, flexWrap: "wrap" }}>
+    <div className={pageStyles.page} data-phase={ended ? "recap" : undefined}>
+      <header className={pageStyles.header}>
+        <div className={pageStyles.identity}>
           <button type="button" aria-label="Back to previous view" title="Back" onClick={() => { if (!layout.goBack()) layout.openTab({ id: "today", title: "Today", kind: "today", params: {} }); }}
             style={{ width: 30, height: 30, flex: "none", border: "1px solid var(--line)", borderRadius: 7, background: "transparent", color: "var(--t2)", fontSize: 19, lineHeight: 1, cursor: "pointer" }}>‹</button>
           {header === "live" || header === "pending"
@@ -1048,11 +1060,11 @@ function MeetingTab({ id, params }: TabProps) {
               : header === "recap"
                 ? <span style={{ display: "inline-flex", alignItems: "center", color: "var(--violet)", background: "var(--violetbg)", fontWeight: 650, letterSpacing: ".06em", fontSize: 11, textTransform: "uppercase", borderRadius: 999, padding: "4px 9px", flex: "none" }}>Recap</span>
                 : <span style={{ fontSize: 11, color: "var(--t3)", fontWeight: 650, letterSpacing: ".04em", textTransform: "uppercase", flex: "none" }}>Connecting…</span>}
-          <h1 style={{ flex: "1 1 260px", minWidth: 0, margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--t1)", fontFamily: "var(--font-display, Georgia, serif)", fontSize: 23, fontWeight: 400, letterSpacing: "-0.02em" }}>
+          <h1 className={pageStyles.title}>
             {m ? (m.title_custom ?? (m.native_id ?? m.title).replace(/^Google Meet · /, "")) : "Meeting"}
           </h1>
-          <div style={{ flex: 1 }} />
-          <div style={{ display: "flex", alignItems: "center", gap: 8, flex: "none" }}>
+        </div>
+          <div className={pageStyles.actions}>
             {m && !meetingsOnly() && <button type="button" aria-expanded={knowledgeOpen} aria-controls={`meeting-knowledge-${m.id}`} onClick={() => setKnowledgeOpen((open) => !open)}
               style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", minHeight: 30, padding: "0 11px", border: "1px solid var(--line2)", borderRadius: 7, background: "transparent", color: "var(--accent)", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
               {knowledgeOpen ? "Close TINA" : "Ask TINA"}
@@ -1060,13 +1072,13 @@ function MeetingTab({ id, params }: TabProps) {
             {m && <BotControls m={m} connected={connected} />}
             {m?.native_id && <ShareSessionButton platform={platformSlug(m.platform)} native={m.native_id} />}
           </div>
-        </div>
-        {m && <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", margin: "8px 0 0 42px", color: "var(--t3)", fontSize: 12 }}>
+        {m && <div className={pageStyles.metadata}>
           <span>{m.platform}</span>
-          <span>{m.when}</span>
+          {ended && <span className={pageStyles.ended} data-failed={m.live_status === "failed"} role="status">{m.live_status === "failed" ? "Bot session failed" : "Meeting ended"}</span>}
+          {whenLabel && <span>{whenLabel}</span>}
           {durationLabel && <span>{durationLabel}</span>}
           {!!m.participants.length && <span>{m.participants.length} participants</span>}
-          {m.has_recording && <span style={{ color: "var(--green)" }}>Recording available</span>}
+          {!ended && m.has_recording && <span style={{ color: "var(--green)" }}>Recording available</span>}
         </div>}
       </header>
       {m && !meetingsOnly() && <div id={`meeting-knowledge-${m.id}`} style={{ display: knowledgeOpen ? "block" : "none", flex: "none", padding: `0 ${MEETING_CANVAS_CONTENT_INSET}px 8px` }}>

@@ -74,3 +74,6 @@ The host may supply `config.hallucinationFilter(text)` to the speaker-stream man
 confirmation/flush branch uses that policy. The default remains `isHallucination`. Desktop's
 archive recovery selects its existing mixed speech filter so a valid short reply is not lost
 solely due to word length. The module does not import the mixed pipeline or change live callers.
+
+The speech filter preserves short replies and numbers; text length alone never rejects speech.
+Punctuation-only output, known phrase-list artifacts and repetition loops remain filtered.

@@ -88,6 +88,59 @@ brief filenames and checks the active private mount set, matching the prep page.
 Run the browser regression from `clients/terminal` with `node tests/brief-flow.browser.mjs`; it uses
 Chrome, the real prep/chat UI and fixture API/SSE responses, not a live provider account.
 
+## Codex research from Knowledge
+
+Terminal and Dashboard chat use **`/research <topic>`** to explicitly research and save a sourced note.
+The command applies only to that turn; ordinary follow-ups stay ordinary chat. No research checkbox
+is shown in the composer. An empty `/research` asks for a topic without dispatching work. A document in
+Terminal Knowledge also offers **Nghiên cứu & lưu**, addressing the selected file by its actual
+active workspace path. `POST /api/chat` recognizes a leading `/research` command and also accepts
+optional `research: true` for document actions and older clients; the authenticated server
+chooses an active private writable destination under `notes/research/<UTC-date>-<unique-id>.md`.
+Without that private mount it refuses the request. Other files and canonical transcript/audio are
+preserved. Ordinary chat and Start brief remain unchanged unless explicitly requested as research.
+Research chat permits up to ten minutes for a request/reconnect, so multi-source work can survive
+a delayed response; ordinary chat retains its existing timeout.
+
+The agent is instructed to combine relevant mounted documents and authorized supplied meeting
+context with public sources it actually inspects, read back the new note, and return its path.
+The note contains a visible source table: `meeting | repo | web`, source name, direct link/file path,
+evidence version and `verified_at`. Meeting rows distinguish transcript segments/revisions from
+derived notes; repo rows identify workspace/file/commit and disclose local changes; web rows name
+the page, direct URL and access date. Unknown versions and failed/partial research are explicit.
+This is an agent workflow, not a deterministic fact-verification or extraction engine: users still
+review claims and provenance. Private meeting/workspace content must not be sent to public search.
+
+## Chat web citations
+
+Successful `done.reply` is authoritative over streamed partial text in both clients. Codex web result
+metadata resolves opaque citations only when an explicit reference-to-URL mapping exists. Actual
+opened page URLs are listed separately as clickable sources; no mapping is inferred from search
+order, query text or a single opened page. Titles fall back to host/path if absent. Missing mappings
+display **Nguồn chưa có liên kết**, without exposing raw provider identifiers or inventing a link.
+Existing Markdown links and code examples are preserved; unsafe link schemes/credentials are rejected.
+
+Up to 50 source records per turn are saved alongside private Codex continuity in
+`.codex/tina-sources/<thread>/<turn>.json`. History uses the matching recorded turn metadata and
+opened URLs from the original rollout. Shared mounts never supply another user's chat sources.
+Older rollouts can recover opened URLs, but cannot recover a reference mapping the provider never
+returned. Dashboard keeps the selected authorized session in `agentSession` so reload restores its
+history, including source links. Browser probes cover both clients with fixture SSE/history, and
+the Dashboard probe checks the saved note's source-type/version/date table.
+
+Run `node tests/agent-research.browser.mjs` from `services/dashboard`, and
+`node tests/brief-flow.browser.mjs` from `clients/terminal` (installed Chrome required).
+
+## Codex research permissions
+
+Normal chat can use hosted live web search/open when granted both `WebSearch` and `WebFetch`;
+search-only grants use cached results. Attached repositories remain local workspace context until
+an explicit network tool reads a remote source. Shell network access additionally requires `Bash`
+and the operator's managed domain allowlist, shipped with the worker image. The default shell
+allowlist covers named GitHub hosts, not the whole internet; hosted search uses a separate provider
+connection. Event/transcription turns stay read-only and offline. Model/account quotas can still
+prevent research even when permissions are correct. See [the adapter policy](../core/agent/llm/README.md#codex-web-and-command-networking).
+
 ## Automatic meeting summaries
 
 The meeting writer records the SHA-256 of its own generated Markdown in

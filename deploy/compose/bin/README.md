@@ -40,9 +40,13 @@ installed symlink follows this checkout; keep it in place or rerun the installer
 No separate CLI credential/profile database is created. API meeting/transcript/routine commands
 are outside this release.
 
+The ASR controller reports disabled Compose profiles as stopped instead of failing the whole
+runtime status request. A Gipformer-only deployment remains controllable without VieGem;
+native MPS VieGem is still checked through its host endpoint without a Compose service.
+
 ### First installation (CLI 0.4.0)
 
-Clone `https://github.com/poor-frog/TINA-KT.git` or use an existing checkout. On macOS install and
+Clone `https://github.com/poor-frog/TINA.git` or use an existing checkout. On macOS install and
 start OrbStack or Docker Desktop. On Linux start a local Docker engine.
 You need Python 3.10+, make (for CLI installation), git, bash, openssl and Docker engine >=26 with
 Compose supporting `up --wait` and optional `env_file` entries. Builds download dependencies and

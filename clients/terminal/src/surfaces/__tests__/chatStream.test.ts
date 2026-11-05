@@ -60,6 +60,26 @@ function recorder() {
 const noWait = { now: () => 0, sleep: async () => {}, reconnectBackoffMs: 0 };
 
 describe("streamChatTurn — cold start & resume", () => {
+  it("replaces streamed citation markers with the final sourced reply after reconnect", async () => {
+    const finalReply = 'Verified. [Python docs](https://docs.python.org/3/library/pathlib.html)';
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(sseResponse([ev({ type: "message-delta", text: "Verified. citeturn0search0" }, "1-0")]))
+      .mockResolvedValueOnce(sseResponse([ev({ type: "done", ok: true, reply: finalReply }, "2-0")]));
+    const { state, cb } = recorder();
+    Object.assign(cb, { onReply: (reply: string) => { state.text = reply; } });
+
+    await streamChatTurn(
+      { prompt: "research Python", session: "research", active: undefined, ...{ research: true } }, cb,
+      { fetchImpl: fetchImpl as unknown as typeof fetch, signal: new AbortController().signal, ...noWait },
+    );
+
+    expect(state.text).toBe(finalReply);
+    const first = JSON.parse(fetchImpl.mock.calls[0][1].body as string);
+    const resumed = JSON.parse(fetchImpl.mock.calls[1][1].body as string);
+    expect(first.research).toBe(true);
+    expect(resumed).toEqual(first);
+  });
+
   it("resumes after an early close (cold start) and renders the delayed reply — no false failure", async () => {
     // Attempt 1: the worker is still cold-starting → the stream closes with NO data (empty body).
     // Attempt 2 (a resume): the first token + completion arrive.
@@ -410,5 +430,22 @@ describe("streamChatTurn — turn-accepted liveness ack", () => {
     expect(state.text).toBe("hello");
     expect(result.sawVisibleOutput).toBe(true);
     expect(result.terminal).toBe(true);
+  });
+});
+
+describe('research reconnect budget', () => {
+  it.each([false, true])('keeps a longer research turn resumable: %s', async research => {
+    let calls = 0;
+    const fetchImpl = vi.fn(async () => {
+      calls++;
+      return sseResponse(calls === 1 ? [] : [ev({ type: 'done', ok: true, reply: 'Research ready' })]);
+    });
+    const { cb } = recorder();
+    const result = await streamChatTurn({ prompt: 'Research', session: 'long-research', research, active: undefined }, cb, {
+      signal: new AbortController().signal, fetchImpl,
+      now: () => calls === 0 ? 0 : 120000, sleep: async () => {}, reconnectBackoffMs: 0,
+    });
+    expect(result.terminal).toBe(research);
+    expect(calls).toBe(research ? 2 : 1);
   });
 });
