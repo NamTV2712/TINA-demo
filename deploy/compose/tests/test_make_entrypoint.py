@@ -170,8 +170,11 @@ class EntryPointTest(unittest.TestCase):
 
     def test_orbstack_native_viegem_fails_closed_without_bridge_address(self):
         self.docker.config["services"]["admin-api"]["environment"]["TINA_VIEGEM_TOKEN"] = "fixture-token" * 4
-        selected = stack.Stack("plan")
-        selected.context = "orbstack"
+        self.docker.context = "orbstack"
+        with patch.object(stack.platform, "system", return_value="Darwin"), \
+             patch.object(stack.platform, "machine", return_value="arm64"), \
+             patch.dict(os.environ, {"TINA_VIEGEM_DEVICE": "mps"}):
+            selected = stack.Stack("plan")
         with patch.object(stack, "run", return_value=subprocess.CompletedProcess([], 1, "", "")), \
              patch.object(stack, "_dotenvx_key_file", return_value=Path("/private/fixture.keys")), \
              self.assertRaisesRegex(stack.StackError, "bridge100 address"):
