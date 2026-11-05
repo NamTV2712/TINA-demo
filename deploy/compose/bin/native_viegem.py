@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parents[3]
 WORKER = ROOT / "deploy/transcription/viegem"
 LABEL = "local.tina.viegem"
 MODEL = "5CD-AI/VieGem-ASR"
+LEGACY_HOST_ENDPOINT = "http://host.docker.internal:18005"
 
 
 def command(args, *, capture=False, check=True):
@@ -71,12 +72,12 @@ def prepare():
     print("VieGem: Python, dependencies and pinned model checksums ready.", flush=True)
 
 
-def probe(value):
+def probe(value, host="127.0.0.1"):
     spec = importlib.util.spec_from_file_location("asr_preflight", ROOT / "deploy/contracts/config.v1/preflight.py")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     content_type, body = module.audio_probe_body(MODEL)
-    req = urllib.request.Request("http://127.0.0.1:18005/v1/audio/transcriptions", data=body,
+    req = urllib.request.Request(f"http://{host}:18005/v1/audio/transcriptions", data=body,
                                  headers={"Content-Type": content_type, "Authorization": "Bearer " + value})
     try:
         with urllib.request.urlopen(req, timeout=15) as response:
@@ -116,17 +117,21 @@ def start():
         "RunAtLoad": True, "KeepAlive": True, "ThrottleInterval": 10,
         "StandardOutPath": str(logs / "viegem.stdout.log"), "StandardErrorPath": str(logs / "viegem.stderr.log"),
         "EnvironmentVariables": {"PATH": os.environ["PATH"], "TINA_VIEGEM_DEVICE": "mps",
+            "TINA_VIEGEM_HOST": os.environ.get("TINA_VIEGEM_HOST", "127.0.0.1"),
             "TOKENIZERS_PARALLELISM": "false", "TINA_VIEGEM_REVISION": fingerprint.hexdigest(),
             "TINA_VIEGEM_ENV_FILE": os.environ["TINA_VIEGEM_ENV_FILE"],
             "TINA_VIEGEM_KEYS_FILE": os.environ["TINA_VIEGEM_KEYS_FILE"],
             "DOTENVX_BIN": shutil.which(os.environ.get("DOTENVX_BIN", "dotenvx")) or "dotenvx"},
     }
-    if old == config and loaded and probe(value):
+    print(f"VieGem: LaunchAgent bind address {config['EnvironmentVariables']['TINA_VIEGEM_HOST']}.", flush=True)
+    bind_host = config["EnvironmentVariables"]["TINA_VIEGEM_HOST"]
+    if old == config and loaded and probe(value, bind_host):
         print("VieGem: existing managed worker passed authenticated audio probe.", flush=True)
         return
     agent.parent.mkdir(parents=True, exist_ok=True)
     temporary = agent.with_suffix(".plist.new")
     temporary.write_bytes(plistlib.dumps(config)); temporary.chmod(0o600); temporary.replace(agent)
+    print(f"VieGem: LaunchAgent configured at {agent} on {bind_host}.", flush=True)
     if loaded:
         command(["launchctl", "bootout", domain + "/" + LABEL], capture=True)
     for _ in range(5):
@@ -143,8 +148,8 @@ def start():
             command(["launchctl", "bootstrap", domain, agent], capture=True, check=False)
         raise RuntimeError(f"launchctl bootstrap failed (exit {result.returncode}); the previous plist was restored.")
     for _ in range(60):
-        if probe(value):
-            print("VieGem: managed Apple MPS worker passed authenticated audio probe.", flush=True)
+        if probe(value, bind_host):
+            print(f"VieGem: managed Apple MPS worker passed authenticated probe at {bind_host}.", flush=True)
             return
         time.sleep(1)
     raise RuntimeError("VieGem did not pass its audio probe; inspect ~/Library/Logs/TINA/viegem.stderr.log.")
@@ -176,7 +181,7 @@ def register():
             settings = json.load(response)
             current = settings["value"]
         endpoint = os.environ.get("TINA_VIEGEM_URL", "http://host.docker.internal:18005")
-        if current.get("viegem_url") not in (None, "", endpoint):
+        if current.get("viegem_url") not in (None, "", endpoint, LEGACY_HOST_ENDPOINT):
             raise RuntimeError("Existing VieGem URL belongs to another endpoint; it was not overwritten.")
         patch = {"viegem_url": endpoint}
         if settings.get("configured") is False or ("configured" not in settings and

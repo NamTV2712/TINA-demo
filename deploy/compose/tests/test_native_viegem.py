@@ -17,6 +17,17 @@ spec.loader.exec_module(native)
 
 
 class NativeViegemTests(unittest.TestCase):
+    def test_probe_uses_the_configured_bind_address(self):
+        requests = []
+        def urlopen(request, **kwargs):
+            requests.append(request)
+            response = io.BytesIO(b'{"text":"ok"}')
+            response.status = 200
+            return response
+        with patch.object(native.urllib.request, "urlopen", urlopen):
+            self.assertTrue(native.probe("fixture-token", "192.168.139.3"))
+        self.assertEqual(requests[0].full_url, "http://192.168.139.3:18005/v1/audio/transcriptions")
+
     def test_build_tools_do_not_receive_runtime_secrets(self):
         with patch.dict(os.environ, {"TINA_VIEGEM_TOKEN": "secret", "TINA_VIEGEM_INTERNAL_SECRET": "internal",
                                      "DOTENV_PRIVATE_KEY": "key"}), patch.object(native.subprocess, "run") as run:
@@ -119,6 +130,22 @@ class NativeViegemTests(unittest.TestCase):
         payload = json.loads(calls[-1].data)
         self.assertEqual(payload, {"viegem_url": "http://host.docker.internal:18005", "default_backend": "viegem"})
 
+    def test_registration_migrates_only_the_known_legacy_host_endpoint(self):
+        calls = []
+        current = {"viegem_url": native.LEGACY_HOST_ENDPOINT, "default_backend": "viegem"}
+        def urlopen(request, **kwargs):
+            calls.append(request)
+            value = {**current, "viegem_token": "runtime-only-secret"}
+            if request.data:
+                value.update(json.loads(request.data))
+            return io.BytesIO(json.dumps({"value": value, "configured": True}).encode())
+        with patch.dict(os.environ, {"TINA_VIEGEM_ADMIN_URL": "http://identity",
+                                    "TINA_VIEGEM_INTERNAL_SECRET": "fixture-secret",
+                                    "TINA_VIEGEM_URL": "http://192.168.139.3:18005"}), \
+             patch.object(native, "token"), patch.object(native.urllib.request, "urlopen", urlopen):
+            native.register()
+        self.assertEqual(json.loads(calls[-1].data), {"viegem_url": "http://192.168.139.3:18005"})
+
     def test_container_migration_only_removes_owned_native_job(self):
         with tempfile.TemporaryDirectory() as d, patch.object(native.Path, "home", return_value=Path(d)), \
              patch.dict(os.environ, {"TINA_VIEGEM_ENV_FILE": "/fixture/.env"}), patch.object(native, "command") as command:
@@ -160,10 +187,13 @@ class NativeViegemTests(unittest.TestCase):
              patch.object(native, "token", return_value="secret-not-in-plist"), \
              patch.object(native, "probe", return_value=True), patch.object(native, "command", command), \
              patch.object(native.time, "sleep"), patch.object(native.socket, "socket") as socket, \
-             patch.dict(os.environ, {"TINA_VIEGEM_ENV_FILE": "/fixture/.env", "TINA_VIEGEM_KEYS_FILE": "/fixture/.env.keys"}):
+             patch.dict(os.environ, {"TINA_VIEGEM_ENV_FILE": "/fixture/.env", "TINA_VIEGEM_KEYS_FILE": "/fixture/.env.keys",
+                                     "TINA_VIEGEM_HOST": "192.168.139.3"}):
             socket.return_value.__enter__.return_value.connect_ex.return_value = 1
             native.start()
             agent = Path(d) / "Library/LaunchAgents/local.tina.viegem.plist"
+            config = plistlib.loads(agent.read_bytes())
+            self.assertEqual(config["EnvironmentVariables"]["TINA_VIEGEM_HOST"], "192.168.139.3")
             self.assertNotIn(b"secret-not-in-plist", agent.read_bytes())
             socket.return_value.__enter__.return_value.connect_ex.return_value = 0
             native.start()

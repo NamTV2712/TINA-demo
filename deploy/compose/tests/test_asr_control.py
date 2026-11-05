@@ -8,6 +8,7 @@ from unittest.mock import patch
 import json
 import importlib.util
 import os
+import subprocess
 import threading
 from types import SimpleNamespace
 import urllib.request
@@ -48,6 +49,17 @@ class ControlTests(unittest.TestCase):
         self.identity, self.workers = Identity(), Workers()
         self.controller = control.Controller(self.identity, self.workers, Path(directory.name) / "state.json", "fixture", grace=0)
 
+    def test_launchagent_bootstrap_retries_transient_unloading_status(self):
+        calls = []
+        def run(args, **kwargs):
+            calls.append(args)
+            return subprocess.CompletedProcess(args, 5 if len(calls) == 1 else 0)
+        with patch.dict("sys.modules", {"stack": SimpleNamespace(run=run)}), \
+             patch.object(control.time, "sleep") as sleep:
+            control.bootstrap_launchagent(Path("/fixture/asr-control.plist"))
+        self.assertEqual(len(calls), 2)
+        sleep.assert_called_once_with(1)
+
     def test_missing_optional_viegem_profile_keeps_runtime_status_available(self):
         selected = SimpleNamespace(services={"admin-api": {"environment": {}}, "gipformer": {}},
             viegem_device="disabled", endpoint=lambda service, _: {"gipformer": "http://gipformer"}[service])
@@ -62,12 +74,13 @@ class ControlTests(unittest.TestCase):
         probe.assert_called_once_with("http://gipformer/status", timeout=1)
 
     def test_native_mps_status_does_not_require_a_compose_viegem_service(self):
-        selected = SimpleNamespace(services={"admin-api": {"environment": {}}}, viegem_device="mps")
+        selected = SimpleNamespace(services={"admin-api": {"environment": {}}}, viegem_device="mps",
+                                   native_viegem_access=lambda: ("192.168.139.3", "http://192.168.139.3:18005"))
         with patch.object(control, "request_json", return_value={
                 "model": {"asr_model": "5CD-AI/VieGem-ASR", "device": "mps"}}) as probe:
             result = control.Workers(selected).status("viegem")
         self.assertTrue(result["ready"])
-        probe.assert_called_once_with("http://127.0.0.1:18005/status", timeout=1)
+        probe.assert_called_once_with("http://192.168.139.3:18005/status", timeout=1)
 
     def test_switch_keeps_worker_required_by_another_account(self):
         self.controller.select("1", "gipformer", True, 0)

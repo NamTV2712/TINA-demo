@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import hmac
+import ipaddress
 import os
 import platform
 from pathlib import Path
@@ -149,6 +150,7 @@ class Stack:
         self.context = self.env.get("DOCKER_CONTEXT") or "default"
         if not self.context:
             raise StackError("Cannot resolve Docker context.")
+        self._native_viegem_access_cache = None
         self.builder = self.env.pop("BUILDX_BUILDER", None) or self.context
         # Compose's Buildx subprocess also needs the global flag; environment-only
         # context selection can leave Bake on the globally selected daemon.
@@ -336,14 +338,14 @@ class Stack:
         key_file = _dotenvx_key_file(self.env_file, self.env)
         if not key_file:
             raise StackError("Automatic VieGem startup requires a private .env.keys file.")
-        endpoint = "http://host.docker.internal:18005"
+        host, endpoint = self.native_viegem_access() if not container else ("127.0.0.1", "")
         if container:
             endpoint = f"http://host.docker.internal:{urlsplit(self.endpoint('viegem', 8000)).port}"
         env = dict(self.env, TINA_VIEGEM_ENV_FILE=str(self.env_file.resolve()),
                    TINA_VIEGEM_KEYS_FILE=str(key_file.resolve()), TINA_VIEGEM_TOKEN=token,
                    TINA_VIEGEM_ADMIN_URL=self.endpoint("admin-api", 8001),
                    TINA_VIEGEM_INTERNAL_SECRET=identity.get("INTERNAL_API_SECRET", ""),
-                   TINA_VIEGEM_URL=endpoint)
+                   TINA_VIEGEM_URL=endpoint, TINA_VIEGEM_HOST=host)
         if action == "register":
             # Probe from Docker before selecting this host endpoint in a fresh registry.
             code = '''import os, json, urllib.request
@@ -395,6 +397,28 @@ with urllib.request.urlopen(req, timeout=20) as response:
                 return f"http://{host}:{port['published']}"
         raise StackError(f"No published port for {service}:{target}.")
 
+    def native_viegem_access(self):
+        if self._native_viegem_access_cache is not None:
+            return self._native_viegem_access_cache
+        host, endpoint = "127.0.0.1", "http://host.docker.internal:18005"
+        if self.context == "orbstack":
+            bridge = run(["ifconfig", "bridge100"], env=self.env, capture=True, check=False)
+            for line in bridge.stdout.splitlines():
+                fields = line.split()
+                if len(fields) > 1 and fields[0] == "inet":
+                    try:
+                        address = ipaddress.IPv4Address(fields[1])
+                    except ipaddress.AddressValueError:
+                        continue
+                    if address.is_private and not address.is_loopback:
+                        host = str(address)
+                        endpoint = f"http://{host}:18005"
+                        break
+            else:
+                raise StackError("Could not find OrbStack's private bridge100 address for the native VieGem worker.")
+        self._native_viegem_access_cache = (host, endpoint)
+        return self._native_viegem_access_cache
+
     def provision_key(self, email=None):
         env = dict(self.env, ADMIN_TOKEN=self.validate_admin(),
                    ADMIN_API_URL=self.endpoint("admin-api", 8001),
@@ -443,19 +467,19 @@ with urllib.request.urlopen(req, timeout=20) as response:
             self.compose("--profile", "viegem", "stop", "viegem", "viegem-models", capture=True)
         elif self.viegem_device == "cpu" and platform.system() == "Darwin":
             self.native_viegem("stop")
+        self.compose("up", "-d", "--no-build", "--pull", "never", "--wait",
+                     "--wait-timeout", self.env.get("WAIT_TIMEOUT", "180"))
+        self.readiness()
+        if ("gipformer" in self.services or self.viegem_device != "disabled") and self.services["admin-api"].get("environment", {}).get("INTERNAL_API_SECRET"):
+            from asr_control import install
+            install(self)
         try:
             self.native_viegem("start")
         except StackError:
             if self.viegem_device == "mps":
                 self.compose("--profile", "viegem", "start", "viegem", capture=True, check=False)
             raise
-        self.compose("up", "-d", "--no-build", "--pull", "never", "--wait",
-                     "--wait-timeout", self.env.get("WAIT_TIMEOUT", "180"))
-        self.readiness()
         self.native_viegem("register")
-        if ("gipformer" in self.services or self.viegem_device != "disabled") and self.services["admin-api"].get("environment", {}).get("INTERNAL_API_SECRET"):
-            from asr_control import install
-            install(self)
 
     def stop_asr_control(self):
         if self.services["admin-api"].get("environment", {}).get("INTERNAL_API_SECRET"):
