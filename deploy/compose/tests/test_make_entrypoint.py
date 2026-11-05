@@ -149,16 +149,20 @@ class EntryPointTest(unittest.TestCase):
              patch.object(stack.platform, "machine", return_value="arm64"), \
              patch.object(stack, "_dotenvx_key_file", return_value=Path("/private/fixture.keys")), \
              patch.dict("sys.modules", {"asr_control": type("Control", (), {
+                 "shutdown": staticmethod(lambda _selected: self.docker.calls.append((["asr-control", "shutdown"], {}))),
                  "install": staticmethod(lambda _selected: self.docker.calls.append((["asr-control", "install"], {})))
              })()}):
             self.invoke("all")
         calls = [args for args, _ in self.docker.calls]
         native = {args[-1]: i for i, args in enumerate(calls) if any(str(a).endswith("native_viegem.py") for a in args)}
         build = next(i for i, args in enumerate(calls) if "build" in args and "agent-worker" in args)
+        controller_stop = next(i for i, args in enumerate(calls) if args[:2] == ["asr-control", "shutdown"])
         up = next(i for i, args in enumerate(calls) if "up" in args)
         controller = next(i for i, args in enumerate(calls) if args[:2] == ["asr-control", "install"])
         access = next(i for i, args in enumerate(calls) if args[0].endswith("/provision-token"))
         self.assertLess(native["prepare"], build)
+        self.assertLess(build, controller_stop)
+        self.assertLess(controller_stop, up)
         self.assertLess(build, native["start"])
         self.assertLess(up, controller)
         self.assertLess(controller, native["start"])

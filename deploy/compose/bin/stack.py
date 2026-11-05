@@ -467,6 +467,7 @@ with urllib.request.urlopen(req, timeout=20) as response:
             self.compose("--profile", "viegem", "stop", "viegem", "viegem-models", capture=True)
         elif self.viegem_device == "cpu" and platform.system() == "Darwin":
             self.native_viegem("stop")
+        self.stop_asr_control()
         self.compose("up", "-d", "--no-build", "--pull", "never", "--wait",
                      "--wait-timeout", self.env.get("WAIT_TIMEOUT", "180"))
         self.readiness()
