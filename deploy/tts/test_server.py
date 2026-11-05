@@ -5,6 +5,8 @@ import threading
 import hashlib
 import tempfile
 import sys
+import socket
+import time
 import unittest
 import urllib.error
 import urllib.request
@@ -112,6 +114,51 @@ class ServerTests(unittest.TestCase):
     def test_short_startup_token_is_refused(self):
         with self.assertRaises(ValueError):
             SpeechServer(("127.0.0.1", 0), self.engine, "short")
+
+
+class ConnectionLimitTests(unittest.TestCase):
+    def test_slow_headers_have_total_deadline_and_excess_connections_are_refused(self):
+        engine = SimpleNamespace(synthesize=lambda _: b"\x01\x00")
+        server = SpeechServer(("127.0.0.1", 0), engine, TOKEN,
+                              max_connections=1, request_timeout=.4)
+        entered, finished = threading.Event(), threading.Event()
+        original = server.process_request_thread
+        def tracked(*args):
+            entered.set()
+            try:
+                original(*args)
+            finally:
+                finished.set()
+        server.process_request_thread = tracked
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        address = server.server_address
+        try:
+            with socket.create_connection(address, timeout=2) as slow:
+                slow.sendall(b"GET /health HTTP/1.1\r\nX-Slow: ")
+                self.assertTrue(entered.wait(1))
+                with socket.create_connection(address, timeout=2) as excess:
+                    try:
+                        self.assertEqual(excess.recv(1), b"")
+                    except ConnectionResetError:
+                        pass
+                started = time.monotonic()
+                # Keep activity well inside the ordinary 10-second socket timeout.
+                while not finished.wait(.03):
+                    try:
+                        slow.sendall(b"x")
+                    except OSError:
+                        break
+                    self.assertLess(time.monotonic() - started, 2)
+                self.assertTrue(finished.wait(1))
+                self.assertLess(time.monotonic() - started, 2)
+            opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+            with opener.open(f"http://127.0.0.1:{address[1]}/health", timeout=2) as response:
+                self.assertEqual(response.status, 200)
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(2)
 
 
 class AudioTests(unittest.TestCase):

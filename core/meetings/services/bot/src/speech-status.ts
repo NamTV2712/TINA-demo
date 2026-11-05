@@ -32,12 +32,17 @@ export function createSpeechReporter(inv: Invocation, fetchImpl = globalThis.fet
   };
 }
 
-export function createSpeechHandler(speak: SpeakController, report: SpeechReporter): (act: Act) => Promise<void> {
+export function createSpeechHandler(speak: SpeakController, report: SpeechReporter,
+  now: () => number = Date.now): (act: Act) => Promise<void> {
   let active: string | null = null;
-  const cancelled = new Set<string>();
+  const cancelled = new Map<string, number>();
+  const prune = () => {
+    for (const [id, expires] of cancelled) if (expires <= now()) cancelled.delete(id);
+  };
   const remember = (id: string) => {
-    cancelled.add(id);
-    if (cancelled.size > 128) cancelled.delete(cancelled.values().next().value!);
+    prune();
+    // Match the core receipt TTL; later Stops must not evict an unexpired cancellation.
+    cancelled.set(id, now() + 600_000);
   };
   return async act => {
     if (act.action === 'speak') { await speak.speak(act.text, act.voice); return; }
@@ -55,6 +60,7 @@ export function createSpeechHandler(speak: SpeakController, report: SpeechReport
       return;
     }
     if (act.action !== 'speech_speak') return;
+    prune();
     const id = act.command_id;
     if (cancelled.has(id)) { await report(id, 'stopped'); return; }
     active = id;

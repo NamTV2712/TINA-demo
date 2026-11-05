@@ -49,6 +49,8 @@ export interface TtsPlaybackOptions {
   setMute?: (muted: boolean) => void;
   /** Deterministic process boundary for tests; production always spawns paplay. */
   spawnProcess?: () => ChildProcess;
+  /** Total synthesis + playback budget, below the coordinator's 175 s receipt wait. */
+  requestTimeoutMs?: number;
 }
 
 /** Build a TtsPlayback that streams the TTS service's PCM straight to paplay. */
@@ -106,9 +108,11 @@ export function createTtsPlayback(
     return await new Promise<PlaybackOutcome>((resolve) => {
       let settled = false;
       let req: ClientRequest;
+      let deadline: ReturnType<typeof setTimeout> | undefined;
       const finish = (outcome: PlaybackOutcome = 'failed'): void => {
         if (settled) return;
         settled = true;
+        clearTimeout(deadline);
         if (request === req) request = null;
         if (cancelActive === cancel) cancelActive = null;
         resolve(outcome);
@@ -117,6 +121,16 @@ export function createTtsPlayback(
         if (settled) return;
         try { req.destroy(new Error('TTS playback stopped')); } catch { /* */ }
         finish('stopped');
+      };
+      const fail = (): void => {
+        if (settled) return;
+        finish('failed');
+        if (speechGeneration !== generation) return;
+        req.destroy();
+        const child = proc;
+        proc = null;
+        try { child?.stdin?.destroy(); child?.kill('SIGKILL'); } catch { /* */ }
+        setMute(true);
       };
       req = (url.protocol === 'https:' ? https : http).request({
         hostname: url.hostname,
@@ -140,8 +154,10 @@ export function createTtsPlayback(
           res.on('aborted', finish);
           return;
         }
-        if (!setMute(false)) { res.resume(); finish('failed'); return; }
-        const p = spawnProcess();
+        if (!setMute(false)) { setMute(true); res.resume(); finish('failed'); return; }
+        let p: ChildProcess;
+        try { p = spawnProcess(); }
+        catch { fail(); return; }
         proc = p;
         p.stderr?.on('data', (d: Buffer) => log(`[tts] paplay: ${d.toString().trim()}`));
         let bytes = 0;
@@ -159,7 +175,7 @@ export function createTtsPlayback(
         p.once('spawn', () => {
           if (!settled && speechGeneration === generation) {
             try { onStarted?.(); }
-            catch { p.kill('SIGKILL'); finish('failed'); }
+            catch { fail(); }
           }
         });
         const done = (code: number | null = null) => {
@@ -175,9 +191,9 @@ export function createTtsPlayback(
       cancelActive = cancel;
       req.on('error', (e) => {
         if (speechGeneration === generation) log(`[tts] request error: ${String(e)}`);
-        finish();
+        fail();
       });
-      req.setTimeout(30_000, () => req.destroy(new Error('TTS request timed out after 30000ms')));
+      deadline = setTimeout(fail, options.requestTimeoutMs ?? 150_000);
       req.write(postData); req.end();
     });
   };

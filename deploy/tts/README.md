@@ -167,6 +167,12 @@ playback. Discord speaking remains unsupported.
 - `auto` selects Trúc Ly explicitly. Standalone `TINA`/`Tina`/`tina` is spoken as "ti na"
   to prevent acronym spelling; agent/transcript text and other acronyms remain unchanged.
 - Limits: 4,000 input characters, 20,000 request bytes, 120 seconds synthesized audio.
+  The sidecar admits at most eight connections and closes each after 145 seconds total
+  (including slow headers/body). Excess connections are closed before allocating a handler.
+  The bot allows 150 seconds total for synthesis and playback, within the coordinator's
+  175-second receipt wait. Slow CPU synthesis can exceed this budget and fails rather than
+  reporting completion. Closing a connection cannot preempt native inference; its single
+  synthesis lock remains held until inference actually returns.
 - GET `/health` and `/status` expose content-free readiness/format information.
 - One native synthesis at a time; a competing request gets 503, with no unbounded queue.
 - No CORS, text storage or input/credential logging. Published port is loopback-only; bots use
