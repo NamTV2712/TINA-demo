@@ -66,6 +66,9 @@ the repository root. It must contain the `DOTENV_PRIVATE_KEY` matching `deploy/c
 file is ignored by Git and must never be committed or pasted into documentation, shell commands, or
 chat. A newly generated key will not decrypt this repository's config.
 
+Optional speech/TTS has a separate encrypted env and private key; see
+[`deploy/tts/README.md`](deploy/tts/README.md#setup-on-another-machine-ubuntuwsl-or-linux).
+
 ### 4. Preview and start TINA
 
 ```bash
