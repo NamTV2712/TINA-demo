@@ -12,7 +12,8 @@ Receipt retention is ten minutes; the active reservation lasts 200 seconds. Thes
 deduplication receipts, not durable exactly-once playback or a replay-after-expiry guarantee.
 
 `GET /bots/{platform}/{native}/speak/{command_id}` returns `PlaybackStatus` through Gateway
-under the same owner authorization. `DELETE .../speak?command_id=<UUID>` requests that command's
+under the same owner authorization, including retained receipts after the bot leaves the latest
+meeting for that owner/platform/native ID. `DELETE .../speak?command_id=<UUID>` requests that command's
 Stop. Acceptance is not a terminal playback acknowledgement. Stop before publication leaves a
 cancellation tombstone, preventing a late matching Speak from being published.
 

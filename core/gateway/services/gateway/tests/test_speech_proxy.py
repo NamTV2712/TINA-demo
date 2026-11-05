@@ -17,4 +17,4 @@ def test_speech_receipts_keep_owner_scope_and_stop_query():
     restricted = TestClient(create_app(FakeAuthorizer(user={'user_id': 7, 'scopes': ['tx']}),
                                       FakeDownstream(), FakeRedis()))
     assert restricted.get(path + '/' + identifier, headers=headers).status_code == 403
-    assert api.post('/bots/internal/callback/speech', headers=headers, json={}).status_code in (403, 404, 422)
+    assert api.post('/bots/internal/callback/speech', headers=headers, json={}).status_code == 404

@@ -129,7 +129,14 @@ def build_speak_router(repo: MeetingRepo, publisher: CommandPublisher, playback:
     @router.get("/bots/{platform}/{native_meeting_id}/speak/{command_id}")
     async def speech_state(platform: str, native_meeting_id: str, command_id: UUID,
                            x_user_id: Optional[str] = Header(default=None)):
-        meeting = await active_voice_bot(platform, native_meeting_id, _resolve_user_id(x_user_id))
+        user_id = _resolve_user_id(x_user_id)
+        if platform not in _SUPPORTED_PLATFORMS:
+            raise HTTPException(422, f"unsupported platform '{platform}'")
+        # Reading a retained receipt must survive bot departure; the repository
+        # still scopes this lookup to the authenticated meeting owner.
+        meeting = await repo.find_latest(user_id, platform, native_meeting_id)
+        if meeting is None:
+            raise HTTPException(404, "No meeting for this bot")
         record = await operation(playback.get(meeting["id"], str(command_id)))
         if not record:
             raise HTTPException(404, "Unknown or expired speech command")

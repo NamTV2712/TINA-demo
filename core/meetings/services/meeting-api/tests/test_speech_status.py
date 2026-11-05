@@ -17,15 +17,19 @@ def speech(monkeypatch):
     monkeypatch.setenv('TTS_SERVICE_URL', 'http://tts.test')
     monkeypatch.setenv('INTERNAL_API_SECRET', 'test-only-internal-speech-secret')
     messages = []
+    meeting = {'id': 42, 'status': 'active', 'data': {'voice_agent_enabled': True}}
     async def active(user, platform, native):
-        return {'id': 42, 'status': 'active', 'data': {'voice_agent_enabled': True}} if user == 7 else None
+        return meeting if user == 7 and meeting['status'] == 'active' else None
+    async def latest(user, platform, native):
+        return meeting if user == 7 else None
     async def sessions(**kwargs): return ['old-session', 'current-session']
     async def publish(channel, body):
         messages.append(json.loads(body))
         return 1
     store = PlaybackStore(FakeRedis(decode_responses=True))
     app = FastAPI()
-    app.include_router(build_speak_router(SimpleNamespace(find_active=active, list_sessions=sessions),
+    app.state.meeting = meeting
+    app.include_router(build_speak_router(SimpleNamespace(find_active=active, find_latest=latest, list_sessions=sessions),
                                         SimpleNamespace(publish=publish), store))
     with TestClient(app) as client:
         yield client, messages
@@ -88,6 +92,19 @@ def test_stop_before_publication_blocks_late_speak(speech):
     assert client.post(PATH, headers=HEADERS, json={'text': 'late result', 'command_id': identifier}).status_code == 409
     assert report(client, identifier, 'stopped').json()['state'] == 'stopped'
     assert report(client, identifier, 'completed').json()['state'] == 'stopped'
+
+
+def test_owner_can_read_terminal_receipt_after_bot_leaves(speech):
+    client, _ = speech
+    identifier = str(uuid4())
+    assert client.post(PATH, headers=HEADERS, json={'text': 'hello', 'command_id': identifier}).status_code == 200
+    assert report(client, identifier, 'started').status_code == 200
+    assert report(client, identifier, 'completed').status_code == 200
+    client.app.state.meeting['status'] = 'completed'
+    response = client.get(PATH + '/' + identifier, headers=HEADERS)
+    assert response.status_code == 200 and response.json()['state'] == 'completed'
+    assert client.get(PATH + '/' + identifier, headers={'X-User-Id': '8'}).status_code == 404
+    assert client.post(PATH, headers=HEADERS, json={'text': 'late'}).status_code == 404
 
 
 @pytest.mark.asyncio
