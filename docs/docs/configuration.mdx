@@ -39,7 +39,8 @@ The Terminal's **VieGem + LM** backend is separate from bot STT. `make all` sele
 Apple Silicon, Docker CUDA on Linux/WSL2, or Docker CPU only when `TINA_VIEGEM_DEVICE=cpu` is
 explicitly set. With OrbStack, the native MPS worker binds to OrbStack's private `bridge100`
 address so Docker services can reach it; the worker still requires its bearer token. Its
-device-specific setup and verification are documented in
+managed ASR controller is refreshed during deployment before the worker starts, so readiness checks
+and idle start/stop use the same endpoint. Its device-specific setup and verification are documented in
 [`deploy/transcription/viegem/README.md`](https://github.com/poor-frog/TINA/blob/main/deploy/transcription/viegem/README.md).
 
 ### When the backend is wrong, you learn at configure time
