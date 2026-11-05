@@ -1794,7 +1794,7 @@
    "unique-id": "tts-sidecar",
    "node-type": "service",
    "name": "Optional Vietnamese TTS sidecar",
-   "description": "Optional separate Compose service under deploy/tts: one preset VieNeu v3 Turbo ONNX CPU voice. Authenticated OpenAI-compatible /v1/audio/speech consumes bounded text and returns headerless mono PCM16 at 24 kHz. Pinned model/codec snapshots are operator-downloaded, hash-verified and read-only; runtime hub access is offline. One synthesis at a time; no transcript writes, agent imports or speech text logging. Native synthesis is not preemptible; existing bot Stop cancels its HTTP request/playback.",
+   "description": "Optional separate Compose service under deploy/tts: one preset VieNeu v3 Turbo ONNX CPU voice. Authenticated OpenAI-compatible /v1/audio/speech consumes bounded text and returns headerless mono PCM16 at 24 kHz. Pinned model/codec snapshots are operator-downloaded, hash-verified and read-only; runtime hub access is offline. One synthesis at a time; no transcript writes, agent imports or speech text logging. Native synthesis is not preemptible; existing bot Stop cancels its HTTP request/playback. Shared env stores a Dotenvx-encrypted token; a host runner loads only that token with a separate private key. Model cache paths are per-host; TTS keys are not injected into inference.",
    "metadata": [
     {
      "path": "deploy/tts"
