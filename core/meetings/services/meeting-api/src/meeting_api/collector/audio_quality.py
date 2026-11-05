@@ -1,12 +1,13 @@
 """Bounded PCM diagnostics for owner-triggered recording review; never rewrites text."""
 from array import array
+import hashlib
 import io
 import math
 import sys
 import wave
 
 
-def assess_audio(content: bytes, text: str) -> dict:
+def _read_pcm(content: bytes) -> array:
     with wave.open(io.BytesIO(content), "rb") as wav:
         if wav.getnchannels() != 1 or wav.getsampwidth() != 2 or wav.getframerate() != 16000 or not 0 < wav.getnframes() <= 480000:
             raise ValueError("Expected at most 30 seconds of mono PCM16 at 16 kHz")
@@ -16,6 +17,12 @@ def assess_audio(content: bytes, text: str) -> dict:
         raise ValueError("Incomplete audio")
     if sys.byteorder != "little":
         pcm.byteswap()
+    return pcm
+
+
+def assess_audio(content: bytes, text: str) -> dict:
+    pcm = _read_pcm(content)
+    count = len(pcm)
     rms = math.sqrt(sum(x * x for x in pcm) / count) / 32768
     clipping = sum(abs(x) >= 32700 for x in pcm) / count
     # 20 ms energy frames. This is an energy estimate, not a speech detector.
@@ -38,3 +45,38 @@ def assess_audio(content: bytes, text: str) -> dict:
         reasons.append("repetition")
     return {"needs_review": bool(reasons), "reasons": reasons, "rms": round(rms, 6),
             "clipping_ratio": round(clipping, 6), "quiet_ratio": round(quiet_ratio, 4)}
+
+
+def prepare_audio(content: bytes) -> tuple[bytes, dict]:
+    """Opt-in bounded-gain.v1. Preserve every sample position; never infer speech presence."""
+    pcm = _read_pcm(content)
+    quality = assess_audio(content, "")
+    rms = math.sqrt(sum(x * x for x in pcm) / len(pcm)) / 32768
+    peak = max(abs(x) for x in pcm) / 32768
+    gain, reason = 1.0, "not_low_volume"
+    if "clipping" in quality["reasons"]:
+        reason = "clipping"
+    elif rms < .0001:
+        reason = "low_signal"
+    elif quality["quiet_ratio"] >= .8:
+        reason = "mostly_quiet"
+    elif rms < .003:
+        # At most +12 dB, with 10% PCM headroom; this cannot restore clipped/missing speech.
+        gain = min(10 ** (12 / 20), .01 / rms, .9 / peak)
+        if gain < 1.05:
+            gain, reason = 1.0, "peak_limited"
+        else:
+            reason = "gain_applied"
+    prepared = content
+    if gain > 1:
+        samples = array("h", (round(x * gain) for x in pcm))
+        if sys.byteorder != "little":
+            samples.byteswap()
+        out = io.BytesIO()
+        with wave.open(out, "wb") as wav:
+            wav.setnchannels(1); wav.setsampwidth(2); wav.setframerate(16000)
+            wav.writeframes(samples.tobytes())
+        prepared = out.getvalue()
+    return prepared, {"method": "bounded-gain.v1", "applied": gain > 1,
+                      "gain_db": round(20 * math.log10(gain), 3), "reason": reason,
+                      "audio_sha256": hashlib.sha256(prepared).hexdigest()}

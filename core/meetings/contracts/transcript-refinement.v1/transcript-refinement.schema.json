@@ -152,6 +152,50 @@
           "attempts": {
             "type": "integer",
             "minimum": 1
+          },
+          "asr_elapsed_ms": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "HTTP duration of the last ASR attempt, excluding queue wait and audio preparation."
+          },
+          "preprocessing": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "method",
+              "applied",
+              "gain_db",
+              "reason",
+              "audio_sha256"
+            ],
+            "properties": {
+              "method": {
+                "const": "bounded-gain.v1"
+              },
+              "applied": {
+                "type": "boolean"
+              },
+              "gain_db": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 12
+              },
+              "reason": {
+                "enum": [
+                  "gain_applied",
+                  "not_low_volume",
+                  "low_signal",
+                  "mostly_quiet",
+                  "clipping",
+                  "peak_limited"
+                ]
+              },
+              "audio_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            },
+            "description": "Prepared ASR input fingerprint. The item audio_sha256 still identifies the unchanged original clip."
           }
         },
         "allOf": [
@@ -214,6 +258,13 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 128
+    },
+    "audio_preprocessing": {
+      "enum": [
+        "none",
+        "bounded-gain.v1"
+      ],
+      "description": "Bot-only pinned audio preparation policy. Omitted legacy jobs use none."
     }
   },
   "$defs": {
@@ -246,9 +297,49 @@
           ],
           "minLength": 1,
           "maxLength": 128,
-          "description": "Bot-only manual retry of failed ASR items from the latest job. Cannot override mode/vocabulary. Preserves ready/applied/checked items; rechecks source and backend."
+          "description": "Bot-only manual retry of failed ASR items from the latest job. Cannot override mode/vocabulary. Preserves ready/applied/checked items; rechecks source and backend. Audio preparation is also preserved."
+        },
+        "normalize_audio": {
+          "type": "boolean",
+          "default": false,
+          "description": "Bot-only opt-in bounded gain for eligible quiet clips. Invalid with check or a retry override. Does not alter original audio, timestamps or text."
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "anyOf": [
+              {
+                "required": [
+                  "mode"
+                ],
+                "properties": {
+                  "mode": {
+                    "const": "check"
+                  }
+                }
+              },
+              {
+                "required": [
+                  "retry_job_id"
+                ],
+                "properties": {
+                  "retry_job_id": {
+                    "type": "string"
+                  }
+                }
+              }
+            ]
+          },
+          "then": {
+            "properties": {
+              "normalize_audio": {
+                "const": false
+              }
+            }
+          }
+        }
+      ]
     },
     "Apply": {
       "type": "object",

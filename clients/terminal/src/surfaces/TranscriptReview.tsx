@@ -18,9 +18,10 @@ export function reconcileReviewDraft(current: Draft | null, segments: Segment[],
     ? current : draftFor(next);
 }
 const qualityLabels: Record<string, string> = { low_volume: "Low volume", clipping: "Audio clipping", mostly_quiet: "Mostly quiet audio", repetition: "Repeated words - listen to verify" };
+const preparationLabels: Record<string, string> = { not_low_volume: "Original volume was suitable.", low_signal: "Signal was too faint for safe volume adjustment.", mostly_quiet: "Mostly quiet audio was left unchanged.", clipping: "Clipped audio was left unchanged.", peak_limited: "Volume adjustment was limited by an audio peak." };
 interface Job {
   id: string; status: string; model: string; backend: string; error?: string; backend_sha256?: string;
-  items: Array<{ segment_id: string; state: string; expected_revision: number; text?: string; reason?: string; error_code?: string; retryable?: boolean; attempts?: number; quality?: { needs_review: boolean; reasons: string[] } }>;
+  items: Array<{ segment_id: string; state: string; expected_revision: number; text?: string; reason?: string; error_code?: string; retryable?: boolean; attempts?: number; preprocessing?: { applied: boolean; gain_db: number; reason: string }; quality?: { needs_review: boolean; reasons: string[] } }>;
 }
 interface AlignedWord { index: number; text: string; start_ms: number | null; end_ms: number | null; aligned: boolean; speaker_id?: string | null; speaker_name?: string; speaker_source?: string }
 interface AlignmentItem { segment_id: string; state: string; expected_revision: number; audio_sha256?: string; words?: AlignedWord[]; phrases?: Array<{ speaker_id: string | null; speaker_name: string; text: string; start_ms: number | null; end_ms: number | null; word_indices: number[] }>; reason?: string }
@@ -44,6 +45,7 @@ export function TranscriptReview({ meetingId, openRef, hideTrigger = false }: { 
   const selected = edit?.segment_id ?? "";
   const draft = edit?.text ?? "";
   const [glossary, setGlossary] = useState("");
+  const [normalizeAudio, setNormalizeAudio] = useState(false);
   const [changedOnly, setChangedOnly] = useState(false);
   const [flaggedOnly, setFlaggedOnly] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -122,7 +124,7 @@ export function TranscriptReview({ meetingId, openRef, hideTrigger = false }: { 
     }, 1000);
     return () => { closed = true; clearInterval(timer); };
   }, [opened, job?.status, alignmentJob?.status, meetingId]);
-  useEffect(() => { setDoc(null); setJob(null); setAlignment(null); setEdit(null); setChangedOnly(false); setFlaggedOnly(false); setLoading(false); setMutating(false); setError(""); }, [meetingId]);
+  useEffect(() => { setDoc(null); setJob(null); setAlignment(null); setEdit(null); setChangedOnly(false); setFlaggedOnly(false); setNormalizeAudio(false); setLoading(false); setMutating(false); setError(""); }, [meetingId]);
   useEffect(() => {
     if (!opened) return;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -145,7 +147,7 @@ export function TranscriptReview({ meetingId, openRef, hideTrigger = false }: { 
   async function refine(action: "start" | "cancel" | "apply" | "retry", mode: "all" | "check" | "flagged" = "all") {
     setMutating(true); setError("");
     try {
-      const payload = action === "retry" && job ? { retry_job_id: job.id } : action === "start" ? { ...(mode === "all" ? {} : { mode }), glossary: glossary.split(",").map(s => s.trim()).filter(Boolean) } : action === "apply" && segment && job ? { job_id: job.id, segment_id: selected, expected_revision: segment.revision } : undefined;
+      const payload = action === "retry" && job ? { retry_job_id: job.id } : action === "start" ? { ...(mode === "all" ? {} : { mode }), ...(normalizeAudio && mode !== "check" ? { normalize_audio: true } : {}), glossary: glossary.split(",").map(s => s.trim()).filter(Boolean) } : action === "apply" && segment && job ? { job_id: job.id, segment_id: selected, expected_revision: segment.revision } : undefined;
       const data = await request<ReviewDocument | Job | null>(`/refinement/${action === "retry" ? "start" : action}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: payload ? JSON.stringify(payload) : undefined });
       if (action === "apply") { accept(data as ReviewDocument, true); setJob(await request<Job | null>("/refinement")); saved(); }
       else setJob(data as Job | null);
@@ -177,7 +179,11 @@ export function TranscriptReview({ meetingId, openRef, hideTrigger = false }: { 
   const content = <div className={styles.content}>
     {error && <p role="alert">{error} <button disabled={busy} onClick={() => void load()}>Reload</button></p>}
     {busy && <p role="status">Working…</p>}
-    <details><summary>Vocabulary hints (optional)</summary><label>Vocabulary hints (comma separated)<textarea value={glossary} disabled={busy || active} maxLength={700} rows={2} placeholder="TINA, Qwen, tên người, tên dự án" onChange={e => setGlossary(e.target.value)} /></label></details>
+    <details><summary>Refinement options</summary>
+      <label>Vocabulary hints (comma separated)<textarea value={glossary} disabled={busy || active} maxLength={700} rows={2} placeholder="TINA, Qwen, tên người, tên dự án" onChange={e => setGlossary(e.target.value)} /></label>
+      <label><input type="checkbox" checked={normalizeAudio} disabled={busy || active || !editable} aria-describedby={`${titleId}-audio-help`} onChange={e => setNormalizeAudio(e.target.checked)} /> Optimize quiet audio</label>
+      <p id={`${titleId}-audio-help`}>Optional volume adjustment for quiet clips during refinement. Better recognition is not guaranteed. Playback and Check audio use the original recording.</p>
+    </details>
       <div className={styles.actions}>
       <button className={styles.primary} disabled={busy || active || !editable || !doc?.segments.some(s => s.audio?.length === 1)} onClick={() => void refine("start")}>Refine after meeting</button>
       <button disabled={busy || active || activeAlignment(alignmentJob) || !editable || !doc?.segments.some(s => s.audio?.length === 1)} onClick={() => void refine("start", "check")}>Check audio</button>
@@ -214,6 +220,7 @@ export function TranscriptReview({ meetingId, openRef, hideTrigger = false }: { 
         </div> : alignmentItem && alignmentItem.state !== "aligned" ? <p>{alignmentItem.reason || "No reliable word alignment is available for this segment."}</p> : null}
         {item?.text && <><h3>Suggested changes</h3><p aria-label="Suggested changes">{transcriptDiff(before, item.text).map((part, i) => part.kind === "add" ? <ins key={i} style={{ background: "var(--greenbg)", color: "var(--green)" }}>{part.text} </ins> : part.kind === "remove" ? <del key={i} style={{ background: "var(--redbg)", color: "var(--red)" }}>{part.text} </del> : <span key={i}>{part.text} </span>)}</p></>}
         {item?.quality && !stale && <p role="status">{item.quality.needs_review ? "Needs review: " + item.quality.reasons.map(r => qualityLabels[r] ?? r).join(" · ") : "No configured audio quality flags detected."}</p>}
+        {item?.preprocessing && !stale && <p>{item.preprocessing.applied ? `ASR used audio boosted by ${item.preprocessing.gain_db} dB. Playback uses the original.` : preparationLabels[item.preprocessing.reason] ?? "Original audio was used."}</p>}
         {item && <p>{stale ? "Transcript changed. Run refinement again." : item.reason || (item.text === segment.text ? "No text changes." : "Suggestions may contain mistakes. Listen before applying.")}</p>}
         {item?.state === "ready" && <button disabled={busy || active || !editable || draftConflict || stale || draft !== segment.text || item.text === segment.text} onClick={() => void refine("apply")}>Apply refinement</button>}
       </section>

@@ -5,3 +5,6 @@
 `AudioCheck.json` covers optional check-only mode, diagnostics and non-applicable checked items.
 
 `RetryableFailure.json` covers a sanitized failed ASR attempt with pinned backend and source.
+
+`PreparedAudio.json` covers opt-in bounded gain with distinct original/prepared
+input hashes and last-attempt HTTP duration. No original recording is modified.

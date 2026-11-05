@@ -212,6 +212,126 @@ async def test_quality_modes_preserve_original(monkeypatch, mode, amplitude, exp
             assert result.status_code == 409
 
 
+def request_audio(request):
+    from email.parser import BytesParser
+    message = BytesParser().parsebytes(b"Content-Type: " + request.headers["content-type"].encode() + b"\r\n\r\n" + request.content)
+    return next(part.get_payload(decode=True) for part in message.get_payload()
+                if part.get_param("name", header="content-disposition") == "file")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("opt_in", [False, True])
+async def test_prepared_asr_keeps_original_playback_apply_hash_and_restore(monkeypatch, opt_in):
+    import hashlib
+    from jsonschema import validate
+    import json
+    from pathlib import Path
+    client, store, _, worker, calls = await fixture(monkeypatch)
+    original = audio(70)
+    async def clip(*args):
+        return original
+    monkeypatch.setattr(worker, "clip", clip)
+    base = "/transcripts/by-id/1"
+    async with client:
+        result = await client.post(base + "/refinement/start", json={"normalize_audio": opt_in})
+        assert result.status_code == 202
+        await worker.task
+        job = await worker.current(7, 1)
+        item = job["items"][0]
+        sent = request_audio(calls[0])
+        assert job["audio_preprocessing"] == ("bounded-gain.v1" if opt_in else "none")
+        assert item["audio_sha256"] == hashlib.sha256(original).hexdigest()
+        assert item["asr_elapsed_ms"] >= 0
+        assert (sent != original) == opt_in
+        if opt_in:
+            assert item["preprocessing"]["audio_sha256"] == hashlib.sha256(sent).hexdigest()
+            assert item["preprocessing"]["gain_db"] == 12
+        else:
+            assert "preprocessing" not in item
+        schema = Path(__file__).parents[3] / "contracts/transcript-refinement.v1/transcript-refinement.schema.json"
+        validate(job, json.loads(schema.read_text(encoding="utf8")))
+        assert (await client.get(base + "/segments/s%2F1/audio")).content == original
+        assert (await store.get_transcript_document(7, 1))["segments"][0]["revision"] == 0
+        applied = await client.post(base + "/refinement/apply", json={"job_id":job["id"],"segment_id":"s/1","expected_revision":0})
+        assert applied.status_code == 200, applied.text
+        history = applied.json()["segments"][0]["history"][0]
+        assert history["audio_sha256"] == hashlib.sha256(original).hexdigest()
+        if opt_in:
+            assert history["preprocessing"] == item["preprocessing"]
+        document_schema = Path(__file__).parents[3] / "contracts/transcript-document.v1/transcript-document.schema.json"
+        validate(applied.json(), json.loads(document_schema.read_text(encoding="utf8")))
+        restored = await client.patch(base + "/segments/s%2F1", json={"expected_revision":1,"text":None})
+        assert restored.json()["segments"][0]["text"] == restored.json()["segments"][0]["raw_text"]
+        if opt_in:
+            await client.post(base + "/refinement/start", json={"mode":"check"})
+            await worker.task
+            current = (await client.get(base + "/document")).json()
+            assert current["segments"][0]["history"][0]["preprocessing"] == history["preprocessing"]
+        assert await worker.clip(7, 1, "s/1") == original
+
+
+@pytest.mark.asyncio
+async def test_retry_preserves_the_exact_prepared_asr_input(monkeypatch):
+    client, _, _, worker, _ = await fixture(monkeypatch)
+    async def clip(*args):
+        return audio(70)
+    monkeypatch.setattr(worker, "clip", clip)
+    sent = []
+    def infer(request):
+        sent.append(request_audio(request))
+        return httpx.Response(503) if len(sent) == 1 else httpx.Response(200, json={"text":"Xin chào."})
+    original = type(client)
+    monkeypatch.setattr("meeting_api.collector.refinement.httpx.AsyncClient", lambda **kw: original(transport=httpx.MockTransport(infer), **kw))
+    async with client:
+        path = "/transcripts/by-id/1/refinement/start"
+        await client.post(path, json={"normalize_audio":True})
+        await worker.task
+        job = await worker.current(7, 1)
+        assert job["items"][0]["state"] == "failed"
+        assert (await client.post(path, json={"retry_job_id":job["id"],"normalize_audio":True})).status_code == 422
+        assert (await client.post(path, json={"retry_job_id":job["id"]})).status_code == 202
+        await worker.task
+        retried = await worker.current(7, 1)
+        assert retried["items"][0]["state"] == "ready"
+        assert retried["items"][0]["preprocessing"] == job["items"][0]["preprocessing"]
+        assert len(sent) == 2 and sent[0] == sent[1] and sent[0] != audio(70)
+
+
+@pytest.mark.asyncio
+async def test_retry_refuses_changed_prepared_input_before_inference(monkeypatch):
+    client, _, _, worker, _ = await fixture(monkeypatch)
+    async def clip(*args):
+        return audio(70)
+    monkeypatch.setattr(worker, "clip", clip)
+    calls = []
+    def infer(request):
+        calls.append(request)
+        return httpx.Response(503)
+    original = type(client)
+    monkeypatch.setattr("meeting_api.collector.refinement.httpx.AsyncClient", lambda **kw: original(transport=httpx.MockTransport(infer), **kw))
+    async with client:
+        path = "/transcripts/by-id/1/refinement/start"
+        await client.post(path, json={"normalize_audio":True})
+        await worker.task
+        job = await worker.current(7, 1)
+        metadata = {**job["items"][0]["preprocessing"], "audio_sha256":"f"*64}
+        monkeypatch.setattr("meeting_api.collector.refinement.prepare_audio", lambda content: (content,metadata))
+        await client.post(path, json={"retry_job_id":job["id"]})
+        await worker.task
+        item = (await worker.current(7, 1))["items"][0]
+        assert item["state"] == "skipped" and not item["retryable"] and item["error_code"] == "source_changed"
+        assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("options", [{"mode":"check","normalize_audio":True}, {"normalize_audio":"true"}])
+async def test_audio_preparation_validation_does_not_submit_asr(monkeypatch, options):
+    client, _, _, _, calls = await fixture(monkeypatch)
+    async with client:
+        assert (await client.post("/transcripts/by-id/1/refinement/start", json=options)).status_code == 422
+    assert not calls
+
+
 def test_quality_is_advisory_and_preserves_vietnamese_accents():
     from meeting_api.collector.audio_quality import assess_audio
     assert assess_audio(audio(0), "hello")["reasons"] == ["low_volume", "mostly_quiet"]

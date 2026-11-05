@@ -40,3 +40,34 @@ meeting. Flagged refinement retained one checked item and returned three sanitiz
 browser's Retry failed segments action produced exactly three successful ASR requests,
 retained the checked item unchanged, and exposed ready proposals with two attempts each.
 The original source meeting snapshot was unchanged; the test meeting/audio were removed.
+
+`test_refinement_audio.py` verifies bounded opt-in gain, PCM headroom, quiet/clipped
+negative controls, byte-identical skips, and exact sample retention when adjacent
+saved-recording spans are decoded through FFmpeg (including first/last samples).
+Its accent-preserving CER/token/edge metrics and A/B-report privacy checks use mocked
+ASR replies, not claims about model accuracy. `test_bot_refinement.py` additionally
+checks original playback/hash/Apply/Restore with prepared ASR input, strict opt-in,
+check-only rejection and identical prepared-input replay during manual retry.
+
+Local A/B probe, 2026-11-05: six distinct `google/fleurs` vi_vn/test recordings plus
+six copies scaled to RMS 0.002 (12 correlated cases), using the published reference
+transcripts and the existing `5CD-AI/VieGem-ASR` CUDA worker. Same PCM16 conversion
+was used for baseline/prepared inputs; no model, language or vocabulary was changed.
+Seven cases received bounded gain, five reused identical input: 19 actual ASR requests.
+Across 1006 reference characters, observed errors were 38 -> 30 (CER 3.78% -> 2.98%):
+three cases improved, nine tied, none worsened. This small read-speech/control sample
+is not a meeting benchmark or evidence for enabling gain by default. Opt-in stays off.
+References/audio/reports are outside Git; recordings/application data were not modified.
+Dataset attribution: Google FLEURS, CC BY 4.0,
+https://huggingface.co/datasets/google/fleurs (vi_vn/test). Source WAV filenames:
+10057024225045006889.wav, 10072308967409148015.wav,
+10078277432407694754.wav, 10093159547857080890.wav, 1015279164912843543.wav, 1015563747297542961.wav.
+
+WebM/Opus regression: compare first/tail probe alignment of subsecond and later
+coarse-seek cuts against the full decode, within the 1 ms container source clock.
+The former direct seek produced a 208-sample (13 ms) short full decode on the
+9-second fixture; the new timestamp-preserving cut retains coverage. A missing
+10 ms WAV tail is rejected rather than returned as successful audio. These are
+signal/timing checks, not a claim that every recognized word is now correct.
+
+Prepared-audio Apply tests validate transcript-document.v1 and retain the prepared-input provenance through Restore and a new check-only job.

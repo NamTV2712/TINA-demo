@@ -9,15 +9,16 @@ import os
 from pathlib import Path
 import subprocess
 import tempfile
+import time
 from datetime import datetime, timezone
 from uuid import uuid4
 from typing import Literal
 import wave
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, field_validator
 
-from .audio_quality import assess_audio
+from .audio_quality import assess_audio, prepare_audio
 from .transcript_document import Correction, CorrectionConflict, normalize
 
 ACTIVE = ("running", "paused", "cancelling")
@@ -28,6 +29,7 @@ class RefinementOptions(BaseModel):
     mode: Literal["all", "check", "flagged"] = "all"
     glossary: list[str] = Field(default_factory=list, max_length=40)
     retry_job_id: str | None = Field(default=None, min_length=1, max_length=128)
+    normalize_audio: StrictBool = False
     model_config = ConfigDict(extra="forbid")
 
     @field_validator("glossary")
@@ -76,7 +78,10 @@ def apply_proposal(data, job, sid, correction):
         raise CorrectionConflict("Suggestion changed; reload before applying")
     item["state"] = "applied"
     data["transcript_refinement"] = current
-    return {"kind": "refinement", "job_id": job["id"], "model": job["model"], "audio_sha256": item["audio_sha256"]}
+    provenance = {"kind": "refinement", "job_id": job["id"], "model": job["model"], "audio_sha256": item["audio_sha256"]}
+    if item.get("preprocessing"):
+        provenance["preprocessing"] = copy.deepcopy(item["preprocessing"])
+    return provenance
 
 
 async def selected_backend(user):
@@ -92,14 +97,21 @@ async def selected_backend(user):
 
 
 def _decode(path, start, duration):
+    first = round(start * 16000)
+    frames = round(duration * 16000)
+    # Keep packet timestamps through a coarse seek; trim on the resampled clock.
+    # Seeking directly to the cut can reapply Opus pre-skip and shorten a boundary.
+    coarse = max(0, int(start) - 1)
+    seek = ["-ss", str(coarse), "-noaccurate_seek"] if coarse else []
     try:
-        proc = subprocess.run(["ffmpeg", "-v", "error", "-nostdin", "-ss", str(start), "-i", str(path),
+        proc = subprocess.run(["ffmpeg", "-v", "error", "-nostdin", "-copyts", *seek, "-i", str(path),
+                               "-af", f"aresample=16000,atrim=start_pts={first}:end_pts={first + frames},asetpts=PTS-STARTPTS",
                                "-t", str(duration), "-ac", "1", "-ar", "16000", "-f", "s16le", "pipe:1"],
                               capture_output=True, timeout=30, check=True)
     except (OSError, subprocess.SubprocessError) as exc:
         raise ValueError("Recording cannot be decoded") from exc
     pcm = proc.stdout
-    if len(pcm) < int(duration * 16000 * 2) - 640:
+    if len(pcm) < (frames - 16) * 2:  # At most 1 ms container-clock quantization; never pad missing audio.
         raise ValueError("Recording does not cover the segment")
     out = io.BytesIO()
     with wave.open(out, "wb") as wav:
@@ -172,9 +184,11 @@ class BotRefiner:
 
     async def start(self, user, mid, options):
         if options.retry_job_id:
-            if options.glossary or options.mode != "all":
-                raise ValueError("Retry keeps the original job's mode and vocabulary")
+            if options.glossary or options.mode != "all" or options.normalize_audio:
+                raise ValueError("Retry keeps the original job's mode, vocabulary and audio preparation")
             return await self.retry(user, mid, options.retry_job_id)
+        if options.mode == "check" and options.normalize_audio:
+            raise ValueError("Audio optimization is only available when requesting ASR")
         async with self.lock:
             if (self.active or getattr(getattr(self, "diarizer", None), "active", None)
                     or getattr(getattr(self, "aligner", None), "active", None) or await self.store.refinement_live()):
@@ -193,6 +207,7 @@ class BotRefiner:
             job = {"version": "transcript-refinement.v1", "id": str(uuid4()), "meeting": str(mid), "status": "running",
                    "model": config["model"], "backend": config["label"], "created_at": datetime.now(timezone.utc).isoformat(),
                    "glossary": options.glossary, "mode": options.mode, "backend_sha256": backend_hash(config),
+                   "audio_preprocessing": "bounded-gain.v1" if options.normalize_audio else "none",
                    "items": [{"segment_id": s["segment_id"], "expected_revision": s["revision"], "state": "pending"} for s in doc["segments"]]}
             source_texts = {s["segment_id"]: s["text"] for s in doc["segments"]}
             previous_job = await self.store.get_refinement(user, mid)
@@ -213,6 +228,8 @@ class BotRefiner:
             failed = [i for i in previous["items"] if i["state"] == "failed" and i.get("retryable") and i.get("audio_sha256")]
             if not failed or not previous.get("backend_sha256"):
                 raise CorrectionConflict("No failed ASR segments available to retry; start a new refinement if needed")
+            if previous.get("audio_preprocessing", "none") not in ("none", "bounded-gain.v1"):
+                raise CorrectionConflict("Audio preparation changed; start a new refinement")
             config = await self.backend(user)
             if backend_hash(config) != previous["backend_sha256"]:
                 raise CorrectionConflict("Transcription backend or model changed; start a new refinement")
@@ -272,6 +289,16 @@ class BotRefiner:
                                 await self.store.save_refinement(user, mid, job)
                                 continue
                             try:
+                                submitted_audio = audio
+                                if job.get("audio_preprocessing") == "bounded-gain.v1":
+                                    submitted_audio, preparation = await asyncio.to_thread(prepare_audio, audio)
+                                    previous = item.get("preprocessing")
+                                    if job.get("retry_of") and previous and previous != preparation:
+                                        item.update(state="skipped", error_code="source_changed", retryable=False,
+                                                    reason="Prepared audio changed. Start a new refinement for this segment.")
+                                        await self.store.save_refinement(user, mid, job)
+                                        continue
+                                    item["preprocessing"] = preparation
                                 # Preparing saved audio can outlast a cancel or the start of a live meeting.
                                 while await self.store.refinement_live() and job["status"] != "cancelling":
                                     job["status"] = "paused"; await self.store.save_refinement(user, mid, job)
@@ -291,7 +318,11 @@ class BotRefiner:
                                 if job["glossary"]:
                                     fields["prompt"] = "Vocabulary: " + ", ".join(job["glossary"])
                                 item["attempts"] = item.get("attempts", 0) + 1
-                                response = await client.post(url, headers=headers, data=fields, files={"file": ("segment.wav", audio, "audio/wav")})
+                                started = time.perf_counter()
+                                try:
+                                    response = await client.post(url, headers=headers, data=fields, files={"file": ("segment.wav", submitted_audio, "audio/wav")})
+                                finally:
+                                    item["asr_elapsed_ms"] = max(0, round((time.perf_counter() - started) * 1000))
                                 response.raise_for_status()
                                 data = response.json()
                                 if not isinstance(data, dict) or not isinstance(data.get("text"), str):

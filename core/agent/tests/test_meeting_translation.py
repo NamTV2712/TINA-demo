@@ -67,6 +67,25 @@ def test_edit_invalidates_only_changed_segment_and_new_live_segment_is_translate
     assert calls == ['Xin chào.', 'Chào bạn.', 'Tạm biệt.']
 
 
+def test_refinement_apply_and_restore_invalidate_translation_without_reusing_stale_text(setup):
+    client, canonical, calls, _ = setup
+    client.post(URL, json={})
+    canonical['segments'].append({'segment_id':'unchanged', 'text':'Tạm biệt.', 'revision':0})
+    client.post(URL, json={})
+    before = deepcopy(canonical['segments'][0])
+    # The canonical endpoint reflects only explicit Apply, not a ready ASR proposal.
+    canonical['segments'][0].update(text='Xin chào mọi người.', revision=1)
+    state = client.get(URL).json()
+    assert state['groups'][0]['translated_text'] is None
+    assert state['groups'][1]['translated_text'] == 'Hello.'
+    client.post(URL, json={})
+    canonical['segments'][0].update(text=before['text'], revision=2)  # Restore original.
+    assert client.get(URL).json()['groups'][0]['translated_text'] is None
+    state = client.post(URL, json={}).json()
+    assert state['completed'] == 2
+    assert calls == ['Xin chào.', 'Tạm biệt.', 'Xin chào mọi người.', 'Xin chào.']
+
+
 def test_provider_error_keeps_source_and_backs_off_then_manual_retry(setup, monkeypatch):
     client, _, calls, _ = setup
     monkeypatch.setattr(api, 'time', type('Clock', (), {'time': staticmethod(lambda: 1000)})())

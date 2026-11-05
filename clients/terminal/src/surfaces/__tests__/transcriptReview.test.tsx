@@ -362,3 +362,35 @@ it("retries the saved job without replacing vocabulary or successful suggestions
   expect(requests).toBe(1);
   expect(screen.getByLabelText("Suggested changes").textContent).toContain("API thứ Sáu.");
 });
+
+it("keeps quiet-audio optimization opt-in and excludes it from check-only requests", async () => {
+  const doc = { status:"completed", segments:[{...segment,audio:[{kind:"recording-span"}]}] };
+  const payloads: Array<Record<string, unknown>> = [];
+  fetchMock.mockImplementation(async (url:string, init?:RequestInit) => ({ok:true,json:async () => {
+    if (url.endsWith("/refinement/start")) {
+      const body=JSON.parse(init!.body as string); payloads.push(body);
+      return {id:"job",status:"completed",model:"custom",backend:"viegem",items:[{
+        segment_id:"s/1",expected_revision:0,state:body.mode === "check" ? "checked" : "ready",text:"API thứ Sáu.",
+        ...(body.normalize_audio ? {preprocessing:{applied:true,gain_db:12,reason:"gain_applied"}} : {}),
+      }]};
+    }
+    return url.endsWith("/document") ? doc : url.endsWith("/alignment") ? {available:false,job:null} : null;
+  }}));
+  render(<TranscriptReview meetingId="42" />);
+  fireEvent.click(screen.getByRole("button",{name:"Review transcript"}));
+  await screen.findByLabelText(/Corrected transcript/);
+  fireEvent.click(screen.getByText("Refinement options"));
+  const option=screen.getByRole("checkbox",{name:"Optimize quiet audio"});
+  expect(option).toHaveProperty("checked",false);
+  fireEvent.click(screen.getByRole("button",{name:"Refine after meeting"}));
+  await waitFor(() => expect(payloads).toHaveLength(1));
+  expect(payloads[0]).toEqual({glossary:[]});
+  await waitFor(() => expect(option).toHaveProperty("disabled",false));
+  fireEvent.click(option);
+  fireEvent.click(screen.getByRole("button",{name:"Refine flagged segments"}));
+  await screen.findByText("ASR used audio boosted by 12 dB. Playback uses the original.");
+  expect(payloads[1]).toEqual({mode:"flagged",normalize_audio:true,glossary:[]});
+  fireEvent.click(screen.getByRole("button",{name:"Check audio"}));
+  await waitFor(() => expect(payloads).toHaveLength(3));
+  expect(payloads[2]).toEqual({mode:"check",glossary:[]});
+});

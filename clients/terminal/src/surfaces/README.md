@@ -91,3 +91,9 @@ Checks have no ASR cost; selective refinement retains explicit audio comparison/
 Failed bot refinement items show safe service-specific reasons. Retry failed segments
 submits the latest job ID, keeps saved vocabulary and successful proposals, and is
 disabled during active work. No automatic retry or model selection is added.
+
+Review transcript -> Refinement options includes **Optimize quiet audio**, off by
+default and disabled during work/live meetings. Only ASR start requests include the
+opt-in; Check audio still measures the original and retry sends only the saved job ID.
+Proposals explain whether limited gain was used or why original audio was retained.
+The audio player always uses the original recording for owner comparison.

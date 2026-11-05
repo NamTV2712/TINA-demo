@@ -1,5 +1,5 @@
 name: gates
-# Push validates main, the live-translation feature branch, and release tags.
+# Push validates main, the live-translation and ASR-quality branches, and release tags.
 # Other feature branches run through pull_request to avoid duplicate runs.
 #
 # SPLIT INTO 3 PARALLEL JOBS (wall-clock law): static / python / node run concurrently
@@ -8,7 +8,7 @@ name: gates
 # (if:always() + explicit check, because a skipped required check would read as satisfied).
 on:
   push:
-    branches: [main, 'Feat/LivetranslationVi2En']
+    branches: [main, 'Feat/LivetranslationVi2En', 'feat/asr-quality-refinement']
     tags: ['v*']
   pull_request:
   # merge queue: the queue's temporary merge-group ref must run (and report) `gates`,

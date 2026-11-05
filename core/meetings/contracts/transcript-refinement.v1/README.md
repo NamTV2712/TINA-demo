@@ -91,3 +91,22 @@ before running `pnpm seal:contracts`. Check `git ls-files --eol` for the schema:
 both the index and working copy should report `lf`. Validate with `pnpm gate:schema`
 and `pnpm gate:contract-version`; back-compatible contract updates still require
 the existing contract review.
+
+## Opt-in prepared bot audio
+
+Bot Start optionally accepts `normalize_audio` (boolean, default false), only for
+ASR modes. Jobs optionally pin `audio_preprocessing` (`none` or `bounded-gain.v1`);
+legacy jobs without it use original audio. Check-only and retry requests cannot
+turn preparation on. Retry preserves the previous policy and prepared-input hash.
+
+`bounded-gain.v1` applies at most +12 dB toward RMS 0.01 only below RMS 0.003,
+with peak capped at 0.9. RMS below 0.0001, >=80% quiet frames, detected clipping
+and peak-limited clips are left unchanged. It is not VAD, denoising or a confidence
+estimate. It never changes sample count, source clock or persisted original bytes.
+Optional item `preprocessing` reports method/applied/gain_db/reason and prepared
+`audio_sha256`; the item's existing `audio_sha256` still hashes the original clip.
+Playback/Apply/Restore retain the original source checks. Optional `asr_elapsed_ms`
+records the last HTTP attempt only, including failed attempts, without queue wait.
+Desktop retains its existing start behavior. All additions are optional.
+
+Explicit Apply also copies preparation metadata into transcript-document.v1 history, so a later job or Restore cannot erase the prepared-input provenance.

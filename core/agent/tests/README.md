@@ -40,3 +40,7 @@ The network probe checks allowed HTTPS/Git, blocked domains/private addresses/pr
 offline/read-only turns and metadata/credential protection. The web probe uses a local Responses
 fixture to inspect real Codex requests on new/resumed threads: live, cached and disabled modes.
 It does not claim that a live model/account actually performed a search.
+
+The refinement Apply/Restore translation regression verifies that canonical text changes
+invalidate the affected phrase's cached translation, retain other phrases, and translate
+restored source text again without returning the previous revision's translation.
