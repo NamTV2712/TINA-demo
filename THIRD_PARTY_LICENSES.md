@@ -1,5 +1,30 @@
 # Third-party licenses — baked artifacts outside the dependency gate
 
+## Optional local wake-word client
+
+Phase 3 adds the operator-downloaded Silero VAD model (MIT) and a host-only FastAPI/uvicorn/httpx
+coordinator. The VAD URL, size and SHA-256 are pinned with the KWS manifest. Certifi's unchanged
+MPL certificate bundle is covered by the scoped record in `license-exceptions.json`.
+
+`clients/speech` uses pinned Sherpa-ONNX 2.0.1 (including its core package), SentencePiece
+0.2.2 (Apache-2.0), sounddevice/PortAudio (MIT) and NumPy (BSD). The operator-downloaded
+GigaSpeech 3.3M KWS archive declares Apache-2.0 in its README, retained in the local cache.
+Exact archive/file hashes are in `clients/speech/tina_speech/model-assets.json`.
+Weights and generated SAPI audio fixtures are not committed or baked into TINA images.
+
+## Optional speech sidecar
+
+`deploy/tts` installs VieNeu 3.8.3 and sea-g2p (Apache-2.0) in a separate, optional image.
+Its operator-downloaded VieNeu-TTS-v3-Turbo and OpenMOSS MOSS-Audio-Tokenizer-Nano-ONNX
+assets declare Apache-2.0 in their upstream model cards. Exact revisions/checksums are in
+[`deploy/tts/model-assets.json`](deploy/tts/model-assets.json); cards travel with the private
+read-only model cache. No weights, reference voices or eSpeak data are baked into TINA images.
+The image retains the installed packages' upstream licence notices.
+Transitive Category B packages (certifi, orjson, Python-SoXR and SoundFile's shared libsndfile)
+remain unmodified separate packages/native libraries in this optional image; their scope and
+disposition are recorded in [`license-exceptions.json`](license-exceptions.json). This is not
+a claim that the complete SDK dependency tree is Apache-2.0.
+
 `gate:licenses` (ADR-0004, `scripts/gates.mjs`) scans the resolved **npm** dependency
 tree (`pnpm licenses list --json`) and the Python tree grows into `pip-licenses`. Neither
 sees **non-dependency artifacts baked into the images** — model weights pulled from a model

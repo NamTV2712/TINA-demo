@@ -12,6 +12,7 @@ __pycache__/
 .env.keys.*
 **/.env.keys
 **/.env.keys.*
+tts.env.keys
 .env.local
 .env.*.local
 .env.vault
@@ -24,6 +25,7 @@ __pycache__/
 !deploy/transcription/gipformer/.env
 !deploy/transcription/diarization/.env
 !deploy/transcription/alignment/.env
+!deploy/tts/.env
 .recordings/
 deploy/execution-targets.json
 # local test/debug artifacts (Playwright MCP screenshots + snapshots). The rule was added AFTER a
@@ -55,5 +57,6 @@ tina-pipeline.html
 assets/architecture.svg
 architecture.svg
 
+output/
 
 

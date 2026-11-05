@@ -104,6 +104,8 @@ export type Act =
   | { action: 'speak'; text: string; voice?: string }
   | { action: 'speak_audio'; url?: string; audioBase64?: string }
   | { action: 'speak_stop' }
+  | { action: 'speech_speak'; command_id: string; text: string; voice?: string }
+  | { action: 'speech_stop'; command_id: string }
   | { action: 'chat_send'; text: string }
   | { action: 'chat_read' }
   | { action: 'screen_show'; imageUrl?: string; text?: string }
@@ -116,6 +118,7 @@ export type ActAction = Act['action'];
 export const ACT_ACTIONS: readonly ActAction[] = [
   'leave', 'reconfigure',
   'speak', 'speak_audio', 'speak_stop',
+  'speech_speak', 'speech_stop',
   'chat_send', 'chat_read',
   'screen_show', 'screen_stop', 'avatar_set', 'avatar_reset',
 ];
@@ -128,6 +131,14 @@ export function parseAct(msg: unknown): Act | null {
   if (!msg || typeof msg !== 'object') return null;
   const action = (msg as { action?: unknown }).action;
   if (typeof action !== 'string' || !(ACT_ACTIONS as readonly string[]).includes(action)) return null;
+  if (action === 'speech_speak' || action === 'speech_stop') {
+    const value = msg as Record<string, unknown>;
+    if (typeof value.command_id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value.command_id)) return null;
+    const allowed = action === 'speech_speak' ? ['action', 'command_id', 'text', 'voice'] : ['action', 'command_id'];
+    if (Object.keys(value).some(key => !allowed.includes(key))) return null;
+    if (action === 'speech_speak' && (typeof value.text !== 'string' || !value.text.trim() || [...value.text].length > 4000
+      || (value.voice !== undefined && (typeof value.voice !== 'string' || value.voice.length > 64)))) return null;
+  }
   return msg as Act;
 }
 

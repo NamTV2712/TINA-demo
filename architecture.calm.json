@@ -1791,6 +1791,90 @@
    "description": "Owner-authorized content document PUT, no-overwrite move and explicit delete with expected SHA-256, existing workspace write lock, entity frontmatter validation and atomic file replacement. Reviewed moves preview source-preserving static backlinks and outgoing relative links in the same workspace; confirmation rechecks the full plan fingerprint, preserves code and aliases, reports ambiguous/uneditable references, rolls back ordinary write failures and removes the source last. Bounded Unicode Markdown content search excludes hidden paths and symlinks. Dashboard uses source-preserving formatting, a folder tree, wikilinks, history and per-account/workspace/file draft recovery across reloads via browser session storage retaining the original SHA-256; Terminal searches its authorized active mounts. Explicit per-path Git commit leaves unrelated staged paths and remotes untouched; shared workspaces remain read-only here. General harness writers retain their existing filesystem behavior."
   },
   {
+   "unique-id": "tts-sidecar",
+   "node-type": "service",
+   "name": "Optional Vietnamese TTS sidecar",
+   "description": "Optional separate Compose service under deploy/tts: one preset VieNeu v3 Turbo ONNX CPU voice. Authenticated OpenAI-compatible /v1/audio/speech consumes bounded text and returns headerless mono PCM16 at 24 kHz. Pinned model/codec snapshots are operator-downloaded, hash-verified and read-only; runtime hub access is offline. One synthesis at a time; no transcript writes, agent imports or speech text logging. Native synthesis is not preemptible; existing bot Stop cancels its HTTP request/playback. Shared env stores a Dotenvx-encrypted token; a host runner loads only that token with a separate private key. Model cache paths are per-host; TTS keys are not injected into inference.",
+   "metadata": [
+    {
+     "path": "deploy/tts"
+    }
+   ],
+   "interfaces": [
+    {
+     "unique-id": "tts-sidecar-http",
+     "type": "api"
+    }
+   ]
+  },
+  {
+   "unique-id": "speech-client",
+   "node-type": "system",
+   "name": "Local wake-word pilot",
+   "description": "Optional host speech CLI: per-microphone KWS, bounded pre-roll and Silero VAD question capture, explicit Start/Stop and participant-only credentials. Opt-in run/run-file sends bounded WAV to the single-room speech coordinator; ordinary listen/file remain local. Wake is activation, not authentication. Default TTS remains Truc Ly. Room-wide polling suppresses KWS/pre-roll while busy; stale status/boot changes disarm until explicit restart; idle requires 800 ms quiet.",
+   "metadata": [
+    {
+     "path": "clients/speech"
+    }
+   ]
+  },
+  {
+   "unique-id": "speech-coordinator",
+   "node-type": "service",
+   "name": "Optional single-room speech coordinator",
+   "description": "Loopback pilot in clients/speech: authenticates enrolled participants through Gateway auth/me; server-held operator/STT keys; fixed approved meeting and documents; existing grounded Wiki ask and freshness checks; correlated Speak/Stop and terminal receipt polling. Volatile bounded turns, no stored audio/text; ambiguous playback stays disarmed. One central capture grant per room; atomic revision rejects delayed losing wakes; boot epoch fences old requests. Single process only.",
+   "metadata": [
+    {
+     "path": "clients/speech/tina_speech/coordinator.py"
+    }
+   ]
+  },
+  {
+   "unique-id": "speech.v1",
+   "node-type": "data-asset",
+   "name": "speech.v1 protocol",
+   "description": "Core-owned correlated speech commands, playback receipts and authorized participant turn status. Legacy acts.v1 remains unchanged.",
+   "metadata": [
+    {
+     "path": "core/meetings/contracts/speech.v1"
+    }
+   ]
+  },
+  {
+   "unique-id": "speech-playback",
+   "node-type": "data-asset",
+   "name": "Ephemeral playback receipts",
+   "description": "Redis speech:playback:{meeting}:{command} (600s) and speech:active:{meeting} (200s), single writer meeting-api; CAS terminal states, session binding and cancellation tombstones.",
+   "controls": {
+    "ownership": {
+     "description": "Meeting API is the single writer of speech receipts and active reservations",
+     "requirements": [
+      {
+       "requirement-url": "urn:tina:calm:controls:single-writer",
+       "config": {
+        "writers": [
+         "meeting-api"
+        ],
+        "match": "speech:(playback|active):.*",
+        "op": "set"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "unique-id": "speech-room.v1",
+   "node-type": "data-asset",
+   "name": "speech-room.v1 protocol",
+   "description": "Core-owned authenticated room occupancy, capture revision and boot epoch handshake; speech.v1 playback shapes unchanged.",
+   "metadata": [
+    {
+     "path": "core/meetings/contracts/speech-room.v1"
+    }
+   ]
+  },
+  {
    "unique-id": "meeting-translation.v1",
    "node-type": "contract",
    "name": "meeting-translation.v1",
@@ -1978,6 +2062,10 @@
       "stt-metrics.v1",
       "transcript-sync",
       "diarization-worker",
+      "tts-sidecar",
+      "speech.v1",
+      "speech-playback",
+      "speech-room.v1",
       "asr-control"
      ]
     }
@@ -3983,6 +4071,102 @@
     }
    ],
    "description": "Authenticated explicit Markdown edit and optional selected-path local commit; owner and content preconditions are enforced in the control plane."
+  },
+  {
+   "unique-id": "bot-tts-sidecar",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "bot"
+     },
+     "destination": {
+      "node": "tts-sidecar",
+      "interface": "tts-sidecar-http"
+     }
+    }
+   },
+   "protocol": "HTTP",
+   "description": "Existing owner-authorized Speak commands make the voice-enabled browser bot send text to TTS_SERVICE_URL/v1/audio/speech with X-API-Key. PCM is resampled by the optional sidecar to 24 kHz and played by the unchanged PulseAudio virtual microphone path; speak_stop aborts request and playback.",
+   "metadata": [
+    {
+     "access": "call"
+    }
+   ]
+  },
+  {
+   "unique-id": "speech-client-coordinator",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "speech-client"
+     },
+     "destination": {
+      "node": "speech-coordinator"
+     }
+    }
+   },
+   "protocol": "HTTP",
+   "description": "Participant-authenticated bounded WAV and turn status; no shared service secrets on clients. Authenticated speech-room.v1 occupancy polling plus epoch/revision capture fencing; all hosts pause wake dispatch during a shared turn."
+  },
+  {
+   "unique-id": "speech-coordinator-gateway",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "speech-coordinator"
+     },
+     "destination": {
+      "node": "gateway"
+     }
+    }
+   },
+   "protocol": "HTTP",
+   "description": "Operator-scoped meeting/Wiki APIs and correlated Speak/Stop; participant auth/me."
+  },
+  {
+   "unique-id": "speech-coordinator-stt",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "speech-coordinator"
+     },
+     "destination": {
+      "node": "transcription"
+     }
+    }
+   },
+   "protocol": "HTTP",
+   "description": "Bounded consented question WAV including up to two seconds wake pre-roll; existing authenticated OpenAI-compatible STT."
+  },
+  {
+   "unique-id": "bot-speech-receipt",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "bot"
+     },
+     "destination": {
+      "node": "meeting-api"
+     }
+    }
+   },
+   "protocol": "HTTP",
+   "description": "Internal-secret-authenticated speech.v1 receipts bound to the recorded bot session."
+  },
+  {
+   "unique-id": "meeting-api-speech-state",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "meeting-api"
+     },
+     "destination": {
+      "node": "speech-playback"
+     }
+    }
+   },
+   "description": "Meeting API alone owns the ephemeral Redis playback state.",
+   "metadata": [{ "access": "write" }]
   },
   {
    "unique-id": "translation-cache-write",

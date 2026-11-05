@@ -27,6 +27,9 @@
 # ------------------------------------------------------------------------------
 FROM tina/meet-join-env:dev AS builder
 
+# Bound individual TypeScript builds and avoid concurrent workspace compilers on local WSL.
+ENV NODE_OPTIONS=--max-old-space-size=2048
+
 ENV PNPM_HOME=/pnpm \
     PATH=/pnpm:$PATH \
     # Browsers are already in the env image (/ms-playwright) — never re-download
@@ -68,13 +71,13 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
 # runs build-browser-utils.mjs, which esbuild-bundles these bricks' dist into
 # window.TinaBrowserUtils (the global capture-bridge.ts injects via addInitScript) —
 # so their dist/ must already exist when the bot build runs.
-RUN pnpm --filter "@tina/capture-codec" --filter "@tina/gmeet-capture" --filter "@tina/mixed-capture-core" --filter "@tina/record-chunker" --filter "@tina/jitsi-capture" --filter "@tina/teams-capture" --filter "@tina/zoom-capture" run build
+RUN pnpm --workspace-concurrency=1 --filter "@tina/capture-codec" --filter "@tina/gmeet-capture" --filter "@tina/mixed-capture-core" --filter "@tina/record-chunker" --filter "@tina/jitsi-capture" --filter "@tina/teams-capture" --filter "@tina/zoom-capture" run build
 
 # Build @tina/bot and everything it depends on (the `...` selector pulls the deps;
 # pnpm runs them in topological order, each package's own `build` = tsc → dist/).
 # The bot's build = `tsc && node build-browser-utils.mjs`, so this also emits the
 # capture bundle dist/browser-utils.global.js (the bricks above are now built).
-RUN pnpm --filter "@tina/bot..." run build
+RUN pnpm --workspace-concurrency=1 --filter "@tina/bot..." run build
 
 # Sanity: the entry the runtime will exec + the capture bundle must exist after the build.
 RUN test -f /build/core/meetings/services/bot/dist/index.js \
@@ -171,7 +174,7 @@ COPY licenses/onnx-community-pyannote-segmentation-3.0.LICENSE.txt /opt/hf-cache
 # Entrypoint: bring up Xvfb + PulseAudio (the env the browser/capture/speak path
 # expects), then run the worker. Boot → validate config → launch browser → join.
 COPY core/meetings/services/bot/entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
+RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
 # noVNC (browser view) — present in the env base; harmless if unused.
 EXPOSE 6080

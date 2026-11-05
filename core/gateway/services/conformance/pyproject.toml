@@ -17,6 +17,9 @@ dependencies = [
     # registers multipart (Form/UploadFile) routes — FastAPI requires python-multipart to build the
     # app even though the conformance suite never posts a recording upload.
     "python-multipart>=0.0.9",
+    # The shipped meeting-api composes its speech receipt store during app creation.
+    "redis>=5,<6",
+    "fakeredis>=2.21,<3",
     "pytest>=8",
     # pytest-asyncio drives the /ws unit harness's `async def` tests (asyncio_mode=auto).
     # No SQLAlchemy-async here so no greenlet pin is required (lesson from the identity

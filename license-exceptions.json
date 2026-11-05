@@ -2,6 +2,38 @@
   "_comment": "Category-B (weak-copyleft) dependencies allowed by exception under P17 / ADR-0004. Each entry is a deliberate, isolated, reviewed allowance — NOT a place to silence Cat-X (GPL/AGPL/source-available). `package` is matched by exact name OR name-prefix (covers per-platform variants). gate:licenses fails on any Cat-B dep not listed here.",
   "categoryB": [
     {
+      "package": "certifi",
+      "license": "MPL-2.0",
+      "reason": "Unmodified CA certificate bundle required transitively by the optional VieNeu SDK download/HTTP dependencies. MPL applies to the dependency files, not TINA source.",
+      "disposition": "Retained as a separate Python package with upstream notices; no modifications or static linkage into TINA.",
+      "scope": "optional deploy/tts image and clients/speech coordinator HTTP dependencies",
+      "approved": "ADR-0004 Category B implementation record; subject to normal change review"
+    },
+    {
+      "package": "orjson",
+      "license": "MPL-2.0 AND (Apache-2.0 OR MIT)",
+      "reason": "Unmodified transitive dependency of the upstream SDK's Gradio dependency. The service uses Python's standard JSON implementation; this dependency remains a separate dynamically loaded extension.",
+      "disposition": "Retained with upstream notices, never statically linked into TINA code.",
+      "scope": "optional deploy/tts image only",
+      "approved": "ADR-0004 Category B implementation record; subject to normal change review"
+    },
+    {
+      "package": "soxr",
+      "license": "LGPL-2.1-or-later",
+      "reason": "Unmodified upstream Python-SoXR wheel required by VieNeu. Its resampler is isolated in a loadable native extension; TINA does not link it into its executable or modify it. The service's output resampling uses SciPy instead.",
+      "disposition": "Separate, replaceable Python package/native extension in the optional service, retaining upstream LGPL and native-library notices.",
+      "scope": "optional deploy/tts image only",
+      "approved": "ADR-0004 Category B implementation record; subject to normal change review"
+    },
+    {
+      "package": "soundfile",
+      "license": "BSD-3-Clause (Python wrapper); LGPL-2.1-or-later (bundled libsndfile)",
+      "reason": "Unmodified transitive audio dependency of VieNeu. The upstream wheel carries a separate shared libsndfile loaded through CFFI; TINA does not statically link or modify it.",
+      "disposition": "Separate, replaceable upstream package/shared library with notices retained. Reference audio and SDK audio-file output are not exposed by the sidecar.",
+      "scope": "optional deploy/tts image only",
+      "approved": "ADR-0004 Category B implementation record; subject to normal change review"
+    },
+    {
       "package": "@img/sharp-libvips",
       "license": "LGPL-3.0-or-later",
       "reason": "libvips native binary behind `sharp`. LGPL is weak copyleft; it is used unmodified and dynamically linked (a separate .dylib/.so loaded at runtime, never statically bundled into our JS), so it qualifies as FINOS/ASF Category B. It enters transitively via @huggingface/transformers' IMAGE pipeline; TINA's mixed lane is AUDIO-only and never instantiates it.",

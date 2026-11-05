@@ -12,6 +12,7 @@ flowchart LR
     desktop_journal["Desktop transcript journal"]
     transcript_sync["Owner transcript synchronization CLI"]
     diarization_worker["Local speaker diarization worker"]
+    tts_sidecar["Optional Vietnamese TTS sidecar"]
     asr_control["ASR host controller"]
   end
   subgraph agent["agent"]
@@ -50,6 +51,7 @@ flowchart LR
   terminal["terminal"]
   dashboard["dashboard (deprecated)"]
   native_capture["TINA Capture"]
+  speech_coordinator["Optional single-room speech coordinator"]
   meeting_api -->|"write"| segments_table
   bot -->|"HTTPS"| transcription
   meeting_api -->|"JDBC"| postgres
@@ -95,6 +97,10 @@ flowchart LR
   meeting_api -->|"HTTP"| diarization_worker
   desktop -->|"HTTP"| alignment_worker
   agent_api -->|"HTTP"| meeting_api
+  bot -->|"HTTP"| tts_sidecar
+  speech_coordinator -->|"HTTP"| gateway
+  speech_coordinator -->|"HTTP"| transcription
+  bot -->|"HTTP"| meeting_api
   agent_api -->|"write"| meeting_translation_cache
   extension -->|"call"| agent_api
   asr_control -->|"HTTP"| admin_api

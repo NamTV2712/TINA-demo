@@ -40,5 +40,7 @@
   "core/runtime/contracts/runtime.v1": "91055d8b14201cac1f99ef6e8c13f8556b0ece2edf94c7d90652ffed4670baf0",
   "core/runtime/contracts/schedule.v1": "1ee54ffef6c1be896d5a920cc8383b3a6e324b07530a69b02522fa555d4fc958",
   "deploy/contracts/config.v1": "a14c262feda834344081cd7e2d6e280c52ef127b5f1aba48e10847f79440e24f",
-  "deploy/contracts/execution-targets.v1": "431f2efdd308b42ea70059ac43bf41aa33595dc94bef9863ff3d4177303478cf"
+  "deploy/contracts/execution-targets.v1": "431f2efdd308b42ea70059ac43bf41aa33595dc94bef9863ff3d4177303478cf",
+  "core/meetings/contracts/speech.v1": "2b43b7b5c2a25608ebef55190410da0139579ce1bcf34f8e647922c6e2a4026a",
+  "core/meetings/contracts/speech-room.v1": "b1481664aceccb15cb73251b69e9b4f503921a7e17c71d4604ba4ba4bbe37a58"
 }

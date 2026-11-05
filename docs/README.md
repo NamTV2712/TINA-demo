@@ -10,5 +10,7 @@ What remains here, deliberately repo-side:
 - [`views/`](views/) — **generated** architecture projections (`architecture.dsl`, `.mmd`) —
   written by `pnpm arch:dsl` / `arch:viz`, drift-checked by `gate:dataflow`. Never hand-edit.
 - [`test-scenarios/`](test-scenarios/) — internal manual test notes.
+- [`tina-speech-plan.md`](tina-speech-plan.md) — proposed wake-word + shared TTS implementation
+  checklist, reuse boundaries and acceptance gates; not a deployed runtime description.
 - `ARCHITECTURE.md`, `DELIVERY*.md`, … — **pointer stubs** for historical source links; current
   content lives in `docs/docs/governance/`.

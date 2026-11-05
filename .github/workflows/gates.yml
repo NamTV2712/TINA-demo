@@ -74,6 +74,13 @@ jobs:
       # which (unlike `docker run`) does NOT implicit-pull — pre-pull its fixture image
       - run: docker pull alpine
       - run: pnpm gate:python
+      - name: Install Dotenvx for encrypted TTS startup tests
+        run: npm install --global @dotenvx/dotenvx@2.38.2
+      - name: TTS protocol, audio and encrypted startup tests (no models)
+        run: >-
+          uv run --no-project --python 3.11
+          --with numpy==2.4.6 --with scipy==1.17.1
+          python -m unittest discover -s deploy/tts -p 'test_*.py'
 
   node:
     runs-on: ubuntu-latest

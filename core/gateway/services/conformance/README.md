@@ -32,6 +32,9 @@ Standalone in `tests/` (L1 contract + L3 in-process integration against the ship
 uv run pytest -q        # uv manages this package's own venv/deps
 ```
 
+The harness declares Redis/fakeredis dependencies to construct the shipped meeting-api's
+speech receipt store in memory. No running Redis instance is needed for these checks.
+
 - `test_health.py` — `gate:health` liveness leg.
 - `test_api_surface.py` — api.v1: the 10 CORE paths + auth-negative (401/403) legs.
 - `test_ws_protocol.py` — ws.v1: subscribe ack, forwarded redis frames, malformed → `Error`, close 4401.

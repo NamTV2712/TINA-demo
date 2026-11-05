@@ -42,7 +42,7 @@ import type { BotPipeline } from './pipeline.js';
 import type { BotRecordingSink } from './recording.js';
 import type { TelemetrySink } from './ports.js';
 import type { RemoteAudioActivityTap } from './aloneness.js';
-import { createTtsPlayback, type TtsPlayback } from './tts-playback.js';
+import { createTtsPlayback, type TtsPlayback, type PlaybackOutcome } from './tts-playback.js';
 
 /** Float32 PCM → base64 of its little-endian bytes — the EXACT codec wire payload, so a stored
  *  captured-signal.v1 frame round-trips through @tina/capture-codec (encode→decode→same PCM). */
@@ -1476,7 +1476,7 @@ export async function startRecording(page: Page, inv: Invocation, recording: Bot
  */
 export interface SpeakController {
   /** Begin speaking `text` (TTS synthesized + injected via the VM's PulseAudio chain). */
-  speak(text: string, voice?: string): Promise<void>;
+  speak(text: string, voice?: string, onStarted?: () => void): Promise<PlaybackOutcome | void>;
   /** Stop any in-flight speech (barge-in). */
   stop(): Promise<void>;
 }
@@ -1495,7 +1495,8 @@ export function createSpeakController(
   let micOn = platform === 'zoom' && enabled;
   let micQueue: Promise<void> = Promise.resolve();
   let speechGeneration = 0;
-  const setMic = async (on: boolean): Promise<void> => {
+  const setMic = async (on: boolean): Promise<boolean> => {
+    let verified = false;
     const operation = micQueue.then(async () => {
       const nextState = await page.evaluate(({ desiredOn, platform, assumedOn }) => {
         const doc = (globalThis as any).document;
@@ -1518,26 +1519,33 @@ export function createSpeakController(
         return desiredOn;
       }, { desiredOn: on, platform, assumedOn: micOn }).catch(() => undefined);
 
-      if (typeof nextState === 'boolean') micOn = nextState;
+      if (typeof nextState === 'boolean') { micOn = nextState; verified = true; }
       else console.error(`[bot] speak: microphone state could not be changed (${platform})`);
     });
     micQueue = operation.catch(() => { /* mic UI failures never reject the voice handler */ });
     await micQueue;
+    return verified;
   };
 
   return {
-    async speak(text: string, voice?: string): Promise<void> {
-      if (!enabled) { console.error('[bot] speak ignored: voiceAgentEnabled is false'); return; }
+    async speak(text: string, voice?: string, onStarted?: () => void): Promise<PlaybackOutcome> {
+      if (!enabled) { console.error('[bot] speak ignored: voiceAgentEnabled is false'); return 'failed'; }
       const generation = ++speechGeneration;
       console.log(`[bot] speak request: ${text.length} characters`);
-      await setMic(true);                                     // (a) unmute the meeting-UI mic button
+      const verified = await setMic(true);                   // (a) unmute the meeting-UI mic button
+      if (generation !== speechGeneration) return 'stopped';
+      if (onStarted && !verified) return 'failed';
       // (b) synthesize via the TTS service + stream PCM to tts_sink → virtual_mic (the bot's mic).
       try {
-        await tts.speak(text, voice);
+        return await tts.speak(text, voice, onStarted) ?? 'failed';
       } catch (e) {
         console.error(`[bot] speak: tts failed: ${String(e)}`);
+        return 'failed';
       } finally {
-        if (generation === speechGeneration) await setMic(false); // (c) re-mute after the tail
+        if (generation === speechGeneration) {
+          const muted = await setMic(false);
+          if (onStarted && !muted) return 'failed';
+        }
       }
     },
     async stop(): Promise<void> {

@@ -53,6 +53,10 @@ system meetings  # capture → transcribe → record; owns the raw transcript
   data-asset stt-metrics.v1
   service transcript-sync
   service diarization-worker
+  service tts-sidecar
+  data-asset speech.v1
+  data-asset speech-playback [writers: meeting-api]
+  data-asset speech-room.v1
   service asr-control
 
 system agent  # the execution domain: a trigger becomes one governed agent turn over a workspace.v1 git repo; owns no transcript
@@ -123,6 +127,8 @@ system flows  # the reaction engine; owns the reaction row and its effect receip
   contract flows.v1
 
 system foreground-application  # User-selected local application with the focused text field; receives only the transcript pasted after the explicit dictation hotkey is released.
+
+system speech-client  # Optional host speech CLI: per-microphone KWS, bounded pre-roll and Silero VAD question capture, explicit Start/Stop and participant-only credentials. Opt-in run/run-file sends bounded WAV to the single-room speech coordinator; ordinary listen/file remain local. Wake is activation, not authentication. Default TTS remains Truc Ly. Room-wide polling suppresses KWS/pre-roll while busy; stale status/boot changes disarm until explicit restart; idle requires 800 ms quiet.
 
 edges:
   bot -write-> segments-stream
@@ -221,6 +227,12 @@ edges:
   agent-api -write-> meeting-knowledge-pages  # Persist private answer/source snapshots and explicitly reviewed create-only Wiki pages; no overwrites.
   terminal -read-> meeting-knowledge-pages  # Through existing authenticated Gateway workspace proxy: related docs, bounded multi-meeting answers, source-meeting quotes/audio, freshness warnings and revision-guarded fact reviews.
   agent-api -write-> workspace-human-documents  # Authenticated explicit Markdown edit and optional selected-path local commit; owner and content preconditions are enforced in the control plane.
+  bot -call-> tts-sidecar  # Existing owner-authorized Speak commands make the voice-enabled browser bot send text to TTS_SERVICE_URL/v1/audio/speech with X-API-Key. PCM is resampled by the optional sidecar to 24 kHz and played by the unchanged PulseAudio virtual microphone path; speak_stop aborts request and playback.
+  speech-client -req-> speech-coordinator  # Participant-authenticated bounded WAV and turn status; no shared service secrets on clients. Authenticated speech-room.v1 occupancy polling plus epoch/revision capture fencing; all hosts pause wake dispatch during a shared turn.
+  speech-coordinator -req-> gateway  # Operator-scoped meeting/Wiki APIs and correlated Speak/Stop; participant auth/me.
+  speech-coordinator -req-> transcription  # Bounded consented question WAV including up to two seconds wake pre-roll; existing authenticated OpenAI-compatible STT.
+  bot -req-> meeting-api  # Internal-secret-authenticated speech.v1 receipts bound to the recorded bot session.
+  meeting-api -write-> speech-playback  # Meeting API alone owns the ephemeral Redis playback state.
   agent-api -write-> meeting-translation-cache  # Owner-scoped SQLite phrase cache, live-tail observations and job leases; every HTTP access first reauthorizes canonical transcript and meeting status.
   terminal-app -call-> agent-api  # Authenticated English/bilingual view reads and advances the shared translation overlay; original ASR remains independent.
   extension -call-> agent-api  # Meeting Bot viewer requests the same gateway-authorized translation cache; provider secrets remain server-side.
