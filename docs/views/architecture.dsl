@@ -232,7 +232,7 @@ edges:
   speech-coordinator -req-> gateway  # Operator-scoped meeting/Wiki APIs and correlated Speak/Stop; participant auth/me.
   speech-coordinator -req-> transcription  # Bounded consented question WAV including up to two seconds wake pre-roll; existing authenticated OpenAI-compatible STT.
   bot -req-> meeting-api  # Internal-secret-authenticated speech.v1 receipts bound to the recorded bot session.
-  meeting-api -req-> speech-playback  # Meeting API alone owns the ephemeral Redis playback state.
+  meeting-api -write-> speech-playback  # Meeting API alone owns the ephemeral Redis playback state.
   agent-api -write-> meeting-translation-cache  # Owner-scoped SQLite phrase cache, live-tail observations and job leases; every HTTP access first reauthorizes canonical transcript and meeting status.
   terminal-app -call-> agent-api  # Authenticated English/bilingual view reads and advances the shared translation overlay; original ASR remains independent.
   extension -call-> agent-api  # Meeting Bot viewer requests the same gateway-authorized translation cache; provider secrets remain server-side.

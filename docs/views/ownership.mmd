@@ -84,5 +84,5 @@ flowchart LR
   agent_api -->|write| meeting_knowledge_pages
   terminal -.->|read| meeting_knowledge_pages
   agent_api -->|write| workspace_human_documents
-  meeting_api -.->|read| speech_playback
+  meeting_api -->|write| speech_playback
   agent_api -->|write| meeting_translation_cache

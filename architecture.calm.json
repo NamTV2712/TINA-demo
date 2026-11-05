@@ -4165,7 +4165,8 @@
      }
     }
    },
-   "description": "Meeting API alone owns the ephemeral Redis playback state."
+   "description": "Meeting API alone owns the ephemeral Redis playback state.",
+   "metadata": [{ "access": "write" }]
   },
   {
    "unique-id": "translation-cache-write",
