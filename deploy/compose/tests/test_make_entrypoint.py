@@ -54,6 +54,7 @@ class Docker:
         self.missing = set()
         self.context = "fixture-docker"
         self.gpu_driver_ok = self.gpu_compute_ok = True
+        self.fail_bridge_lookup = False
 
     def __call__(self, args, *, env=None, capture=False, check=True):
         args = list(args)
@@ -85,7 +86,8 @@ class Docker:
         elif args[:3] == ["docker", "context", "show"]:
             out = self.context
         elif args[:2] == ["ifconfig", "bridge100"]:
-            out = "bridge100: flags=...\n\tinet 192.168.139.3 netmask 0xfffffe00 broadcast 192.168.139.255\n"
+            code = int(self.fail_bridge_lookup)
+            out = "" if code else "bridge100: flags=...\n\tinet 192.168.139.3 netmask 0xfffffe00 broadcast 192.168.139.255\n"
         elif args[:2] == ["docker", "ps"]:
             out = "existing-container" if self.containers else ""
         elif args[:2] == ["docker", "inspect"]:
@@ -171,14 +173,14 @@ class EntryPointTest(unittest.TestCase):
     def test_orbstack_native_viegem_fails_closed_without_bridge_address(self):
         self.docker.config["services"]["admin-api"]["environment"]["TINA_VIEGEM_TOKEN"] = "fixture-token" * 4
         self.docker.context = "orbstack"
+        self.docker.fail_bridge_lookup = True
         with patch.object(stack.platform, "system", return_value="Darwin"), \
              patch.object(stack.platform, "machine", return_value="arm64"), \
-             patch.dict(os.environ, {"TINA_VIEGEM_DEVICE": "mps"}):
+             patch.dict(os.environ, {"TINA_VIEGEM_DEVICE": "mps"}), \
+             patch.object(stack, "_dotenvx_key_file", return_value=Path("/private/fixture.keys")):
             selected = stack.Stack("plan")
-        with patch.object(stack, "run", return_value=subprocess.CompletedProcess([], 1, "", "")), \
-             patch.object(stack, "_dotenvx_key_file", return_value=Path("/private/fixture.keys")), \
-             self.assertRaisesRegex(stack.StackError, "bridge100 address"):
-            selected.native_viegem("register")
+            with self.assertRaisesRegex(stack.StackError, "bridge100 address"):
+                selected.native_viegem("register")
 
     def test_container_viegem_skips_native_setup_on_all_hosts(self):
         self.docker.config["services"]["admin-api"]["environment"]["TINA_VIEGEM_TOKEN"] = "fixture-token" * 4
