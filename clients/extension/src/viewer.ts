@@ -248,9 +248,21 @@ function openDestination(destination: 'terminal' | 'dashboard'): void {
 }
 
 function showSettings(show: boolean): void {
-  $('settings').hidden = !show;
-  $('viewer').hidden = show;
-  $('settings').setAttribute('aria-hidden', String(!show));
+  const settings = $('settings');
+  const viewer = $('viewer');
+  if (show) {
+    settings.hidden = false;
+    settings.inert = false;
+    viewer.hidden = true;
+    viewer.inert = true;
+    $('backBtn').focus();
+  } else {
+    viewer.hidden = false;
+    viewer.inert = false;
+    $('gearBtn').focus();
+    settings.hidden = true;
+    settings.inert = true;
+  }
 }
 
 async function init(): Promise<void> {

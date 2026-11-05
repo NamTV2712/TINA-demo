@@ -51,7 +51,7 @@ class Workers:
         self.identity_env = selected.services["admin-api"]["environment"]
     def endpoint(self, backend):
         if backend == "viegem" and self.selected.viegem_device == "mps":
-            return "http://127.0.0.1:18005"
+            return self.selected.native_viegem_access()[1]
         return self.selected.endpoint(backend, 8000)
     def credential(self, backend):
         if backend == "viegem":
@@ -258,6 +258,19 @@ def instance_of(selected):
     return hashlib.sha256((str(selected.env_file.resolve()) + "\0" + selected.project).encode()).hexdigest()[:20]
 
 
+def bootstrap_launchagent(agent: Path):
+    import stack
+    args = ["launchctl", "bootstrap", f"gui/{os.getuid()}", str(agent)]
+    for attempt in range(5):
+        result = stack.run(args, capture=True, check=False)
+        if result.returncode == 0:
+            return
+        if result.returncode != 5 or attempt == 4:
+            break
+        time.sleep(1)
+    raise ControlError(503, "Could not start the owned ASR controller LaunchAgent")
+
+
 def handler(controller, key):
     class Handler(BaseHTTPRequestHandler):
         def setup(self):
@@ -344,9 +357,7 @@ def install(selected):
                 "EnvironmentVariables": {"PATH": os.environ["PATH"]},
                 "StandardOutPath": str(log_dir / "stdout.log"), "StandardErrorPath": str(log_dir / "stderr.log")}
         agent.write_bytes(plistlib.dumps(body)); agent.chmod(0o600)
-        result = stack.run(["launchctl", "bootstrap", f"gui/{os.getuid()}", str(agent)], capture=True, check=False)
-        if result.returncode:
-            raise ControlError(503, "Could not start the owned ASR controller LaunchAgent")
+        bootstrap_launchagent(agent)
     else:
         # WSL2 has no launchd; detached controller persists across terminal close, make all restores after reboot.
         clean_env = {k: v for k, v in os.environ.items() if not any(x in k for x in ("SECRET", "TOKEN", "PRIVATE_KEY"))}

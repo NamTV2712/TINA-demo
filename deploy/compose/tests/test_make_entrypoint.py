@@ -54,6 +54,7 @@ class Docker:
         self.missing = set()
         self.context = "fixture-docker"
         self.gpu_driver_ok = self.gpu_compute_ok = True
+        self.fail_bridge_lookup = False
 
     def __call__(self, args, *, env=None, capture=False, check=True):
         args = list(args)
@@ -84,6 +85,9 @@ class Docker:
             code = int(not self.gpu_compute_ok)
         elif args[:3] == ["docker", "context", "show"]:
             out = self.context
+        elif args[:2] == ["ifconfig", "bridge100"]:
+            code = int(self.fail_bridge_lookup)
+            out = "" if code else "bridge100: flags=...\n\tinet 192.168.139.3 netmask 0xfffffe00 broadcast 192.168.139.255\n"
         elif args[:2] == ["docker", "ps"]:
             out = "existing-container" if self.containers else ""
         elif args[:2] == ["docker", "inspect"]:
@@ -139,21 +143,44 @@ class EntryPointTest(unittest.TestCase):
 
     def test_native_viegem_prepares_before_build_and_registers_before_access(self):
         self.docker.config["services"]["admin-api"]["environment"]["TINA_VIEGEM_TOKEN"] = "fixture-token" * 4
+        self.docker.config["services"]["admin-api"]["environment"]["INTERNAL_API_SECRET"] = "internal-fixture-secret"
+        self.docker.context = "orbstack"
         with patch.object(stack.platform, "system", return_value="Darwin"), \
              patch.object(stack.platform, "machine", return_value="arm64"), \
-             patch.object(stack, "_dotenvx_key_file", return_value=Path("/private/fixture.keys")):
+             patch.object(stack, "_dotenvx_key_file", return_value=Path("/private/fixture.keys")), \
+             patch.dict("sys.modules", {"asr_control": type("Control", (), {
+                 "install": staticmethod(lambda _selected: self.docker.calls.append((["asr-control", "install"], {})))
+             })()}):
             self.invoke("all")
         calls = [args for args, _ in self.docker.calls]
         native = {args[-1]: i for i, args in enumerate(calls) if any(str(a).endswith("native_viegem.py") for a in args)}
         build = next(i for i, args in enumerate(calls) if "build" in args and "agent-worker" in args)
         up = next(i for i, args in enumerate(calls) if "up" in args)
+        controller = next(i for i, args in enumerate(calls) if args[:2] == ["asr-control", "install"])
         access = next(i for i, args in enumerate(calls) if args[0].endswith("/provision-token"))
         self.assertLess(native["prepare"], build)
         self.assertLess(build, native["start"])
-        self.assertLess(native["start"], up)
-        self.assertLess(up, native["register"])
+        self.assertLess(up, controller)
+        self.assertLess(controller, native["start"])
+        self.assertLess(native["start"], native["register"])
         self.assertLess(native["register"], access)
         self.assertFalse(any("fixture-token" in str(args) for args in calls))
+        start_env = next(env for args, env in self.docker.calls
+                         if any(str(a).endswith("native_viegem.py") for a in args) and args[-1] == "start")
+        self.assertEqual(start_env["TINA_VIEGEM_HOST"], "192.168.139.3")
+        self.assertEqual(start_env["TINA_VIEGEM_URL"], "http://192.168.139.3:18005")
+
+    def test_orbstack_native_viegem_fails_closed_without_bridge_address(self):
+        self.docker.config["services"]["admin-api"]["environment"]["TINA_VIEGEM_TOKEN"] = "fixture-token" * 4
+        self.docker.context = "orbstack"
+        self.docker.fail_bridge_lookup = True
+        with patch.object(stack.platform, "system", return_value="Darwin"), \
+             patch.object(stack.platform, "machine", return_value="arm64"), \
+             patch.dict(os.environ, {"TINA_VIEGEM_DEVICE": "mps"}), \
+             patch.object(stack, "_dotenvx_key_file", return_value=Path("/private/fixture.keys")):
+            selected = stack.Stack("plan")
+            with self.assertRaisesRegex(stack.StackError, "bridge100 address"):
+                selected.native_viegem("register")
 
     def test_container_viegem_skips_native_setup_on_all_hosts(self):
         self.docker.config["services"]["admin-api"]["environment"]["TINA_VIEGEM_TOKEN"] = "fixture-token" * 4

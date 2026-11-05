@@ -82,8 +82,10 @@ export TINA_VIEGEM_DEVICE=mps
 sh deploy/transcription/viegem/start.sh
 ```
 
-Default address is `127.0.0.1:18005`. Docker-hosted TINA reaches it using
-`http://host.docker.internal:18005`. Configure the managed registry below with the same token.
+The standalone default address is `127.0.0.1:18005`. `make all` keeps the native MPS worker on
+loopback for Docker Desktop; with OrbStack it binds only to OrbStack's private `bridge100` address
+and registers that address for Docker-hosted TINA. The bearer token remains required. Configure the
+managed registry with the same token.
 The server accepts the original model ID, `custom`, and the legacy `whisper-1` alias.
 `/health`, `/status`, `/capabilities`, `/v1/models` and authenticated
 `POST /v1/audio/transcriptions` match the existing worker contract.
