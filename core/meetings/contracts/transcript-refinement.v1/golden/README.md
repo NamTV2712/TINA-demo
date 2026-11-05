@@ -8,3 +8,6 @@
 
 `PreparedAudio.json` covers opt-in bounded gain with distinct original/prepared
 input hashes and last-attempt HTTP duration. No original recording is modified.
+
+`TextAudioReview.json` covers separate source and second-pass checks. Repeated text
+coincides with mostly quiet original audio; this stays an advisory, unapplied proposal.

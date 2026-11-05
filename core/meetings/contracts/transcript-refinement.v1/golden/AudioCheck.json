@@ -21,7 +21,8 @@
         ],
         "rms": 0,
         "clipping_ratio": 0,
-        "quiet_ratio": 1
+        "quiet_ratio": 1,
+        "text_check": "no_text_flags"
       }
     }
   ]

@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useId, useRef, useState } from "react";
 import { transcriptDiff } from "./transcript-diff";
+import { TranscriptQualityEvidence, type TranscriptQuality } from "./transcript-quality";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 
@@ -17,11 +18,10 @@ export function reconcileReviewDraft(current: Draft | null, segments: Segment[],
   return !reset && current && next?.segment_id === current.segment_id && current.text !== current.base_text
     ? current : draftFor(next);
 }
-const qualityLabels: Record<string, string> = { low_volume: "Low volume", clipping: "Audio clipping", mostly_quiet: "Mostly quiet audio", repetition: "Repeated words - listen to verify" };
 const preparationLabels: Record<string, string> = { not_low_volume: "Original volume was suitable.", low_signal: "Signal was too faint for safe volume adjustment.", mostly_quiet: "Mostly quiet audio was left unchanged.", clipping: "Clipped audio was left unchanged.", peak_limited: "Volume adjustment was limited by an audio peak." };
 interface Job {
   id: string; status: string; model: string; backend: string; error?: string; backend_sha256?: string;
-  items: Array<{ segment_id: string; state: string; expected_revision: number; text?: string; reason?: string; error_code?: string; retryable?: boolean; attempts?: number; preprocessing?: { applied: boolean; gain_db: number; reason: string }; quality?: { needs_review: boolean; reasons: string[] } }>;
+  items: Array<{ segment_id: string; state: string; expected_revision: number; text?: string; reason?: string; error_code?: string; retryable?: boolean; attempts?: number; preprocessing?: { applied: boolean; gain_db: number; reason: string }; quality?: TranscriptQuality; proposal_quality?: TranscriptQuality }>;
 }
 interface AlignedWord { index: number; text: string; start_ms: number | null; end_ms: number | null; aligned: boolean; speaker_id?: string | null; speaker_name?: string; speaker_source?: string }
 interface AlignmentItem { segment_id: string; state: string; expected_revision: number; audio_sha256?: string; words?: AlignedWord[]; phrases?: Array<{ speaker_id: string | null; speaker_name: string; text: string; start_ms: number | null; end_ms: number | null; word_indices: number[] }>; reason?: string }
@@ -62,7 +62,7 @@ export function TranscriptReview({ meetingId, onSaved }: { meetingId: string; on
     ? `${base}/alignment/${encodeURIComponent(selected)}/audio`
     : `${base}/segments/${encodeURIComponent(selected)}/audio`;
   const changed = (s: Segment) => s.text !== s.raw_text || job?.items.some(i => i.segment_id === s.segment_id && i.state === "ready" && i.text !== s.text);
-  const flagged = (s: Segment) => job?.items.some(i => i.segment_id === s.segment_id && i.expected_revision === s.revision && i.quality?.needs_review);
+  const flagged = (s: Segment) => job?.items.some(i => i.segment_id === s.segment_id && i.expected_revision === s.revision && (i.quality?.needs_review || i.proposal_quality?.needs_review));
   const visible = doc?.segments.filter(s => (!changedOnly || changed(s)) && (!flaggedOnly || flagged(s))) ?? [];
   const editable = !!doc && ["completed", "failed", "interrupted"].includes(doc.status);
   const active = activeJob(job);
@@ -195,7 +195,7 @@ export function TranscriptReview({ meetingId, onSaved }: { meetingId: string; on
     <p role="status">{alignmentJob ? `${alignmentJob.status} · ${alignmentJob.items.filter(i => i.state !== "pending").length}/${alignmentJob.items.length} segments · ${alignmentJob.model}${alignmentJob.error ? " · " + alignmentJob.error : ""}` : alignment?.available ? "Word timestamps are optional and use the immutable raw ASR text." : "Configure the self-hosted MFA Vietnamese alignment worker to enable word playback."}</p>
     <label><input type="checkbox" checked={changedOnly} disabled={busy} onChange={e => { setChangedOnly(e.target.checked); if (e.target.checked && segment && !changed(segment)) pick(doc?.segments.find(changed)); }} /> Only changed segments</label>
     <label><input type="checkbox" checked={flaggedOnly} disabled={busy} onChange={e => { setFlaggedOnly(e.target.checked); if (e.target.checked && segment && !flagged(segment)) pick(doc?.segments.find(s => flagged(s) && (!changedOnly || changed(s)))); }} /> Only segments needing review</label>
-    <p>Audio flags are advisory. Quiet audio and repeated words may be intentional; listen before applying changes.</p>
+    <p>Checks compare text warnings with original audio. They do not prove hallucination. Listen before applying changes.</p>
     <p>{visible.length} / {doc?.segments.length ?? 0} segments</p>
     {doc && visible.length === 0 && <p>{flaggedOnly ? "No current segments flagged. Run Check audio to assess saved clips." : changedOnly ? "No changed segments." : "No confirmed transcript yet."}</p>}
     {visible.length > 0 && <label>Segment<select style={field} value={visible.some(s => s.segment_id === selected) ? selected : ""} disabled={busy} onChange={e => pick(doc?.segments.find(s => s.segment_id === e.target.value))}>
@@ -216,7 +216,11 @@ export function TranscriptReview({ meetingId, onSaved }: { meetingId: string; on
           </div>)}
         </div> : alignmentItem && alignmentItem.state !== "aligned" ? <p>{alignmentItem.reason || "No reliable word alignment is available for this segment."}</p> : null}
         {item?.text && <><h3>Suggested changes</h3><p aria-label="Suggested changes">{transcriptDiff(before, item.text).map((part, i) => part.kind === "add" ? <ins key={i} style={{ background: "#245d4d", color: "#c6ffe7" }}>{part.text} </ins> : part.kind === "remove" ? <del key={i} style={{ background: "#5c3030", color: "#ffd2c8" }}>{part.text} </del> : <span key={i}>{part.text} </span>)}</p></>}
-        {item?.quality && !stale && <p role="status">{item.quality.needs_review ? "Needs review: " + item.quality.reasons.map(r => qualityLabels[r] ?? r).join(" · ") : "No configured audio quality flags detected."}</p>}
+        {item?.quality && !stale && item.state !== "applied" && <TranscriptQualityEvidence quality={item.quality} label="Source" />}
+        {item?.proposal_quality && !stale && (item.state === "ready" || (item.state === "applied" && segment.revision === item.expected_revision + 1 && segment.text === item.text)) && <>
+          <TranscriptQualityEvidence quality={item.proposal_quality} label="Suggestion" />
+          {item.state === "ready" && item.proposal_quality.needs_review && <p>The suggestion also needs review. Compare it with the audio before Apply; it has not replaced your transcript.</p>}
+        </>}
         {item?.preprocessing && !stale && <p>{item.preprocessing.applied ? `ASR used audio boosted by ${item.preprocessing.gain_db} dB. Playback uses the original.` : preparationLabels[item.preprocessing.reason] ?? "Original audio was used."}</p>}
         {item && <p>{stale ? "Transcript changed. Run refinement again." : item.reason || (item.text === segment.text ? "No text changes." : "Suggestions may contain mistakes. Listen before applying.")}</p>}
         {item?.state === "ready" && <button disabled={busy || active || !editable || draftConflict || stale || draft !== segment.text || item.text === segment.text} onClick={() => void refine("apply")}>Apply refinement</button>}

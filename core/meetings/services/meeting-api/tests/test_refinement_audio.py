@@ -2,14 +2,59 @@ from array import array
 import hashlib
 import io
 import sys
+import unicodedata
 import wave
 
 import pytest
 
-from meeting_api.collector.audio_quality import assess_audio, prepare_audio
+from meeting_api.collector.audio_quality import assess_audio, assess_text, prepare_audio
 from meeting_api.collector.refinement import _decode
 from meeting_api.collector.refinement_eval import text_metrics
 from test_bot_refinement import audio
+
+
+@pytest.mark.parametrize("amplitude,text,check", [
+    (0, "TINA, TINA. TINA! TINA?", "text_and_quiet_audio"),
+    (70, "TINA, TINA. TINA! TINA?", "text_flag"),  # Low volume alone is not corroboration.
+    (1000, "má, má. má! má?", "text_flag"),
+    (1000, unicodedata.normalize("NFD", "má má má má"), "text_flag"),
+    (0, "… !!!", "text_and_quiet_audio"),
+    (1000, "… !!!", "text_flag"),
+    (0, "Dạ", "no_text_flags"),
+    (1000, "ma má mà mạ", "no_text_flags"),
+    (1000, "7", "no_text_flags"),
+    (1000, "OK", "no_text_flags"),
+    (1000, "TINA dùng API-v2 và C++", "no_text_flags"),
+])
+def test_text_audio_evidence_keeps_accents_short_replies_and_numbers(amplitude, text, check):
+    original = audio(amplitude)
+    quality = assess_audio(original, text)
+    assert quality["text_check"] == check
+    assert ("repetition" in quality["reasons"]) == ("TINA," in text or "má," in text or "ma\u0301" in text)
+    assert original == audio(amplitude)
+
+
+def test_proposal_reuses_original_acoustics_without_carrying_source_text_flags():
+    source = assess_audio(audio(0), "má má má má")
+    corrected = assess_text(source, "Dạ")
+    assert source["text_check"] == "text_and_quiet_audio"
+    assert corrected["text_check"] == "no_text_flags"
+    assert corrected["reasons"] == ["low_volume", "mostly_quiet"]
+    assert all(corrected[key] == source[key] for key in ("rms", "clipping_ratio", "quiet_ratio"))
+
+
+def test_quiet_frame_coincidence_can_include_real_audible_speech():
+    samples = array("h", [0] * 44800 + [2000, -2000] * 1600)
+    if sys.byteorder != "little":
+        samples.byteswap()
+    out = io.BytesIO()
+    with wave.open(out, "wb") as wav:
+        wav.setnchannels(1); wav.setsampwidth(2); wav.setframerate(16000)
+        wav.writeframes(samples.tobytes())
+    quality = assess_audio(out.getvalue(), "Dạ, dạ. Dạ! Dạ?")
+    assert quality["text_check"] == "text_and_quiet_audio"
+    assert quality["quiet_ratio"] > .9
+    assert quality["rms"] > .003  # Audio has a real nonzero burst; no absence-of-speech verdict.
 
 
 def pcm(content):

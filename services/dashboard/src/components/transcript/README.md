@@ -1,5 +1,13 @@
 # Transcript review components
 
+`transcript-quality.tsx` presents source and second-pass checks separately, explaining
+text-only warnings versus warnings coinciding with mostly quiet original audio.
+Expandable details show the original RMS/quiet-frame/clipping values; energy never
+proves absent speech. The revision-bound review filter includes flagged suggestions
+even when the source text was unflagged. Edits hide obsolete checks; after Apply only
+evidence matching the exact applied revision/text is shown. Legacy jobs are supported.
+All suggestions still require explicit owner Apply and can be restored.
+
 Owner-facing transcript display, revision diff and recording review. Check audio
 measures bounded saved bot clips without inference; Refine flagged segments decodes
 only clips with advisory RMS/clipping/quiet-frame/repetition flags. Filters compare

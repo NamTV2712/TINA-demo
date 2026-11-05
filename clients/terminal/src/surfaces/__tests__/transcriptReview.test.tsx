@@ -339,6 +339,33 @@ it("checks audio without ASR and filters quality flags by current revision", asy
   expect(screen.queryByRole("button", { name: "Apply refinement" })).toBeNull();
 });
 
+it("includes a flagged second-pass suggestion in review and hides evidence after the source changes", async () => {
+  let doc = { status: "completed", segments: [{ ...segment, audio: [{ kind: "recording-span" }] }] };
+  const quality = { needs_review: false, reasons: [], text_check: "no_text_flags", rms: .02, quiet_ratio: 0, clipping_ratio: 0 };
+  const job = { id: "second-pass", status: "completed", model: "custom", backend: "viegem", items: [{
+    segment_id: "s/1", expected_revision: 0, state: "ready", text: "TINA TINA TINA TINA", quality,
+    proposal_quality: { ...quality, needs_review: true, reasons: ["repetition"], text_check: "text_flag" },
+  }] };
+  fetchMock.mockImplementation(async (url: string, init?: RequestInit) => ({ ok: true, json: async () => {
+    if (init?.method === "PATCH") doc = { ...doc, segments: [{ ...doc.segments[0], text: "Owner correction", revision: 1 }] };
+    return url.endsWith("/refinement") ? job : url.endsWith("/alignment") ? { available: false, job: null } : doc;
+  } }));
+  render(<TranscriptReview meetingId="42" />);
+  fireEvent.click(screen.getByRole("button", { name: "Review transcript" }));
+  await screen.findByRole("region", { name: "Suggestion checks" });
+  expect(screen.getByText(/Text warning without mostly quiet audio/)).toBeTruthy();
+  expect(screen.getByText(/The suggestion also needs review/)).toBeTruthy();
+  expect(screen.getByLabelText(/Corrected transcript/)).toHaveProperty("value", segment.text);
+  expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+  fireEvent.click(screen.getByLabelText("Only segments needing review"));
+  expect(screen.getByRole("option", { name: /Review/ })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Apply refinement" })).toHaveProperty("disabled", false);
+  fireEvent.change(screen.getByLabelText(/Corrected transcript/), { target: { value: "Owner correction" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save revision" }));
+  await screen.findByText(/No current segments flagged/);
+  expect(screen.queryByRole("region", { name: "Suggestion checks" })).toBeNull();
+});
+
 it("retries the saved job without replacing vocabulary or successful suggestions", async () => {
   const doc = { status: "completed", segments: [{ ...segment, audio: [{ kind: "recording-span" }] }, { ...segment, segment_id:"failed", audio:[{kind:"recording-span"}] }] };
   const kept = { segment_id:"s/1", expected_revision:0, state:"ready", text:"API thứ Sáu." };

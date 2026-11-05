@@ -4,6 +4,7 @@ import hashlib
 import io
 import math
 import sys
+import unicodedata
 import wave
 
 
@@ -18,6 +19,36 @@ def _read_pcm(content: bytes) -> array:
     if sys.byteorder != "little":
         pcm.byteswap()
     return pcm
+
+
+def assess_text(acoustics: dict, text: str) -> dict:
+    """Compare text cues with original-clip energy, never classify or delete speech.
+
+    A quiet-frame coincidence is advisory, not independent proof of non-speech.
+    No length/language/phrase blacklist: short replies, names and numbers are valid.
+    """
+    reasons = [r for r in acoustics["reasons"] if r in ("low_volume", "clipping", "mostly_quiet")]
+    # NFC keeps Vietnamese accents intact, including decomposed input. Punctuation
+    # must not hide a loop; retain symbols inside words (e.g. API-v2, R&D).
+    tokens = []
+    for token in unicodedata.normalize("NFC", text).casefold().split():
+        first, last = 0, len(token)
+        while first < last and not token[first].isalnum():
+            first += 1
+        while last > first and not token[last - 1].isalnum():
+            last -= 1
+        if first < last:
+            tokens.append(token[first:last])
+    repeated = any(tokens[i:i + size] * 4 == tokens[i:i + size * 4]
+                   for size in range(1, min(10, len(tokens) // 4) + 1)
+                   for i in range(len(tokens) - size * 4 + 1))
+    if repeated:
+        reasons.append("repetition")
+    if text.strip() and not tokens:
+        reasons.append("non_lexical")
+    text_flag = repeated or "non_lexical" in reasons
+    text_check = ("text_and_quiet_audio" if "mostly_quiet" in reasons else "text_flag") if text_flag else "no_text_flags"
+    return {**acoustics, "needs_review": bool(reasons), "reasons": reasons, "text_check": text_check}
 
 
 def assess_audio(content: bytes, text: str) -> dict:
@@ -36,15 +67,8 @@ def assess_audio(content: bytes, text: str) -> dict:
         reasons.append("clipping")
     if quiet_ratio >= .8:
         reasons.append("mostly_quiet")
-    # Preserve Vietnamese diacritics. Repetition flags are advisory, including real repeated speech.
-    words = text.casefold().split()
-    repeated = any(words[i:i + size] * 4 == words[i:i + size * 4]
-                   for size in range(1, min(10, len(words) // 4) + 1)
-                   for i in range(len(words) - size * 4 + 1))
-    if repeated:
-        reasons.append("repetition")
-    return {"needs_review": bool(reasons), "reasons": reasons, "rms": round(rms, 6),
-            "clipping_ratio": round(clipping, 6), "quiet_ratio": round(quiet_ratio, 4)}
+    return assess_text({"rms": round(rms, 6), "reasons": reasons,
+                        "clipping_ratio": round(clipping, 6), "quiet_ratio": round(quiet_ratio, 4)}, text)
 
 
 def prepare_audio(content: bytes) -> tuple[bytes, dict]:

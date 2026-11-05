@@ -18,7 +18,7 @@ import wave
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, field_validator
 
-from .audio_quality import assess_audio, prepare_audio
+from .audio_quality import assess_audio, assess_text, prepare_audio
 from .transcript_document import Correction, CorrectionConflict, normalize
 
 ACTIVE = ("running", "paused", "cancelling")
@@ -332,7 +332,13 @@ class BotRefiner:
                                     raise ValueError("Invalid ASR result")
                                 if job["status"] == "cancelling":
                                     break
-                                item.update(state="ready", text=text, audio_sha256=hashlib.sha256(audio).hexdigest())
+                                # Judge the proposal against the same ORIGINAL clip, not
+                                # boosted input. A second ASR pass can also hallucinate.
+                                proposal_quality = await asyncio.to_thread(assess_text, item["quality"], text)
+                                if job["status"] == "cancelling":
+                                    break
+                                item.update(state="ready", text=text, audio_sha256=hashlib.sha256(audio).hexdigest(),
+                                            proposal_quality=proposal_quality)
                             except Exception as exc:
                                 code, reason = asr_failure(exc)
                                 item.update(state="failed", error_code=code, retryable=True, reason=reason)

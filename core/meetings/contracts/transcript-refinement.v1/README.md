@@ -63,6 +63,26 @@ valid only at their expected text revision. New checks replace the latest job vi
 just like an ordinary refinement start; previously accepted revisions remain intact.
 Source audio and the original transcript remain immutable.
 
+### Text/audio comparison and second-pass checks
+
+Bot `quality` optionally includes `text_check`: `no_text_flags`, `text_flag`, or
+`text_and_quiet_audio`. Text cues are four consecutive repetitions of 1-10 tokens
+(NFC/casefold with token-edge punctuation trimmed, accents retained), or nonempty
+text without letters/numbers (`non_lexical`, an additional advisory reason).
+Short replies, proper names and numbers have no minimum length rule or blacklist.
+The combined cue requires a text warning AND >=80% quiet original 20 ms frames;
+low RMS or clipping alone is insufficient. Energy is not a speech classifier, so
+even combined cues never prove hallucination or authorize deletion.
+
+Ready bot items optionally include `proposal_quality` with the same diagnostic shape.
+It evaluates the suggested text against the original clip's acoustic metrics, not
+boosted ASR input, and does not inherit text warnings from the source. Legacy jobs
+and Desktop may omit these fields. Both review clients include source/proposal
+warnings in their current-revision filter, label each separately, and hide obsolete
+checks after a text edit. After Apply, only proposal evidence matching the exact
+applied revision/text remains visible. There is no automatic deletion or Apply.
+`golden/TextAudioReview.json` demonstrates a second-pass warning on quiet audio.
+
 ## Manual retry of failed bot ASR segments
 
 POST `/by-id/{id}/refinement/start` with `{"retry_job_id":"latest-job-id"}`

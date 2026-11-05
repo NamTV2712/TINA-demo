@@ -97,3 +97,11 @@ default and disabled during work/live meetings. Only ASR start requests include 
 opt-in; Check audio still measures the original and retry sends only the saved job ID.
 Proposals explain whether limited gain was used or why original audio was retained.
 The audio player always uses the original recording for owner comparison.
+
+`transcript-quality.tsx` presents the meetings-owned source/proposal checks separately.
+It explains text-only cues versus cues coinciding with mostly quiet audio, with
+optional original RMS/quiet-frame/clipping details. These never assert absent speech.
+The review filter includes a flagged second-pass suggestion at its exact source
+revision, even when source text was unflagged. Stale evidence is hidden after edits;
+after Apply only evidence matching the applied proposal/revision remains visible.
+Legacy jobs without text/proposal checks remain readable. Apply stays explicit.

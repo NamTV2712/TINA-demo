@@ -143,6 +143,17 @@ and `flagged` (measure every eligible clip and decode only flagged ones). All mo
 the existing source clock, ownership, pause/cancel, revision and audio-hash protections.
 No raw text/audio is changed; only ready ASR proposals can be explicitly applied.
 
+Text/audio comparison also flags non-lexical text and repetition after Unicode NFC,
+case folding and trimming token-edge punctuation. Vietnamese accents are preserved;
+short replies, names and numbers are not rejected based on length. `text_check`
+distinguishes no text cues, text-only cues and text cues coinciding with >=80% quiet
+frames. Low volume or clipping alone never produces that last assessment. Quiet-frame
+energy is not VAD or independent proof of absent speech; all results are advisory.
+Every ready second-pass suggestion has its own `proposal_quality`, recomputed from
+its text and the same ORIGINAL-clip acoustic metrics, even when gain was used for
+inference. Neither suspected text nor audio is removed. Check/flagged modes, saved
+proposals, retry and revision-safe explicit Apply/Restore keep their existing flow.
+
 Refinement start also accepts `retry_job_id` for explicit failed-only retry. A new
 CAS-admitted job preserves settled proposals, mode and vocabulary, refreshes credentials
 for the same endpoint/model/backend hash, and checks failed clips against their original

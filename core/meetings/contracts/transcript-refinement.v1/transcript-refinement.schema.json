@@ -92,47 +92,7 @@
             "type": "string"
           },
           "quality": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-              "needs_review",
-              "reasons",
-              "rms",
-              "clipping_ratio",
-              "quiet_ratio"
-            ],
-            "properties": {
-              "needs_review": {
-                "type": "boolean"
-              },
-              "reasons": {
-                "type": "array",
-                "uniqueItems": true,
-                "items": {
-                  "enum": [
-                    "low_volume",
-                    "clipping",
-                    "mostly_quiet",
-                    "repetition"
-                  ]
-                }
-              },
-              "rms": {
-                "type": "number",
-                "minimum": 0,
-                "maximum": 1
-              },
-              "clipping_ratio": {
-                "type": "number",
-                "minimum": 0,
-                "maximum": 1
-              },
-              "quiet_ratio": {
-                "type": "number",
-                "minimum": 0,
-                "maximum": 1
-              }
-            }
+            "$ref": "#/$defs/quality"
           },
           "error_code": {
             "enum": [
@@ -196,6 +156,10 @@
               }
             },
             "description": "Prepared ASR input fingerprint. The item audio_sha256 still identifies the unchanged original clip."
+          },
+          "proposal_quality": {
+            "$ref": "#/$defs/quality",
+            "description": "Second-pass text checked against the same original audio metrics. Suggestions may also need review; no automatic Apply or removal."
           }
         },
         "allOf": [
@@ -363,6 +327,58 @@
         "expected_revision": {
           "type": "integer",
           "minimum": 0
+        }
+      }
+    },
+    "quality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "needs_review",
+        "reasons",
+        "rms",
+        "clipping_ratio",
+        "quiet_ratio"
+      ],
+      "properties": {
+        "needs_review": {
+          "type": "boolean"
+        },
+        "reasons": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "low_volume",
+              "clipping",
+              "mostly_quiet",
+              "repetition",
+              "non_lexical"
+            ]
+          }
+        },
+        "rms": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "clipping_ratio": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "quiet_ratio": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "text_check": {
+          "enum": [
+            "no_text_flags",
+            "text_flag",
+            "text_and_quiet_audio"
+          ],
+          "description": "Advisory text/energy comparison on the original clip. Mostly quiet frames are not evidence of absent speech. No confidence score or deletion decision."
         }
       }
     }

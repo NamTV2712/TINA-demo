@@ -8,6 +8,7 @@ import pytest
 from fastapi import FastAPI
 
 from meeting_api.collector.app import build_router
+from meeting_api.collector.audio_quality import assess_audio
 from meeting_api.collector.fakes import InMemoryTranscriptStore
 from meeting_api.collector.refinement import BotRefiner, RefinementOptions
 from meeting_api.collector.transcript_document import document
@@ -212,6 +213,25 @@ async def test_quality_modes_preserve_original(monkeypatch, mode, amplitude, exp
             assert result.status_code == 409
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("text", ["TINA, TINA. TINA! TINA?", "… !!!"])
+async def test_text_only_flags_trigger_selective_asr_with_normal_energy(monkeypatch, text):
+    client, store, _, worker, calls = await fixture(monkeypatch)
+    store._meetings[1]["segments"]["s/1"]["text"] = text
+    async def clip(*args):
+        return audio(1000)
+    monkeypatch.setattr(worker, "clip", clip)
+    async with client:
+        await client.post("/transcripts/by-id/1/refinement/start", json={"mode": "flagged"})
+        await worker.task
+        item = (await worker.current(7, 1))["items"][0]
+        assert len(calls) == 1 and item["state"] == "ready"
+        assert item["quality"]["text_check"] == "text_flag"
+        assert item["proposal_quality"]["text_check"] == "no_text_flags"
+        assert not item["proposal_quality"]["needs_review"]
+        assert (await store.get_transcript_document(7, 1))["segments"][0]["text"] == text
+
+
 def request_audio(request):
     from email.parser import BytesParser
     message = BytesParser().parsebytes(b"Content-Type: " + request.headers["content-type"].encode() + b"\r\n\r\n" + request.content)
@@ -242,6 +262,8 @@ async def test_prepared_asr_keeps_original_playback_apply_hash_and_restore(monke
         assert job["audio_preprocessing"] == ("bounded-gain.v1" if opt_in else "none")
         assert item["audio_sha256"] == hashlib.sha256(original).hexdigest()
         assert item["asr_elapsed_ms"] >= 0
+        assert item["proposal_quality"]["rms"] == item["quality"]["rms"]
+        assert item["quality"]["rms"] == assess_audio(original, "")["rms"]
         assert (sent != original) == opt_in
         if opt_in:
             assert item["preprocessing"]["audio_sha256"] == hashlib.sha256(sent).hexdigest()
@@ -380,6 +402,82 @@ async def fixture(monkeypatch):
     refiner = BotRefiner(store, repo, storage, backend)
     app = FastAPI(); app.include_router(build_router(store, None, refiner=refiner))
     return original(transport=httpx.ASGITransport(app=app), base_url="http://api.test", headers=HEADERS), store, storage, refiner, calls
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("amplitude,suggestion,expected", [
+    (0, "TINA, TINA. TINA! TINA?", "text_and_quiet_audio"),
+    (1000, "TINA, TINA. TINA! TINA?", "text_flag"),
+    (1000, "7", "no_text_flags"),
+])
+async def test_second_pass_flags_are_durable_advisory_and_never_auto_applied(monkeypatch, amplitude, suggestion, expected):
+    import json
+    from pathlib import Path
+    from jsonschema import validate
+
+    client, store, _, worker, _ = await fixture(monkeypatch)
+    source = audio(amplitude)
+    async def clip(*args):
+        return source
+    monkeypatch.setattr(worker, "clip", clip)
+    original = type(client)
+    monkeypatch.setattr("meeting_api.collector.refinement.httpx.AsyncClient", lambda **kw: original(
+        transport=httpx.MockTransport(lambda request: httpx.Response(200, json={"text": suggestion})), **kw))
+    async with client:
+        base = "/transcripts/by-id/1"
+        before = (await client.get(base + "/document")).json()
+        assert (await client.post(base + "/refinement/start", json={})).status_code == 202
+        await worker.task
+        job = (await client.get(base + "/refinement")).json()
+        item = job["items"][0]
+        assert item["state"] == "ready" and item["text"] == suggestion
+        assert item["quality"]["text_check"] == "no_text_flags"
+        assert item["proposal_quality"]["text_check"] == expected
+        assert all(item["proposal_quality"][k] == item["quality"][k] for k in ("rms", "quiet_ratio", "clipping_ratio"))
+        assert (await client.get(base + "/document")).json() == before
+        assert (await client.get(base + "/segments/s%2F1/audio")).content == source
+        restarted = BotRefiner(store, worker.repo, worker.storage, worker.backend)
+        assert await restarted.current(7, 1) == job
+        assert (await client.get(base + "/refinement", headers={"x-user-id": "8"})).status_code == 404
+        schema = Path(__file__).parents[3] / "contracts/transcript-refinement.v1/transcript-refinement.schema.json"
+        validate(job, json.loads(schema.read_text(encoding="utf8")))
+        # Even a flagged suggestion only changes the document after explicit owner Apply.
+        applied = await client.post(base + "/refinement/apply", json={"job_id": job["id"], "segment_id": "s/1", "expected_revision": 0})
+        assert applied.status_code == 200
+        assert applied.json()["segments"][0]["text"] == suggestion
+        restored = await client.patch(base + "/segments/s%2F1", json={"expected_revision": 1, "text": None})
+        assert restored.status_code == 200
+        assert restored.json()["segments"][0]["text"] == before["segments"][0]["text"]
+
+
+@pytest.mark.asyncio
+async def test_cancel_during_proposal_check_does_not_publish_a_ready_suggestion(monkeypatch):
+    import threading
+    from meeting_api.collector.audio_quality import assess_text
+
+    client, store, _, worker, _ = await fixture(monkeypatch)
+    async def clip(*args):
+        return audio(1000)
+    monkeypatch.setattr(worker, "clip", clip)
+    entered, release = asyncio.Event(), threading.Event()
+    loop = asyncio.get_running_loop()
+    def delayed_check(*args):
+        loop.call_soon_threadsafe(entered.set)
+        assert release.wait(5)
+        return assess_text(*args)
+    monkeypatch.setattr("meeting_api.collector.refinement.assess_text", delayed_check)
+    async with client:
+        await client.post("/transcripts/by-id/1/refinement/start", json={})
+        try:
+            await asyncio.wait_for(entered.wait(), 5)
+            await worker.cancel(7, 1)
+        finally:
+            release.set()
+            await worker.task
+        job = await worker.current(7, 1)
+        assert job["status"] == "cancelled"
+        assert not any(i["state"] == "ready" for i in job["items"])
+        assert (await store.get_transcript_document(7, 1))["segments"][0]["revision"] == 0
 
 
 @pytest.mark.asyncio

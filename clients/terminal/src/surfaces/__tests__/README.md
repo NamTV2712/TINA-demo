@@ -22,6 +22,10 @@ is removed after the meeting ends, or replaced with the recorded start time when
 Transcript review tests also verify the check-only request, visible advisory reason,
 quality filtering and absence of Apply for checked items.
 
+The second-pass evidence regression verifies that a normal source with a suspicious
+suggestion enters the review filter, shows separate source/suggestion checks, leaves
+the draft unchanged and sends no automatic Apply. Owner edits invalidate the evidence.
+
 The failed-refinement retry test verifies job-ID-only submission, preserved successful
 suggestions and in-flight job progress without replacing mode/vocabulary.
 

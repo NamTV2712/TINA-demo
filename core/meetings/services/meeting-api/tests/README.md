@@ -16,6 +16,20 @@ receiver, and a `fakeredis.aioredis` client.
 Audio-review coverage in `test_bot_refinement.py` checks check-only operation without
 credentials/inference, selective ASR, immutable originals, non-applicable checked items,
 quiet/clipped PCM, invalid audio and Vietnamese accent-preserving repetition flags.
+
+Text/audio evidence regressions also cover punctuation/decomposed Vietnamese loops,
+short replies/numbers, low volume without quiet-frame corroboration, and a mostly
+quiet clip containing an audible burst. These are advisory checks, not a speech
+classifier or accuracy benchmark. Second-pass tests assert separate source/proposal
+evidence, unchanged original playback/document, owner isolation, persisted reads
+after worker recreation, selective ASR for text-only flags, and explicit Apply/Restore.
+
+Local Docker/browser smoke, 2026-11-05: a disposable owner fixture paired repeated
+text with digital silence and with a normal-energy tone. Check audio returned
+`text_and_quiet_audio` versus `text_flag`, with no ASR requests or text revisions.
+Terminal and Dashboard displayed the saved checks; the source player loaded the
+3-second clip. The fixture and its storage object were removed. This validates
+the diagnostic flow, not recognition accuracy or speech detection.
 The recording integration tests require FFmpeg on PATH.
 
 Local Docker smoke, 2026-11-05: Terminal -> gateway -> Meeting API -> object storage
