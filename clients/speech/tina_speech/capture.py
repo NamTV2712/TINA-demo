@@ -46,7 +46,11 @@ class QuestionCapture:
         self.started = False
         self.finished = False
         self.after_wake = self.initial
-        self.vad.feed(self.blocks[0])
+        # KWS may report after a short question has already entered the pre-roll.
+        # Endpoint that speech too; ASR still requires wake + a nonempty question.
+        active, ended = self.vad.feed(self.blocks[0])
+        self.started = active or ended
+        self.pre_roll_ended = ended and not active
 
     def feed(self, audio):
         if self.finished:
@@ -59,9 +63,11 @@ class QuestionCapture:
             raise ValueError("Question exceeds 20 seconds")
         self.blocks.append(block.copy())
         active, ended = self.vad.feed(block)
+        if active:
+            self.pre_roll_ended = False
         if active and np.sqrt(np.mean(block ** 2)) >= .01 and self.samples > self.after_wake + 1600:
             self.started = True
-        if self.started and ended and not active:
+        if self.started and (ended or self.pre_roll_ended) and not active:
             self.finished = True
             return self.wav()
         if not self.started and self.samples - self.initial >= 5 * SAMPLE_RATE:

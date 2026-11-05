@@ -147,7 +147,7 @@ uv run --project clients/speech tina-speech setup
 uv run --project clients/speech tina-speech serve --config C:\private\tina-speech-room.json
 ```
 
-The server binds loopback port 18005. Startup verifies operator identity, active voice bot and
+The server binds loopback port 18006. Startup verifies operator identity, active voice bot and
 linked approved Wiki paths. It does not silently enroll users or discover unrelated documents.
 No default stack service, user table or agent prompt/retrieval pipeline is replaced.
 
@@ -155,7 +155,7 @@ No default stack service, user table or agent prompt/retrieval pipeline is repla
 
 In a separate host process, set **only your own** `TINA_SPEECH_USER_KEY`. Shared operator/STT/TTS
 keys never go to participants. `TINA_SPEECH_COORDINATOR_URL` defaults to
-`http://127.0.0.1:18005`; non-loopback connections require HTTPS. Multi-machine hosting/TLS
+`http://127.0.0.1:18006`; non-loopback connections require HTTPS. Multi-machine hosting/TLS
 is operator-managed. Run one coordinator process/worker for the room, and install the
 same branch on every participant host. Set `participants` to each user's real TINA user ID;
 each host uses its own enrolled user's API key. The local example lists IDs 7 and 8 as placeholders.

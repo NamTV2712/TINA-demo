@@ -17,11 +17,12 @@ QUIET = np.zeros(320, dtype=np.float32)
 
 
 class Vad:
-    def __init__(self): self.quiet = 0
+    def __init__(self): self.quiet = 0; self.spoken = False
     def feed(self, audio):
         active = bool(np.max(np.abs(audio)) >= .01)
+        self.spoken = self.spoken or active
         self.quiet = 0 if active else self.quiet + len(audio)
-        return active, self.quiet >= 12800
+        return active, self.spoken and self.quiet >= 12800
 
 
 def event():
@@ -42,13 +43,25 @@ def test_capture_keeps_immediate_question_pre_roll_and_ends_on_vad():
 
 
 def test_capture_no_speech_and_duration_are_bounded():
-    capture = QuestionCapture(event(), Vad())
+    silent = WakeEvent(32000, 0, np.zeros(32000, dtype=np.float32))
+    capture = QuestionCapture(silent, Vad())
     with pytest.raises(ValueError, match='No question'):
         for _ in range(250): capture.feed(QUIET)
     capture = QuestionCapture(event(), Vad())
     with pytest.raises(ValueError, match='20 seconds'):
         for _ in range(1001): capture.feed(VOICE)
     assert capture.samples <= 32000 + 320000 + 320
+
+
+def test_question_entirely_in_pre_roll_is_not_lost_when_kws_reports_late():
+    capture = QuestionCapture(event(), Vad())
+    for _ in range(39): assert capture.feed(QUIET) is None
+    assert capture.feed(QUIET) is not None
+
+
+def test_question_already_endpointed_in_pre_roll_completes_on_next_block():
+    vad = SimpleNamespace(feed=Mock(side_effect=[(False, True), (False, False)]))
+    assert QuestionCapture(event(), vad).feed(QUIET) is not None
 
 
 class Client:

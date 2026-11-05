@@ -78,7 +78,7 @@ def parser():
     sub.add_parser("devices", help="List input devices without recording")
     server = sub.add_parser("serve", help="Run the single-room authorized coordinator on loopback")
     server.add_argument("--config", type=Path, required=True)
-    server.add_argument("--port", type=int, default=18005)
+    server.add_argument("--port", type=int, default=18006)
     for command in ("setup", "listen", "file", "run", "run-file"):
         p = sub.add_parser(command)
         p.add_argument("--model-dir", type=Path, default=default_directory())

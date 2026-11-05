@@ -6,5 +6,6 @@ _Governed by `docs/docs/governance/architecture.mdx` (P1–P12). This folder own
 capture client. It sends the existing `capture.v1` protocol to local Desktop; it does not
 load an ASR model or replace the Terminal/Dashboard clients.
 
-[`speech`](speech/) is the optional host-only "Hey TINA" wake-word pilot. It emits local
-diagnostics and does not yet dispatch STT, agent or meeting actions.
+[`speech`](speech/) is the optional host-only "Hey TINA" wake-word pilot. `listen` and `file`
+emit local diagnostics; opt-in `run` and `run-file` submit captured questions to the room
+coordinator for STT, agent answers and shared meeting TTS.

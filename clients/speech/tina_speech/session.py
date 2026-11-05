@@ -243,5 +243,5 @@ class SpeechSession:
 
 
 def configured_client():
-    return RoomClient(os.environ.get('TINA_SPEECH_COORDINATOR_URL', 'http://127.0.0.1:18005'),
+    return RoomClient(os.environ.get('TINA_SPEECH_COORDINATOR_URL', 'http://127.0.0.1:18006'),
                       os.environ.get('TINA_SPEECH_USER_KEY', ''))
