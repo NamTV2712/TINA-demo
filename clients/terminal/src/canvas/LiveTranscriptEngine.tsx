@@ -217,6 +217,9 @@ export function LiveTranscriptEngine({
         const translated = segment.translation?.text;
         const draft = segment.completed === false;
         const originalVisible = language === "bilingual" || !translated;
+        let pendingTranslation = draft ? "Chờ đoạn nói hoàn tất…" : translationPaused ? "Chưa dịch được · bản gốc vẫn được giữ" : segment.translation?.ready ? "Đang dịch…" : "Đang gom câu…";
+        if (!draft && segment.translation?.status === "failed") pendingTranslation = "Chưa dịch được đoạn này · bấm Thử lại";
+        if (!draft && segment.translation?.status === "retrying") pendingTranslation = "Đoạn này đang chờ thử lại…";
         const playable = !!segment.id && playableSegmentIds?.has(segment.id) && !!onSegmentClick;
         return <article className={styles.turn} data-active={!!segment.id && segment.id === activeSegmentId} key={segment.translation?.groupId ?? segment.id ?? index}>
           {head(segment.speaker, segment.tsMs)}
@@ -226,7 +229,7 @@ export function LiveTranscriptEngine({
           </div>}
           <div lang="en" className={styles.english}>
             <span className={styles.languageLabel}>EN</span>
-            {translated || (draft ? "Chờ đoạn nói hoàn tất…" : translationPaused ? "Chưa dịch được · bản gốc vẫn được giữ" : segment.translation?.ready ? "Đang dịch…" : "Đang gom câu…")}
+            {translated || pendingTranslation}
           </div>
         </article>;
       })}

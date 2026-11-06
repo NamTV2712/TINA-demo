@@ -27,6 +27,12 @@ its source text. `engine.py` passes the saved `TINA_MEETING_MODEL` override to C
 (falling back to its configured completion model when absent). The shared `translation_text`
 helper removes inline reasoning and rejects unusable output before emitting a message delta.
 Failures emit no translated text and do not log the transcript or provider response body.
+The private terminal `turn-complete` marker carries an optional fixed `translation_error` code
+(see `meeting-translation.v2`); it never carries exception text. Typed adapter status and transport
+errors distinguish phrase timeout/output failure from owner-wide auth/quota/service cooldowns.
+The control plane accepts translated deltas only after a successful completion marker, discarding
+partial output on error or an interrupted stream. Deploy worker and control plane together to
+enable this classification; a legacy worker's empty result remains a conservative service error.
 The control plane owns phrase grouping, persistence, leases and retry; this worker performs
 only the tool-less translation and leaves original/canonical transcripts unchanged.
 

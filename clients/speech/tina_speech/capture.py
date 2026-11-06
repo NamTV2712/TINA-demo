@@ -63,11 +63,15 @@ class QuestionCapture:
             raise ValueError("Question exceeds 20 seconds")
         self.blocks.append(block.copy())
         active, ended = self.vad.feed(block)
+        if ended:
+            self.pre_roll_ended = True
         if active:
             self.pre_roll_ended = False
         if active and np.sqrt(np.mean(block ** 2)) >= .01 and self.samples > self.after_wake + 1600:
             self.started = True
-        if self.started and (ended or self.pre_roll_ended) and not active:
+        # VAD may have ended only the wake phrase before KWS reports it.
+        buffered_end_ready = self.pre_roll_ended and self.samples - self.initial >= 1.2 * SAMPLE_RATE
+        if self.started and buffered_end_ready and not active:
             self.finished = True
             return self.wav()
         if not self.started and self.samples - self.initial >= 5 * SAMPLE_RATE:

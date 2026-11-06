@@ -53,10 +53,10 @@ class OpenAIResponsesCompletion:
             ) as response:
                 if response.status_code in (401, 403):
                     detail = response.read().decode("utf-8", errors="replace")[:300]
-                    raise LLMAuthError(f"{response.status_code} from {self._base}: {detail}")
+                    raise LLMAuthError(f"{response.status_code} from {self._base}: {detail}", status_code=response.status_code)
                 if response.status_code >= 400:
                     detail = response.read().decode("utf-8", errors="replace")[:300]
-                    raise LLMError(f"{response.status_code} from {self._base}: {detail}")
+                    raise LLMError(f"{response.status_code} from {self._base}: {detail}", status_code=response.status_code)
                 for line in response.iter_lines():
                     if not line.startswith("data:"):
                         continue

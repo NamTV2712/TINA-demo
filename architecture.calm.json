@@ -1811,7 +1811,7 @@
    "unique-id": "speech-client",
    "node-type": "system",
    "name": "Local wake-word pilot",
-   "description": "Optional host speech CLI: per-microphone KWS, bounded pre-roll and Silero VAD question capture, explicit Start/Stop and participant-only credentials. Opt-in run/run-file sends bounded WAV to the single-room speech coordinator; ordinary listen/file remain local. Wake is activation, not authentication. Default TTS remains Truc Ly. Room-wide polling suppresses KWS/pre-roll while busy; stale status/boot changes disarm until explicit restart; idle requires 800 ms quiet.",
+   "description": "Optional host speech CLI: per-microphone KWS, bounded pre-roll and Silero VAD question capture, explicit Start/Stop and participant-only credentials. A 1200 ms post-wake continuation window retains a question after the wake's VAD endpoint; anchored ASR validation also accepts the spelling hay tina, never mid-sentence or empty questions. Opt-in run/run-file sends bounded WAV to the single-room speech coordinator; ordinary listen/file remain local. Wake is activation, not authentication. Default TTS remains Truc Ly. Room-wide polling suppresses KWS/pre-roll while busy; stale status/boot changes disarm until explicit restart; idle requires 800 ms quiet.",
    "metadata": [
     {
      "path": "clients/speech"
@@ -1890,7 +1890,7 @@
    "unique-id": "meeting-translation-cache",
    "node-type": "database",
    "name": "Private meeting translation SQLite cache",
-   "description": "Durable owner/meeting/phrase English translations, observed live-tail stability and atomic provider job leases. Exact member IDs/text invalidate edits. Legacy fragment cache is retained without reuse; no transcript mutation.",
+   "description": "Durable owner/meeting/phrase English translations, revision-bound attempt counters and per-phrase bounded retry cooldowns; new ready phrases continue independently. Auth/configuration/quota/service failures apply an owner-wide cooldown with a generation protecting against older in-flight successes. Atomic leases and cache rechecks deduplicate viewers across API processes; completion reauthorizes and rechecks canonical source after inference. Private SQLite upgrade preserves cached results, active leases and legacy cooldowns; no transcript mutation.",
    "metadata": [
     {
      "contract": "meeting-translation.v2",
@@ -1919,7 +1919,7 @@
    "unique-id": "meeting-translation.v2",
    "node-type": "contract",
    "name": "meeting-translation.v2",
-   "description": "Backend-owned same-speaker phrase groups, source members, stable live-tail buffering and cached English overlay.",
+   "description": "Backend-owned same-speaker phrase groups, source member revisions, stable live-tail buffering and cached English overlay. Optional group attempt/retry status, can_advance and fixed service-error codes distinguish isolated phrase failures from owner-wide service cooldowns. Private worker completion metadata carries fixed failure codes only; partial or interrupted output is not accepted.",
    "metadata": [
     {
      "path": "core/agent/contracts/meeting-translation.v2",
@@ -4180,7 +4180,7 @@
      }
     }
    },
-   "description": "Owner-scoped SQLite phrase cache, live-tail observations and job leases; every HTTP access first reauthorizes canonical transcript and meeting status.",
+   "description": "Owner-scoped SQLite phrase cache, revision-bound attempts, live-tail observations, atomic job leases and owner service cooldown generations. HTTP access reauthorizes canonical transcript and meeting status; completion reloads source/access before publishing a result.",
    "metadata": [
     {
      "access": "write"

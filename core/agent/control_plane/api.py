@@ -1181,6 +1181,7 @@ def create_app(
             raise HTTPException(status_code=503, detail=f"{label} is unavailable") from exc
 
         output_parts: list[str] = []
+        translation_complete = False
         deadline = time.monotonic() + 60.0
         try:
             for item in stream_reader.read(unit_id, resume="0-0"):
@@ -1198,6 +1199,13 @@ def create_app(
                         if sum(map(len, output_parts)) > 50000:
                             raise HTTPException(status_code=502, detail=f"{label} returned too much text")
                 elif event.get("type") == "turn-complete":
+                    if task == 'translate':
+                        from shared.translation_text import TRANSLATION_FAILURE_STATUS
+                        translation_complete = True
+                        if 'translation_error' in event:
+                            code = event['translation_error']
+                            status = TRANSLATION_FAILURE_STATUS.get(code, 503) if isinstance(code, str) else 503
+                            raise HTTPException(status_code=status, detail='Live translation could not complete')
                     break
         except HTTPException:
             raise
@@ -1216,6 +1224,8 @@ def create_app(
                 except Exception:  # noqa: BLE001 — TTL is the fallback if cleanup fails
                     logger.warning("transcript completion output cleanup failed task=%s", task)
         output = "".join(output_parts).strip()
+        if task == 'translate' and not translation_complete:
+            raise HTTPException(status_code=503, detail='Live translation stream was interrupted')
         if not output:
             raise HTTPException(status_code=503, detail=f"{label} is unavailable")
         return output
