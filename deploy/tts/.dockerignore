@@ -1,0 +1,6 @@
+*
+!requirements.txt
+!engine.py
+!server.py
+!install_models.py
+!model-assets.json

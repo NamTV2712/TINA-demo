@@ -8,6 +8,9 @@ slim `uv` image, plus the dev hot-reload overlay and the dashboard overlay. This
 contract — the machine-readable "where can work run, and what does it need?" registry a plan
 resolves against in planning, before execution (ADR-0020).
 
+Optional speech output is deployed separately: [`tts/`](tts/README.md) provides an authenticated
+ONNX CPU TTS sidecar for the existing bot Speak/Stop path. It does not change default startup.
+
 ## Seams
 
 | Direction | Neighbour | Via | What crosses |
