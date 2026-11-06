@@ -2,6 +2,11 @@
 
 Tests for terminal surface state, gateway websocket handling, and meeting actions. Fixtures live in `fixtures/`.
 
+`chatgptConnection.test.tsx` waits for the asynchronous sign-in update and focus listener
+to settle before simulating a return from the popup. It verifies that focus refreshes
+account status while preserving the reconnect handoff for the still-connected old account,
+without relying on CI timing or extending test timeouts.
+
 `settingsModels.test.tsx` verifies that model settings hide manual thinking controls and clear
 legacy effort pins when saving. Provider inference behavior is tested in the agent domain;
 the language selector and phrase-overlay UI are covered by the [canvas tests](../../canvas/__tests__/README.md).
