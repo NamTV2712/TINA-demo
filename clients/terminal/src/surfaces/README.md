@@ -83,3 +83,25 @@ Ended meetings show a compact end status in the metadata row. `meetingWhenLabel`
 cached live-only labels with the saved start time when available, and otherwise omits that
 placeholder; it does not invent a timestamp. The existing recap badge and lifecycle actions
 remain available, with recording playback presented in the canvas toolbar.
+
+TranscriptReview adds owner-triggered Check audio and Refine flagged segments for
+bot recordings, with a current-revision quality filter and readable advisory reasons.
+Checks have no ASR cost; selective refinement retains explicit audio comparison/Apply.
+
+Failed bot refinement items show safe service-specific reasons. Retry failed segments
+submits the latest job ID, keeps saved vocabulary and successful proposals, and is
+disabled during active work. No automatic retry or model selection is added.
+
+Review transcript -> Refinement options includes **Optimize quiet audio**, off by
+default and disabled during work/live meetings. Only ASR start requests include the
+opt-in; Check audio still measures the original and retry sends only the saved job ID.
+Proposals explain whether limited gain was used or why original audio was retained.
+The audio player always uses the original recording for owner comparison.
+
+`transcript-quality.tsx` presents the meetings-owned source/proposal checks separately.
+It explains text-only cues versus cues coinciding with mostly quiet audio, with
+optional original RMS/quiet-frame/clipping details. These never assert absent speech.
+The review filter includes a flagged second-pass suggestion at its exact source
+revision, even when source text was unflagged. Stale evidence is hidden after edits;
+after Apply only evidence matching the applied proposal/revision remains visible.
+Legacy jobs without text/proposal checks remain readable. Apply stays explicit.

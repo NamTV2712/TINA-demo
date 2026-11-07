@@ -8,20 +8,25 @@
 | `test_core_run.py` | L2 unit | `core.run()` with **faked ports**: reads a transcript.v1 golden → emits the stub action → would-commit a workspace.v1-conformant entity |
 | `test_config.py` | unit | `TINA_*` env validates + fails fast; secrets stay out of repr; worker `env` matches `runtime.v1` golden |
 | `test_translation_groups.py` | unit | fragmented speech joins into phrases; speaker identity, pauses, sentence/size boundaries, source timestamps and stable group IDs are preserved |
-| `test_meeting_translation.py` | API + unit | owner authorization, durable shared phrase cache, edit invalidation, lease deduplication/expiry, provider backoff/retry, live-tail buffering, stop flush, legacy cache separation, saved Meeting model and visible-only output |
+| `test_meeting_translation.py` | API + unit | owner authorization, durable shared phrase cache, in-flight source/revision/access rechecks, concurrent viewer deduplication/lease expiry, per-phrase bounded retries, owner-wide service cooldown/generation, SQLite upgrade/restart, live-tail buffering, stop flush, saved Meeting model and visible-only output |
 | `fakes.py` | — | in-memory `WorkspacePort` / `RuntimePort` — the seam that makes L2 possible |
 | `conftest.py` | — | loads transcript.v1 goldens by path (the spec, P8) |
 
 Focused translation checks, from `core/agent`:
 
 ```bash
-uv run pytest tests/test_meeting_translation.py tests/test_translation_groups.py -q
+uv run pytest tests/test_meeting_translation.py tests/test_translation_groups.py tests/test_llm_openai_compat.py tests/test_llm_anthropic.py -q
+uv run pytest tests/test_api.py -k translation -q
 ```
 
 These tests fake provider calls and do not need API keys or consume inference quota. The broader
 agent suite includes POSIX file locks and symlinks; run it on Linux/WSL or in the existing Docker
 test environment when developing on Windows. Frontend behavior belongs to the Terminal canvas
 and extension suites, not these backend tests.
+
+`test_api.py` rejects partial translation deltas on terminal worker errors or missing completion
+markers. `test_llm_openai_compat.py` checks typed failure status through all three HTTP completion
+adapters, including quota and timeout, without live credentials.
 
 Codex network/web probes run explicitly in an isolated built worker image. They do not use model
 credentials or production workspace volumes. Run from the repository root (use the appropriate
@@ -40,3 +45,7 @@ The network probe checks allowed HTTPS/Git, blocked domains/private addresses/pr
 offline/read-only turns and metadata/credential protection. The web probe uses a local Responses
 fixture to inspect real Codex requests on new/resumed threads: live, cached and disabled modes.
 It does not claim that a live model/account actually performed a search.
+
+The refinement Apply/Restore translation regression verifies that canonical text changes
+invalidate the affected phrase's cached translation, retain other phrases, and translate
+restored source text again without returning the previous revision's translation.

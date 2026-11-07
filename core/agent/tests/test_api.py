@@ -113,6 +113,39 @@ def test_health_ok():
     assert r.status_code == 200 and r.json()["status"] == "ok"
 
 
+@pytest.mark.parametrize('code,status', [('auth', 401), ('configuration', 404), ('rate_limit', 429),
+    ('unavailable', 503), ('timeout', 504), ('request_rejected', 400), ('invalid_translation', 422),
+    ('interrupted', 503), ('private provider text', 503), (None, 503)])
+def test_translation_rejects_partial_output_when_worker_finishes_with_an_error(tmp_path, code, status):
+    from control_plane.workspace_reader import WorkspaceReader
+    class Reader:
+        def read(self, unit_id, *, resume=None):
+            yield {'type': 'message-delta', 'text': 'Unfinished private result'}
+            yield {'type': 'turn-complete', 'translation_error': code}
+    client = TestClient(create_app(Dispatcher(load_settings(), _FakeRuntime(), _FakeIdentity()),
+                                 reader=WorkspaceReader(str(tmp_path)), stream_reader=Reader()))
+    response = client.post('/api/dictation/translate', headers={'X-User-Id': 'u_jane'},
+                           json={'text': 'Xin chào.', 'target_language': 'en'})
+    assert response.status_code == status
+    assert response.json() == {'detail': 'Live translation could not complete'}
+
+
+@pytest.mark.parametrize('finished', [False, True])
+def test_translation_requires_the_worker_completion_marker(tmp_path, finished):
+    from control_plane.workspace_reader import WorkspaceReader
+    class Reader:
+        def read(self, unit_id, *, resume=None):
+            yield {'type': 'message-delta', 'text': 'Hello.'}
+            if finished:
+                yield {'type': 'turn-complete'}
+    client = TestClient(create_app(Dispatcher(load_settings(), _FakeRuntime(), _FakeIdentity()),
+                                 reader=WorkspaceReader(str(tmp_path)), stream_reader=Reader()))
+    response = client.post('/api/dictation/translate', headers={'X-User-Id': 'u_jane'},
+                           json={'text': 'Xin chào.', 'target_language': 'en'})
+    assert response.status_code == (200 if finished else 503)
+    assert response.json() == ({'translated_text': 'Hello.'} if finished else {'detail': 'Live translation stream was interrupted'})
+
+
 def test_models_reports_chat_and_workspace_streaming_model(tmp_path):
     from control_plane.workspace_reader import WorkspaceReader
 

@@ -36,14 +36,29 @@ function renderTranslationControls(): void {
   selector.disabled = !supported;
   selector.value = language;
   const displayLanguage = source === 'desktop' ? 'vi' : language;
+  const retrying = translation?.groups.filter(g => g.status === 'retrying').length ?? 0;
+  const failed = translation?.groups.filter(g => g.status === 'failed').length ?? 0;
+  const serviceMessages: Record<string, string> = {
+    auth: 'API từ chối quyền truy cập · kiểm tra khóa trong Settings → Models rồi thử lại',
+    configuration: 'Kiểm tra provider và model trong Settings → Models rồi thử lại',
+    rate_limit: 'API đang giới hạn lượt gọi · sẽ tự thử lại',
+    unavailable: 'Dịch vụ dịch chưa khả dụng · sẽ tự thử lại',
+  };
+  const message = translation?.service_error ? serviceMessages[translation.service_error] : undefined;
+  const progress = translation ? [
+    `VI → EN · ${translation.completed}/${translation.total} cụm`,
+    retrying ? `${retrying} cụm chờ thử lại` : '',
+    failed ? `${failed} cụm cần thử lại` : '',
+    translation.groups.some(g => !g.ready) ? 'Đang gom câu…' : '',
+  ].filter(Boolean).join(' · ') : 'Đang tải bản dịch…';
   ($('displayLanguage') as HTMLButtonElement).disabled = !supported;
   $('displayLanguage').textContent = { vi: 'Tiếng Việt', en: 'English', bilingual: 'VI + EN' }[displayLanguage];
   $('translationControls').dataset.state = translationError ? 'error' : translation?.status || 'pending';
   $('translationStatus').textContent = !selected ? '' : source === 'desktop' ? 'Dịch hiện hỗ trợ Meeting Bot.' : language === 'vi' ? ''
     : translationError ? 'Dịch chưa khả dụng · transcript tiếng Việt vẫn hoạt động'
-    : translation?.status === 'paused' ? 'Dịch tạm dừng · sẽ tự thử lại'
-    : translation ? `VI → EN · ${translation.completed}/${translation.total} cụm${translation.groups.some(g => !g.ready) ? ' · Đang gom câu…' : ''}` : 'Đang tải bản dịch…';
-  $('retryTranslation').hidden = language === 'vi' || !(translationError || translation?.status === 'paused');
+    : message || (translation?.status === 'paused' && !retrying && !failed ? 'Dịch tạm dừng · sẽ tự thử lại'
+    : progress);
+  $('retryTranslation').hidden = language === 'vi' || !(translationError || translation?.status === 'paused' || retrying || failed);
 }
 
 function startTranslation(retry = false): void {
