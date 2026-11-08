@@ -83,6 +83,14 @@ def test_only_real_ordered_authenticated_receipts_can_complete(speech):
     assert set(public) == {'meeting_id', 'command_id', 'state'}
 
 
+def test_manual_playback_cannot_invent_voice_history_progress(speech):
+    client,_=speech;identifier=str(uuid4())
+    client.post(PATH,headers=HEADERS,json={'text':'manual','command_id':identifier})
+    assert report(client,identifier,'started').status_code==200
+    assert report(client,identifier,'started',played_text='manual').status_code==409
+    assert report(client,identifier,'started',played_text='x'*4001).status_code==422
+
+
 def test_stop_before_publication_blocks_late_speak(speech):
     client, messages = speech
     identifier = str(uuid4())

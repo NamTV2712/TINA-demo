@@ -1,0 +1,436 @@
+"""Owner-approved room voice; bots receive only a meeting/session-scoped capability."""
+from __future__ import annotations
+
+import hashlib
+import hmac
+import json
+import os
+import time
+from uuid import UUID
+from typing import Literal
+
+import httpx
+from fastapi import APIRouter, Header, HTTPException
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
+
+from .stop_router import _resolve_user_id
+from .stop import leave_command_channel
+from .speech_status import SpeechConflict
+from .voice_replies import VoiceReply, public_replies
+from redis.exceptions import WatchError
+
+STATES = '^(LISTENING|CAPTURING|THINKING|SPEAKING|QUIET|ERROR|OFF)$'
+
+
+def voice_token(secret, meeting, session):
+    secret = secret if secret is not None else os.environ.get('ADMIN_TOKEN', '')
+    if not secret:
+        raise ValueError('ADMIN_TOKEN is required for a voice capability')
+    return hmac.new(secret.encode(), f'meeting-voice.v1:{meeting}:{session}'.encode(), 'sha256').hexdigest()
+
+
+class VoicePolicy(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    enabled: StrictBool = False
+    include_transcript: StrictBool = False
+    documents: list[str] = Field(default_factory=list, max_length=8)
+    revision: int = Field(default=0, ge=0)
+    wake_variants: list[str] = Field(default_factory=list, max_length=8)
+    noise_suppression: StrictBool = False
+    allow_general_knowledge: StrictBool = False
+    allow_web_search: StrictBool = False
+
+    @field_validator('wake_variants')
+    @classmethod
+    def wake_aliases(cls, values):
+        import unicodedata
+        result = []
+        for value in values:
+            value = unicodedata.normalize('NFKC', value).strip().casefold()
+            if (not 2 <= len(value) <= 40 or not all(c.isalpha() or c in ' -' for c in value)
+                    or value.startswith(('hey ', 'hi ', 'hello ')) or value == 'anh ơi'):
+                raise ValueError('Choose a short approved ASR name variant without a greeting prefix')
+            if value not in result: result.append(value)
+        return result
+
+    @field_validator('documents')
+    @classmethod
+    def paths(cls, values):
+        if len(set(values)) != len(values) or any(not p.endswith('.md') or len(p) > 512 or p.startswith('/') or '..' in p.split('/') for p in values):
+            raise ValueError('Choose linked Markdown documents')
+        return values
+
+
+class VoiceQuestion(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    request_id: UUID
+    question: str = Field(min_length=1, max_length=2000)
+    revision: int = Field(ge=0)
+
+    @field_validator('question')
+    @classmethod
+    def nonblank(cls, value):
+        if not value.strip():
+            raise ValueError('Question is empty')
+        return value.strip()
+
+
+DiagnosticCode = Literal[
+    'starting', 'listening', 'waiting_asr', 'tts_unavailable', 'sources_unavailable', 'name_not_matched', 'name_unconfirmed', 'wake_confirmed',
+    'waiting_speech_end', 'waiting_asr_tail', 'waiting_question', 'thinking', 'speaking',
+    'waiting_quiet', 'stopped', 'completed', 'question_timeout', 'ambiguous_audio',
+    'ambiguous_window', 'stale_asr', 'asr_unavailable', 'services_unavailable',
+    'worker_failed', 'kws_unavailable', 'answer_failed', 'no_evidence', 'playback_failed', 'policy_changed',
+    'interrupted', 'waiting_turn_end',
+]
+DIAGNOSTIC_TTL_SECONDS = 30
+
+
+class VoiceDiagnostic(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    event_id: UUID
+    code: DiagnosticCode
+    observed_at_ms: int = Field(ge=0, strict=True)
+    heard_prefix: str | None = Field(default=None, max_length=64)
+    heard_at_ms: int | None = Field(default=None, ge=0, strict=True)
+    channel: int | None = Field(default=None, ge=0, lt=65536, strict=True)
+    source_start_ms: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+
+    @field_validator('heard_prefix')
+    @classmethod
+    def prefix_only(cls, value):
+        if value is None: return None
+        # Three words only. The full question remains in the existing transcript, not diagnostics.
+        return ' '.join(''.join(c if c.isprintable() else ' ' for c in value).split()[:3]) or None
+
+
+class AudioChannel(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    channel: int = Field(ge=0, lt=65536, strict=True)
+    frames: int = Field(ge=0, le=9007199254740991, strict=True)
+    samples: int = Field(ge=0, le=9007199254740991, strict=True)
+    last_frame_ms: int = Field(ge=0, strict=True)
+    rms: float = Field(ge=0, le=1, allow_inf_nan=False)
+    sample_clock: StrictBool
+    gap_samples: int = Field(ge=0, le=9007199254740991, strict=True)
+    overlap_samples: int = Field(ge=0, le=9007199254740991, strict=True)
+    clock_resets: int = Field(ge=0, le=9007199254740991, strict=True)
+    asr_inflight: int = Field(ge=0, le=64, strict=True)
+    asr_errors: int = Field(ge=0, le=9007199254740991, strict=True)
+    asr_at_ms: int | None = Field(default=None, ge=0, strict=True)
+    capture_lag_ms: float | None = Field(default=None, ge=0, le=3600000, allow_inf_nan=False)
+    capture_age_ms: float | None = Field(default=None, ge=0, le=3600000, allow_inf_nan=False)
+    roundtrip_ms: float | None = Field(default=None, ge=0, le=3600000, allow_inf_nan=False)
+    queue_ms: float | None = Field(default=None, ge=0, le=3600000, allow_inf_nan=False)
+
+
+class AudioSnapshot(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    observed_at_ms: int = Field(ge=0, strict=True)
+    channels: list[AudioChannel] = Field(max_length=16)
+    noise_suppression: Literal['off','starting','low','failed'] | None = None
+
+    @field_validator('channels')
+    @classmethod
+    def unique_channels(cls, rows):
+        if len({r.channel for r in rows}) != len(rows): raise ValueError('Duplicate audio channel')
+        return rows
+
+
+class KwsStatus(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    engine: Literal['livekit-wakeword']
+    version: Literal['2.1.1']
+    mode: Literal['activation']
+    device: Literal['cpu']
+    status: Literal['off', 'starting', 'ready', 'failed']
+    models: list[Literal['hey_tina', 'tina_oi']] = Field(min_length=2, max_length=2)
+    observed_at_ms: int = Field(ge=0, strict=True)
+
+    @field_validator('models')
+    @classmethod
+    def retained_models(cls, values):
+        if len(set(values)) != 2: raise ValueError('Expected both retained KWS models')
+        return values
+
+
+class VoiceState(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    state: str = Field(pattern=STATES)
+    request_id: UUID | None = None
+    diagnostic: VoiceDiagnostic | None = None
+    audio: AudioSnapshot | None = None
+    kws: KwsStatus | None = None
+
+
+def new_meeting_voice_policy():
+    """New capable Google Meet rooms use their own transcript; linked documents remain opt-in."""
+    return VoicePolicy(enabled=True,include_transcript=True,noise_suppression=True).model_dump()
+
+
+def policy_of(row):
+    return VoicePolicy.model_validate((row.get('data') or {}).get('voice_assistant') or {})
+
+
+def build_voice_router(repo, redis, publisher, playback=None, client_factory=httpx.AsyncClient):
+    router = APIRouter()
+
+    async def meeting(mid, user=None, session=None, authorization=None):
+        row = await repo.get_meeting(mid)
+        if row is None or (user is not None and str(row['user_id']) != str(user)):
+            raise HTTPException(404, 'Meeting not found')
+        if session is not None:
+            secret = os.environ.get('ADMIN_TOKEN', '')
+            expected = voice_token(secret, mid, session) if secret else ''
+            if not expected or not hmac.compare_digest((authorization or '').encode(), ('Bearer ' + expected).encode()):
+                raise HTTPException(401, 'Invalid voice capability')
+            sessions = await repo.list_sessions(meeting_id=mid)
+            if (row.get('status') != 'active' or not sessions or sessions[-1] != session
+                    or (row.get('data') or {}).get('stop_requested')):
+                raise HTTPException(409, 'Voice session is no longer active')
+        return row
+
+    async def agent(row, suffix, body=None):
+        base = os.environ.get('AGENT_API_URL', '').rstrip('/')
+        secret = os.environ.get('INTERNAL_API_SECRET', '')
+        if not base or not secret:
+            raise HTTPException(503, 'Meeting voice service is not configured')
+        async with client_factory(timeout=95, follow_redirects=False) as client:
+            try:
+                response = await client.request('POST' if body is not None else 'GET',
+                    f'{base}/api/internal/meeting-voice/{row["id"]}/{suffix}', json=body,
+                    headers={'X-User-Id': str(row['user_id']), 'X-Internal-Secret': secret})
+                if response.status_code >= 400 or len(response.content) > 200000:
+                    raise HTTPException(503, 'Approved meeting sources are unavailable')
+                return response.json()
+            except (httpx.HTTPError, ValueError) as exc:
+                raise HTTPException(503, 'Meeting voice service is unavailable') from exc
+
+    def keys(mid, session, request):
+        return f'meeting:voice:{mid}:lock', f'meeting:voice:{mid}:{session}:{request}'
+
+    async def release(mid, session, request):
+        lock, _ = keys(mid, session, request)
+        for _ in range(3):
+            async with redis.pipeline(transaction=True) as pipe:
+                try:
+                    await pipe.watch(lock)
+                    held = await pipe.get(lock)
+                    if isinstance(held, bytes): held = held.decode()
+                    if held != f'{session}:{request}': return
+                    pipe.multi()
+                    pipe.delete(lock)
+                    await pipe.execute()
+                    return
+                except WatchError:
+                    continue
+
+
+    @router.get('/meetings/{meeting_id}/voice-assistant')
+    async def get_policy(meeting_id: int, x_user_id: str | None = Header(default=None)):
+        mid = meeting_id
+        row = await meeting(mid, _resolve_user_id(x_user_id))
+        sessions = await repo.list_sessions(meeting_id=mid) if row.get('status') == 'active' else []
+        active_session = sessions[-1] if row.get('status') == 'active' and sessions else None
+        state, diagnostic = await redis.mget(f'meeting:voice:{mid}:state', f'meeting:voice:{mid}:diagnostic')
+        runtime = json.loads(state) if state else {}
+        if not active_session or runtime.get('session_uid') != active_session:
+            runtime = {}
+        audio = runtime.get('audio')
+        if audio and int(time.time() * 1000) - audio['observed_at_ms'] > 15000:
+            runtime.pop('audio', None)
+        detail = json.loads(diagnostic) if diagnostic else None
+        if (not active_session or not detail or detail.get('session_uid') != active_session
+                or detail.get('expires_at_ms', 0) <= int(time.time() * 1000)):
+            detail = None
+        return {'replies': public_replies(row, active_session, bool(runtime)),
+                'available': bool((row.get('data') or {}).get('voice_assistant_capable')),
+                'policy': policy_of(row).model_dump(), 'runtime': {
+                    **runtime, 'state': runtime.get('state', 'OFF'), 'session_active': bool(active_session),
+                    'heartbeat_fresh': bool(runtime), 'diagnostic': detail}}
+
+    @router.put('/meetings/{meeting_id}/voice-assistant')
+    async def set_policy(meeting_id: int, body: VoicePolicy, x_user_id: str | None = Header(default=None)):
+        mid = meeting_id
+        user = _resolve_user_id(x_user_id)
+        row = await meeting(mid, user)
+        if body.noise_suppression and (row.get('platform') != 'google_meet' or not (row.get('data') or {}).get('voice_assistant_capable')):
+            raise HTTPException(409, 'Start a new voice-capable Google Meet bot before testing noise suppression')
+        if body.enabled:
+            if row.get('status') not in {'requested', 'joining', 'awaiting_admission', 'active'}:
+                raise HTTPException(409, 'Start a new bot session before enabling voice')
+            if row.get('platform') != 'google_meet':
+                raise HTTPException(422, 'Voice assistant currently supports Google Meet')
+            if not (row.get('data') or {}).get('voice_assistant_capable'):
+                raise HTTPException(409, 'Start a new voice-enabled bot before enabling the assistant')
+            if (row.get('data') or {}).get('transcribe_enabled') is False:
+                raise HTTPException(409, 'Enable transcription for the bot before enabling voice questions')
+            if not body.include_transcript and not body.documents and not body.allow_general_knowledge and not body.allow_web_search:
+                raise HTTPException(422, 'Choose sources that may be spoken to this room')
+            available = await agent(row, 'ready')
+            if any(path not in available['documents'] for path in body.documents):
+                raise HTTPException(422, 'Choose documents linked to this meeting')
+        try:
+            saved = await repo.set_voice_policy(mid, user, body.revision, body.model_dump())
+        except ValueError as exc:
+            raise HTTPException(409, 'Voice settings changed; reload before saving') from exc
+        # Any policy change cancels in-flight thought/playback, including a source revocation.
+        await publisher.publish(leave_command_channel(mid), json.dumps({'action': 'speak_stop'}))
+        return {'policy': saved, 'runtime': {'state': 'OFF' if not body.enabled else 'QUIET'}}
+
+    @router.get('/bots/voice/{mid}/{session}/config', include_in_schema=False)
+    async def config(mid: int, session: str, authorization: str | None = Header(default=None)):
+        row = await meeting(mid, session=session, authorization=authorization)
+        policy = policy_of(row)
+        ready = False
+        reason = None
+        if policy.enabled:
+            ready_key = f'meeting:voice:{mid}:{session}:ready:{policy.revision}'
+            cached = await redis.get(ready_key)
+            if cached is not None:
+                if cached in ('1', b'1', '0', b'0'):
+                    ready = cached in ('1', b'1')
+                else:
+                    verdict = json.loads(cached)
+                    ready, reason = verdict['ready'], verdict.get('reason')
+            else:
+                try:
+                    available = await agent(row, 'ready')
+                    if any(path not in available['documents'] for path in policy.documents):
+                        raise HTTPException(409, 'Shared source was removed')
+                except HTTPException:
+                    reason = 'sources_unavailable'
+                if reason is None:
+                    url = os.environ.get('TTS_SERVICE_URL', '').rstrip('/')
+                    try:
+                        if url:
+                            async with client_factory(timeout=4, follow_redirects=False) as client:
+                                response = await client.get(url + '/ready', headers={'X-API-Key': os.environ.get('TTS_API_TOKEN', '')})
+                                ready = response.status_code == 200
+                    except httpx.HTTPError:
+                        pass
+                    if not ready: reason = 'tts_unavailable'
+                # Readiness is advisory; answers always recheck live policy/source fingerprints.
+                await redis.set(ready_key, json.dumps({'ready': ready, 'reason': reason}), ex=10)
+        return {'enabled': policy.enabled, 'ready': ready, 'revision': policy.revision,
+                'wake_variants': policy.wake_variants, 'noise_suppression':policy.noise_suppression, 'unavailable_reason': reason}
+
+    @router.post('/bots/voice/{mid}/{session}/state', include_in_schema=False)
+    async def state(mid: int, session: str, body: VoiceState, authorization: str | None = Header(default=None)):
+        await meeting(mid, session=session, authorization=authorization)
+        now_ms = int(time.time() * 1000)
+        if body.kws and not now_ms - 15000 < body.kws.observed_at_ms <= now_ms + 5000:
+            raise HTTPException(422, 'Invalid KWS observation clock')
+        if body.audio and (body.audio.observed_at_ms > now_ms + 5000
+                or any(r.last_frame_ms > body.audio.observed_at_ms + 5000 or (r.asr_at_ms or 0) > body.audio.observed_at_ms + 5000 for r in body.audio.channels)):
+            raise HTTPException(422, 'Invalid audio observation clock')
+        await redis.set(f'meeting:voice:{mid}:state', json.dumps(body.model_dump(mode='json', exclude={'diagnostic'})
+                        | {'session_uid': session}), ex=15)
+        detail = body.diagnostic
+        if detail:
+            heard_at = detail.heard_at_ms if detail.heard_prefix and detail.heard_at_ms is not None else detail.observed_at_ms
+            born = min(detail.observed_at_ms, heard_at)
+            if (now_ms - DIAGNOSTIC_TTL_SECONDS * 1000 < born
+                    and max(detail.observed_at_ms, heard_at) <= now_ms + 5000):
+                key = f'meeting:voice:{mid}:diagnostic'
+                for _ in range(3):
+                    try:
+                        async with redis.pipeline(transaction=True) as pipe:
+                            await pipe.watch(key)
+                            raw = await pipe.get(key)
+                            previous = json.loads(raw) if raw else None
+                            if previous and previous.get('session_uid') == session and (
+                                    previous.get('event_id') == str(detail.event_id)
+                                    or previous.get('observed_at_ms', 0) > detail.observed_at_ms):
+                                break
+                            # Absolute expiry is based on the original heard/observed time.
+                            expires = min(now_ms, born) + DIAGNOSTIC_TTL_SECONDS * 1000
+                            pipe.multi()
+                            pipe.set(key, json.dumps(detail.model_dump(mode='json') | {
+                                'session_uid': session, 'expires_at_ms': expires}), pxat=expires)
+                            await pipe.execute()
+                            break
+                    except WatchError:
+                        continue  # Diagnostic contention must not prevent Stop below.
+        if body.state in ('QUIET', 'OFF') and body.request_id:
+            try:
+                if playback is not None:
+                    try:
+                        await playback.cancel(mid, str(body.request_id), session)
+                        await playback.report(mid, str(body.request_id), session, 'stopped')
+                    except SpeechConflict:
+                        pass  # An unrelated manual Speak owns the active reservation.
+            finally:
+                await release(mid, session, body.request_id)
+        return {'accepted': True}
+
+    @router.post('/bots/voice/{mid}/{session}/answer', include_in_schema=False)
+    async def answer(mid: int, session: str, body: VoiceQuestion, authorization: str | None = Header(default=None),
+                     x_voice_speaker_key: str | None = Header(default=None, pattern=r'^[0-9a-f]{64}$', max_length=64)):
+        row = await meeting(mid, session=session, authorization=authorization)
+        policy = policy_of(row)
+        if not policy.enabled or policy.revision != body.revision:
+            raise HTTPException(409, 'Voice sharing policy changed')
+        if (row.get('data') or {}).get('artifact_deletion'):
+            raise HTTPException(409, 'Meeting artifacts were deleted')
+        if str(body.request_id) in ((row.get('data') or {}).get('voice_replies') or {}):
+            raise HTTPException(409, 'Voice request already recorded; do not replay playback')
+        lock, key = keys(mid, session, body.request_id)
+        fingerprint = hashlib.sha256(body.model_dump_json().encode()).hexdigest()
+        prior = await redis.get(key)
+        if prior:
+            value = json.loads(prior)
+            if value['fingerprint'] != fingerprint:
+                raise HTTPException(409, 'Voice request changed')
+            raise HTTPException(409, 'Voice request already dispatched; do not replay playback')
+        holder = f'{session}:{body.request_id}'
+        if not await redis.set(lock, holder, nx=True, ex=240):
+            raise HTTPException(409, 'Another voice turn is active')
+        try:
+            history_key = f'meeting:voice:{mid}:{session}:history:{policy.revision}:{x_voice_speaker_key}' if x_voice_speaker_key else None
+            stored = json.loads(await redis.get(history_key) or '[]') if history_key else []
+            replies = (row.get('data') or {}).get('voice_replies') or {}
+            history = []
+            for turn in stored:
+                reply = replies.get(turn['request_id'], {})
+                if reply.get('session_uid') != session: continue
+                if reply.get('state') == 'completed': history.append(turn)
+                elif reply.get('state') == 'stopped' and reply.get('played_text'):
+                    history.append(turn | {'answer': reply['played_text'], 'clarification': False})
+            result = await agent(row, 'answer', {'question': body.question, 'revision': body.revision,
+                                 'history': [{k: v for k, v in turn.items() if k != 'request_id'} for turn in history]})
+            fresh = await meeting(mid, session=session, authorization=authorization)
+            held = await redis.get(lock)
+            if isinstance(held, bytes): held = held.decode()
+            if policy_of(fresh) != policy or held != holder:
+                raise HTTPException(409, 'Voice turn was cancelled')
+            if playback is not None:
+                try:
+                    now = int(time.time() * 1000)
+                    reply = VoiceReply(request_id=body.request_id, text=result['text'], state='queued',
+                                       **{k: result[k] for k in ('answer_kind', 'reason', 'links', 'lookups') if k in result},
+                                       created_at_ms=now, updated_at_ms=now).model_dump(mode='json', exclude_none=True)
+                    await playback.begin(mid, str(body.request_id), session, result['text'], 'auto', reply=reply)
+                except SpeechConflict as exc:
+                    raise HTTPException(409, 'Speech turn was stopped or another playback is active') from exc
+            result['evidence_available'] = bool(result.get('sources'))
+            await redis.set(key, json.dumps({'fingerprint': fingerprint, 'answer': result}), ex=240)
+            refs = result.pop('context_refs', []) if result.get('clarification') else []
+            result.pop('context_refs', None)
+            refs = refs or [{'key': s['key'], 'fingerprint': s['fingerprint']} for s in result.get('sources', [])]
+            if history_key and refs:
+                turn = {'request_id': str(body.request_id), 'question': body.question, 'answer': result['text'],
+                        'clarification': result.get('clarification') is True,
+                        'created_at_ms': int(time.time() * 1000),
+                        'sources': refs}
+                await redis.set(history_key, json.dumps((stored + [turn])[-3:]), ex=900)
+            return result
+        except BaseException:
+            if playback is not None:
+                try:
+                    await playback.report(mid, str(body.request_id), session, 'failed')
+                except Exception:
+                    pass  # Clear Redis playback ownership even if durable storage is temporarily unavailable.
+            await release(mid, session, body.request_id)
+            raise
+    return router

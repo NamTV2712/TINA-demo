@@ -81,7 +81,10 @@
     .speaker-avatar { width: 22px; height: 22px; flex: 0 0 22px; display: grid; place-items: center; background: var(--subtle-bg); border-radius: 50%; color: var(--brand); font-size: 10px; }
     .speaker-name { font-size: 12px; font-weight: 650; }
     .turn-time { margin-left: auto; color: var(--muted-foreground); font-size: 10px; font-variant-numeric: tabular-nums; }
-    .turn-copy { margin: 0; font-size: 14px; line-height: 1.6; white-space: pre-wrap; }
+    .turn-copy { margin: 0; font-size: 14px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .voice-reply { padding-left: 12px; border-left: 2px solid var(--brand); }
+    .voice-reply .turn-header { flex-wrap: wrap; }
+    .voice-reply [role="status"] { margin-left: 0; }
     .turn-draft { margin-top: 7px; padding-left: 9px; border-left: 2px solid var(--control-line); }
     .draft-label { display: block; margin-bottom: 3px; color: var(--muted-foreground); font-size: 9px; text-transform: uppercase; }
     #latestBtn { position: sticky; bottom: 4px; display: block; margin: 0 auto; width: auto; min-height: 34px; padding: 0 12px; border-radius: 20px; background: var(--surface); border-color: var(--control-line); box-shadow: 0 3px 12px #0002; color: var(--brand); font-size: 11px; }

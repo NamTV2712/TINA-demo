@@ -38,6 +38,7 @@ export interface TranscriptionSegment {
 }
 
 export interface TranscriptionResult {
+  queue_ms?: number;
   text: string;
   language: string;
   language_probability?: number;
@@ -307,6 +308,8 @@ export class TranscriptionClient {
       }
 
       const data = await response.json() as any;
+      const queue = /(?:^|,)\s*asr_queue\s*;\s*dur=([\d.]+)(?=\s*(?:,|$))/.exec(response.headers.get('server-timing') || '');
+      const queueMs = queue ? Number(queue[1]) : NaN;
 
       const allSegments = (data.segments || []).map((s: any) => ({
         start: s.start || 0,
@@ -328,6 +331,7 @@ export class TranscriptionClient {
         log(`[STT] dropped ${allSegments.length - segments.length}/${allSegments.length} low-confidence segment(s)`);
       }
       return {
+        ...(Number.isFinite(queueMs) && queueMs >= 0 && queueMs <= 3_600_000 ? {queue_ms: queueMs} : {}),
         text,
         language: data.language || language || 'unknown',
         language_probability: data.language_probability ?? 0,

@@ -8,9 +8,9 @@ import wave
 import numpy as np
 import pytest
 
-from tina_speech.capture import QuestionCapture
+from tina_meeting_voice.capture import QuestionCapture
 from tina_speech.session import SpeechSession
-from tina_speech.wakeword import WakeDetector, WakeEvent
+from tina_meeting_voice.wakeword import WakeDetector, WakeEvent
 
 VOICE = np.ones(320, dtype=np.float32) * .2
 QUIET = np.zeros(320, dtype=np.float32)

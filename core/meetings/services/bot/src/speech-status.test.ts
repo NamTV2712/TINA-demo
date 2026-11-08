@@ -5,13 +5,22 @@ import { PassThrough } from 'node:stream';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { ChildProcess } from 'node:child_process';
-import { createSpeechHandler } from './speech-status.js';
+import { createSpeechHandler,createSpeechReporter } from './speech-status.js';
 import { createTtsPlayback } from './tts-playback.js';
 import { createSpeakController } from './capture-bridge.js';
 import { parseAct } from './contracts.js';
 import type { Invocation } from './config.js';
 
 const id = '00000000-0000-4000-8000-000000000001';
+
+test('played text receipts stay ordered and never leak into the callback URL',async()=>{
+  const bodies:unknown[]=[],urls:string[]=[];
+  const report=createSpeechReporter({meetingApiCallbackUrl:'http://callback.test/lifecycle',internalSecret:'test',meeting_id:1,connectionId:'s'} as Invocation,
+    async(url,init)=>{urls.push(String(url));bodies.push(JSON.parse(String(init?.body)));return new Response('{}');});
+  await report(id,'started');await report(id,'started','Lan phụ trách.');await report(id,'stopped','Lan phụ trách.');
+  assert.deepEqual(bodies.map((b:any)=>b.played_text),[undefined,'Lan phụ trách.','Lan phụ trách.']);
+  assert(urls.every(url=>url==='http://callback.test/bots/internal/callback/speech'));
+});
 
 test('tracked command requires UUID and text; legacy acts remain accepted', () => {
   assert(parseAct({ action: 'speak', text: 'legacy' }));
@@ -84,12 +93,14 @@ test('Stop during delayed microphone UI never starts a late TTS request', async 
 test('HTTP errors, empty PCM and nonzero player exits cannot report completed', async () => {
   const previous = process.env.TTS_SERVICE_URL;
   let status = 503, pcm = Buffer.alloc(20), playerCode = 0, starts = 0;
+  let submitted: {input: string; meeting_id: number} | undefined;
   const server = createServer((req, res) => {
-    req.resume(); req.once('end', () => { res.writeHead(status); res.end(pcm); });
+    let body = ''; req.on('data', chunk => { body += chunk; });
+    req.once('end', () => { submitted = JSON.parse(body); res.writeHead(status); res.end(pcm); });
   });
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
   process.env.TTS_SERVICE_URL = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  const playback = createTtsPlayback(() => {}, { setMute() {}, spawnProcess() {
+  const playback = createTtsPlayback(() => {}, { meetingId: 14, setMute() {}, spawnProcess() {
     const child = new EventEmitter() as unknown as ChildProcess;
     Object.assign(child, { stdin: new PassThrough(), stderr: new PassThrough(),
       kill() { child.emit('exit', null); return true; } });
@@ -106,6 +117,7 @@ test('HTTP errors, empty PCM and nonzero player exits cannot report completed', 
     playerCode = 0;
     assert.equal(await playback.speak('test', 'auto', () => { starts++; }), 'completed');
     assert.equal(starts, 1);
+    assert.deepEqual(submitted, { model: 'tts-1', input: 'test', voice: 'auto', response_format: 'pcm', meeting_id: 14 });
   } finally {
     playback.stop();
     if (previous === undefined) delete process.env.TTS_SERVICE_URL; else process.env.TTS_SERVICE_URL = previous;
@@ -163,5 +175,79 @@ test('total deadline bounds a stalled synthesis and a stalled player, restoring 
     playback.stop();
     if (previous === undefined) delete process.env.TTS_SERVICE_URL; else process.env.TTS_SERVICE_URL = previous;
     await new Promise<void>(resolve => server.close(() => resolve()));
+  }
+});
+
+
+test('streaming starts before synthesis ends; lookahead never plays and its failure never mutes the active sentence', async () => {
+  const previous = process.env.TTS_SERVICE_URL;
+  let firstResponse: import('node:http').ServerResponse | undefined;
+  const bodies: string[] = [], mutes: boolean[] = [];
+  const server = createServer((req, res) => {
+    let data='';req.on('data',c=>{data+=c;});req.on('end',()=>{
+      const text=JSON.parse(data).input;bodies.push(text);
+      if(text==='first'){firstResponse=res;res.write(Buffer.alloc(8000));}
+      else{res.writeHead(503);res.end();}
+    });
+  });
+  await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+  process.env.TTS_SERVICE_URL=`http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  let started!:()=>void;const began=new Promise<void>(resolve=>{started=resolve;});
+  const tts=createTtsPlayback(()=>{},{setMute:value=>{mutes.push(value);},spawnProcess(){
+    const p=new EventEmitter() as unknown as ChildProcess;
+    Object.assign(p,{stdin:new PassThrough(),stderr:new PassThrough(),kill(){p.emit('exit',null);return true;}});
+    p.stdin!.on('finish',()=>setImmediate(()=>p.emit('exit',0)));setImmediate(()=>p.emit('spawn'));return p;
+  }});
+  try{
+    const first=tts.prepare!('first');assert.equal(await first.ready,true);
+    const playing=first.play(started);await began;
+    assert.equal(firstResponse?.writableEnded,false);
+    const next=tts.prepare!('next');assert.equal(await next.ready,false);
+    assert.deepEqual(mutes,[false], 'failed lookahead cannot mute the current audio');
+    assert.deepEqual(bodies,['first','next']);
+    firstResponse!.end(Buffer.alloc(8000));assert.equal(await playing,'completed');
+    assert.equal(mutes.at(-1),true);
+  }finally{tts.stop();firstResponse?.end();if(previous===undefined)delete process.env.TTS_SERVICE_URL;else process.env.TTS_SERVICE_URL=previous;
+    await new Promise<void>(resolve=>server.close(()=>resolve()));}
+});
+
+test('Stop cancels both streams and a late or truncated prefetched response cannot play', async () => {
+  const previous=process.env.TTS_SERVICE_URL;const responses:import('node:http').ServerResponse[]=[];
+  const server=createServer((req,res)=>{req.resume();req.on('end',()=>{responses.push(res);res.write(Buffer.alloc(8000));});});
+  await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+  process.env.TTS_SERVICE_URL=`http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  let starts=0;
+  const tts=createTtsPlayback(()=>{},{setMute(){},spawnProcess(){
+    const p=new EventEmitter() as unknown as ChildProcess;
+    Object.assign(p,{stdin:new PassThrough(),stderr:new PassThrough(),kill(){p.emit('exit',null);return true;}});
+    setImmediate(()=>p.emit('spawn'));return p;
+  }});
+  try{
+    const first=tts.prepare!('first');await first.ready;const playing=first.play(()=>{starts++;});
+    const next=tts.prepare!('next');await next.ready;
+    const excess=tts.prepare!('excess');assert.equal(await excess.ready,false);assert.equal(responses.length,2);
+    tts.stop();assert.equal(await playing,'stopped');
+    for(const response of responses)response.end(Buffer.alloc(8000));
+    assert.equal(await next.play(()=>{starts++;}),'stopped');assert(starts<=1);
+    const cut=tts.prepare!('cut');await cut.ready;responses.at(-1)!.destroy();
+    assert.equal(await cut.play(),'failed');
+  }finally{tts.stop();for(const r of responses)r.end();if(previous===undefined)delete process.env.TTS_SERVICE_URL;else process.env.TTS_SERVICE_URL=previous;
+    await new Promise<void>(resolve=>server.close(()=>resolve()));}
+});
+
+test('prepared audio waits before opening the meeting mic and mic refusal cancels preparation', async () => {
+  for(const mode of ['stop-before-ready','unknown-mic']){
+    let release!:(value:boolean)=>void,created=false,plays=0,cancels=0;const mic:boolean[]=[];
+    const ready=new Promise<boolean>(resolve=>{release=resolve;});
+    const page={async evaluate(_fn:unknown,args:{desiredOn:boolean}){mic.push(args.desiredOn);return mode==='unknown-mic'?undefined:args.desiredOn;}};
+    const controller=createSpeakController(page as never,{platform:'google_meet',voiceAgentEnabled:true} as Invocation,()=>({
+      async speak(){throw Error('prepared path required');},stop(){if(created)release(false);},
+      prepare(){created=true;return{ready,cancel(){cancels++;},async play(){plays++;return 'completed';}};}
+    }));
+    const speaking=controller.speak('synthetic');
+    await Promise.resolve();assert(!mic.includes(true));
+    if(mode==='stop-before-ready'){await controller.stop();assert.equal(await speaking,'stopped');}
+    else{release(true);assert.equal(await speaking,'failed');}
+    assert.equal(plays,0);assert.equal(cancels,1);
   }
 });

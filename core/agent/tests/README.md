@@ -40,3 +40,14 @@ The network probe checks allowed HTTPS/Git, blocked domains/private addresses/pr
 offline/read-only turns and metadata/credential protection. The web probe uses a local Responses
 fixture to inspect real Codex requests on new/resumed threads: live, cached and disabled modes.
 It does not claim that a live model/account actually performed a search.
+
+Voice regressions: `test_voice_knowledge.py` covers relevance/recency, source budgets, stale history
+and bounded clarifications; `test_meeting_voice.py` checks approved-source isolation and the dedicated
+voice CompletionPort prompt. These use synthetic sources and no provider credentials.
+Conversation tests retain authorized clarification context for short answers, expire pending
+clarification hints, and reject history whose source fingerprints changed.
+
+Voice answer coverage: `test_voice_knowledge.py`, `test_meeting_voice.py` and
+`test_llm_openai_responses_voice.py` prove bounded lookups, public-mode opt-ins, source isolation,
+revocation checks, verifier diagnostics and required native search citations. See `eval/voice` for
+30 synthetic questions and an explicit live-provider evaluation command.

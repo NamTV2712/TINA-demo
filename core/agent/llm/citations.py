@@ -12,7 +12,8 @@ _INLINE = re.compile(
 )
 
 
-def _source(value):
+def safe_web_source(value):
+    """Validate a provider-recorded HTTP(S) citation for display; this never fetches the URL."""
     if not isinstance(value, dict) or not isinstance(value.get('url'), str):
         return None
     url = value['url']
@@ -46,14 +47,14 @@ def web_sources(item: dict) -> list[dict]:
     action = item.get('action')
     if isinstance(action, dict) and action.get('type') in ('openPage', 'open_page'):
         candidates = [*candidates, action]
-    return [source for value in candidates if (source := _source(value)) is not None][:50]
+    return [source for value in candidates if (source := safe_web_source(value)) is not None][:50]
 
 
 def render_citations(text: str, sources: list[dict]) -> str:
     """Resolve explicit references and append a bounded, source-preserving Markdown bibliography."""
     unique = {}
     for value in sources[:50]:
-        source = _source(value)
+        source = safe_web_source(value)
         if source is None:
             continue
         if source['url'] in unique:

@@ -1,5 +1,12 @@
 # Third-party licenses — baked artifacts outside the dependency gate
 
+## Experimental bot noise suppression
+
+The bot links Ubuntu noble's `libwebrtc-audio-processing1` 0.3.1-0ubuntu6 (WebRTC / Google,
+BSD-3-Clause; upstream PATENTS grant). The library's copyright notices remain at
+`/usr/share/doc/libwebrtc-audio-processing1/copyright` in the image. The small local C ABI shim
+enables only 16 kHz mono NS Low; no model weights or third-party Python bindings are fetched.
+
 ## Optional local wake-word client
 
 Phase 3 adds the operator-downloaded Silero VAD model (MIT) and a host-only FastAPI/uvicorn/httpx
@@ -96,3 +103,12 @@ text: [`licenses/onnx-community-pyannote-segmentation-3.0.LICENSE.txt`](licenses
 > MIT is a Category-A (permissive) license under ADR-0004; baking it requires no exception,
 > only that the copyright + permission notice be preserved — which this file and the baked
 > `/opt/hf-cache/LICENSE.*` satisfy.
+
+The shared `core/meetings/modules/voice-engine` reuses the existing pinned Sherpa-ONNX CPU KWS (Apache-2.0), SentencePiece and Silero VAD (MIT) assets from the host speech pilot. Models remain outside source/images in an operator-provisioned read-only cache; original notices are retained by the installer.
+
+The isolated bot KWS runtime pins LiveKit WakeWord 2.1.1 (Apache-2.0) and ONNX Runtime 1.31.1
+(MIT). The two retained local `tina-v1` ONNX detectors were fine-tuned from LiveKit's standard pretrained
+encoder using VieNeu synthetic speech. Their sizes/hashes are pinned in
+`core/meetings/modules/voice-engine/tina_meeting_voice/livekit-models.json`; weights are not committed
+or baked into images. Upstream LICENSE and NOTICE are preserved in that package as `livekit.LICENSE`
+and `livekit.NOTICE` and copied alongside the weights by `deploy/wakeword/install_local.py`.

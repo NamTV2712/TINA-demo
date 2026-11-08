@@ -279,8 +279,11 @@ def create_app(
     else:
         from fakeredis.aioredis import FakeRedis
         playback_redis = FakeRedis(decode_responses=True)
-    app.state.speech_playback = PlaybackStore(playback_redis)
+    app.state.speech_playback = PlaybackStore(playback_redis, meeting_repo.save_voice_reply)
     app.include_router(build_speak_router(meeting_repo, command_publisher, app.state.speech_playback))
+    from .lifecycle.voice import build_voice_router
+    app.include_router(build_voice_router(meeting_repo, playback_redis, command_publisher, app.state.speech_playback))
+    from .lifecycle.voice_settings import build_voice_settings_router
 
     # Resolve the shared recording storage before mounting the collector: completed-meeting erasure
     # uses this same port to delete objects before its transcript/JSONB finalization.
@@ -295,6 +298,7 @@ def create_app(
     # --- collector: transcripts + meetings + ws-authorize (api.v1) ---
     if transcript_store is None:
         transcript_store = _collector_fakes().InMemoryTranscriptStore()
+    app.include_router(build_voice_settings_router(playback_redis, repo=meeting_repo, store=transcript_store))
     if recording_repo is None:
         recording_repo = _recordings_fakes().InMemoryRecordingRepo()
     from .collector.refinement import BotRefiner

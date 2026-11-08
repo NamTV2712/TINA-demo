@@ -1,5 +1,8 @@
 # lifecycle — receiver + meeting-state machine (O-MTG-1)
 
+`voice_settings.py` exposes account-authenticated TTS readiness metadata and a bounded fixed-text
+WAV preview for browser playback only. It never sends a room Speak command or returns TTS credentials.
+
 The **receiver** side of `lifecycle.v1`. The bot emits LifecycleEvents to its control-plane
 callback (emitter = `meetings/services/bot/src/orchestrator.ts`, L4-proven); this brick ingests
 them, validates each AT THE SEAM (jsonschema by path against the sealed `lifecycle.v1` schema),
@@ -62,3 +65,5 @@ TRANSIENT → retry: `awaiting_admission_timeout`, `join_failure`. PERMANENT →
 `test_lifecycle_diagnostics.py` (P3a: per-terminal-cause attribution + webhook) ·
 `test_lifecycle_fixtures.py` (P3b: normal / user-stop+leave-command / join-failure) ·
 `test_join_retry.py` (P3d: FakeClock-driven bounded retries). Ride `gate:python`.
+
+`voice.py` owns room-shared voice policy, active-session capability checks, turn reservations and state. Policy changes cancel thought/playback; only approved current evidence may reach TTS.

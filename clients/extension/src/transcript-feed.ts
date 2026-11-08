@@ -1,5 +1,6 @@
 import { groupSegments, type TranscriptSegment } from './transcript-rendering';
 import { translationSegments, type TranscriptLanguage, type TranslationGroup, type PhraseTranslation } from './translation';
+import { replyLabel, type VoiceReply } from './voice-replies';
 
 type Segment = TranscriptSegment & { speaker_key?: string; translation?: PhraseTranslation };
 const identity = (s: Segment): string => s.segment_id || `${s.speaker_key || s.speaker || ''}:${s.absolute_start_time}`;
@@ -18,6 +19,7 @@ export function createTranscriptFeed(feed: HTMLElement, root: HTMLElement, lates
   const spans = new Map<string, HTMLSpanElement>();
   const translations = new Map<string, HTMLSpanElement>();
   const originals = new Map<string, HTMLSpanElement>();
+  const replyRows = new Map<string, { row: HTMLElement; time: HTMLTimeElement; state: HTMLElement; copy: HTMLElement; note: HTMLElement; sources:HTMLElement }>();
   let following = true;
   function createTurn() {
     const row = element('article', 'transcript-turn'); row.setAttribute('role', 'listitem');
@@ -37,9 +39,9 @@ export function createTranscriptFeed(feed: HTMLElement, root: HTMLElement, lates
   }, { passive: true });
   latest.addEventListener('click', scrollToLatest);
   return {
-    reset() { rows.clear(); spans.clear(); translations.clear(); originals.clear(); root.replaceChildren(); following = true; latest.hidden = true; feed.scrollTop = 0; },
+    reset() { rows.clear(); spans.clear(); translations.clear(); originals.clear(); replyRows.clear(); root.replaceChildren(); following = true; latest.hidden = true; feed.scrollTop = 0; },
     reveal() { if (following) scrollToLatest(); },
-    render(segments: Segment[], draftLabel: string, language: TranscriptLanguage = 'vi', translationGroups: TranslationGroup[] = [], paused = false) {
+    render(segments: Segment[], draftLabel: string, language: TranscriptLanguage = 'vi', translationGroups: TranslationGroup[] = [], paused = false, replies: VoiceReply[] = []) {
       const selection = document.getSelection?.();
       const selected = selection?.rangeCount && feed.contains(selection.anchorNode) && feed.contains(selection.focusNode)
         ? { anchor: selection.anchorNode!, anchorOffset: selection.anchorOffset, focus: selection.focusNode!, focusOffset: selection.focusOffset } : null;
@@ -57,6 +59,7 @@ export function createTranscriptFeed(feed: HTMLElement, root: HTMLElement, lates
         const date = new Date(group.startTime);
         text(turn.time, Number.isFinite(date.getTime()) ? date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }) : '');
         if (turn.time.dateTime !== group.startTime) turn.time.dateTime = group.startTime;
+        turn.row.dataset.sourceTime = String(date.getTime());
         const confirmed: HTMLElement[] = [], pending: HTMLElement[] = [];
         for (const segment of group.segments) {
           const id = identity(segment); activeSpans.add(id);
@@ -83,6 +86,35 @@ export function createTranscriptFeed(feed: HTMLElement, root: HTMLElement, lates
         text(turn.label, draftLabel);
         return turn.row;
       });
+      const activeReplies = new Set<string>();
+      for (const reply of replies) {
+        activeReplies.add(reply.request_id);
+        let item = replyRows.get(reply.request_id);
+        if (!item) {
+          const row = element('article', 'transcript-turn voice-reply'); row.setAttribute('aria-label', 'TINA trả lời'); row.setAttribute('role', 'listitem');
+          const header = element('header', 'turn-header'), name = element('strong', 'speaker-name'); text(name, 'TINA trả lời');
+          const state = element('span', 'turn-time'); state.setAttribute('role', 'status');
+          const time = element('time', 'turn-time'), copy = element('p', 'turn-copy'), note = element('p', 'turn-time');
+          const sources=element('div','voice-sources');
+          header.append(name, state, time); row.append(header, copy, sources, note);
+          item = { row, state, time, copy, note, sources }; replyRows.set(reply.request_id, item);
+        }
+        const partial=reply.state==='stopped'&&reply.played_text!==undefined;
+        text(item.state, replyLabel[reply.state]+(reply.answer_kind==='web'?' · Web':reply.answer_kind==='general'?' · Kiến thức chung':'')); text(item.copy, partial ? reply.played_text||'Chưa có câu nào được phát trọn vẹn.' : reply.text);
+        const signature=JSON.stringify(reply.links||[]);
+        if(item.sources.dataset.links!==signature){
+          item.sources.replaceChildren(...(reply.links||[]).map(link=>{const a=element('a','voice-source');a.href=link.url;a.target='_blank';a.rel='noopener noreferrer';text(a,link.title);a.style.marginRight='10px';return a;}));
+          item.sources.dataset.links=signature;
+        }
+        const date = new Date(reply.created_at_ms); item.time.dateTime = date.toISOString();
+        item.row.dataset.sourceTime = String(reply.created_at_ms);
+        text(item.time, date.toLocaleTimeString('vi-VN'));
+        text(item.note, partial?'Chỉ hiển thị các câu đã phát trọn vẹn.': ['stopped', 'failed', 'unconfirmed'].includes(reply.state) ? 'TINA có thể chưa đọc hết nội dung này.' : '');
+        item.note.hidden = !item.note.textContent;
+        ordered.push(item.row);
+      }
+      for (const id of replyRows.keys()) if (!activeReplies.has(id)) replyRows.delete(id);
+      ordered.sort((a, b) => Number(a.dataset.sourceTime) - Number(b.dataset.sourceTime));
       reconcile(root, ordered);
       for (const key of rows.keys()) if (!activeRows.has(key)) rows.delete(key);
       for (const key of spans.keys()) if (!activeSpans.has(key)) { spans.delete(key); originals.delete(key); translations.delete(key); }

@@ -81,6 +81,21 @@ def test_public_summary_is_safe_for_personal_custom_service_and_environment_fall
     assert _transcription_summary({"backend": "default"}, {"default_backend": "sherpa"})["source"] == "platform"
 
 
+def test_voice_preference_is_account_scoped_and_delivered_in_existing_spawn_context(client,monkeypatch):
+    from sqlalchemy.orm import attributes
+    monkeypatch.setattr(attributes,'flag_modified',lambda *a:None)
+    c,_=client;headers={'X-API-Key':'valid-key'}
+    assert c.get('/user/voice',headers=headers).json()=={'prepare_new_bots':None}
+    assert c.put('/user/voice',headers=headers,json={'prepare_new_bots':False}).json()=={'prepare_new_bots':False}
+    context=c.get('/internal/users/7/bot-context',headers={'X-Internal-Secret':'internal-test-secret'}).json()
+    assert context['voice']=={'prepare_new_bots':False}
+    assert c.get('/user/voice').status_code==401
+    assert c.put('/user/voice',headers=headers,json={'prepare_new_bots':'false'}).status_code==422
+    assert c.put('/user/voice',headers=headers,json={'prepare_new_bots':False,'user_id':8}).status_code==422
+    assert c.fixture_user.data['transcription_prefs']=={'backend':'funasr'}
+    assert c.put('/user/voice',headers=headers,json={'prepare_new_bots':None}).json()=={'prepare_new_bots':None}
+
+
 def test_managed_viegem_uses_only_platform_credentials_and_does_not_leak_them(client, monkeypatch):
     c, _ = client
     c.fixture_platform.update(viegem_url="http://host.docker.internal:18005", viegem_token="managed-secret")

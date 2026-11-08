@@ -40,6 +40,13 @@ def verify(directory):
 
 def install(directory):
     data = manifest()
+    if (directory / 'silero_vad.onnx').is_file():
+        try:
+            verify(directory)
+            verify_vad(directory)
+            return
+        except ValueError:
+            pass
     directory.mkdir(parents=True, exist_ok=True)
     # Stream to disk with an exact size bound; never extract arbitrary archive paths.
     with tempfile.TemporaryFile() as archive:

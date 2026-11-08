@@ -12,7 +12,7 @@
   "core/agent/contracts/unit.v1": "21728526bd5b7a5732e9681e4dd66252d1731cdf31523b4bc6fbd7d546414dc3",
   "core/agent/contracts/workspace.v1": "f5c9a7630e03a69b6b7265e66f9d84e4fec4e25f92830a9d0d3071be65ba4e7d",
   "core/flows/contracts/flows.v1": "31b59e4ee11729c65313e1fb440a1472e969f2030bfadeb5a59143f0c2d86522",
-  "core/gateway/contracts/api.v1": "838839b3bd1d1d5cf49bff61c9b0350f4a67649d8622800d02ec78dbe99c7ed9",
+  "core/gateway/contracts/api.v1": "9f14c77d7a1ec1e0cd497dae35a48cbb26d65cb4a187a7e2eec7d48ec9e69076",
   "core/gateway/contracts/logevent.v1": "ab4b65305aa58f9e385998439062b5145b353ad6918783f168d54fa74c992cea",
   "core/gateway/contracts/ws.v1": "9fd89f5fe27e2d8ca7d7a11e6d3ab0d9c94d3bd37bda61866d91530a3b9e6e4c",
   "core/identity/contracts/identity.v1": "bff18beb068e7a23a568bab0d157df89f78d4deda0f5e432c8c0b0f2024b4276",
@@ -27,8 +27,11 @@
   "core/meetings/contracts/lifecycle.v1": "458d9701d9b835deb3873c1fc96e0f42a439445fa9c2e90a515e8bc8b980772d",
   "core/meetings/contracts/meeting-memory-revision.v1": "c46424b023e37e0ab42d2e49d100e6ad8d1f1d2172b94f667eb457b79d0a0778",
   "core/meetings/contracts/meeting-memory.v1": "fd3572eccbba501ea8feb2e53a02743b1e1fe523675c423909e27764b3088b85",
+  "core/meetings/contracts/meeting-voice.v1": "f38de82e21c46f7f95fa5c75c470dadde1c6532527881d7117fb4dab04765619",
   "core/meetings/contracts/service-authority.v1": "1b4121fa004b0963963b45caa9266c29d8f6c5276af66a879e7c7678f5495c1b",
   "core/meetings/contracts/speaker-revision.v1": "714d3f424452b1c2d06d2f68640324b71dc1eea177bf6546c16c197ef27bf62c",
+  "core/meetings/contracts/speech-room.v1": "b1481664aceccb15cb73251b69e9b4f503921a7e17c71d4604ba4ba4bbe37a58",
+  "core/meetings/contracts/speech.v1": "5b2d85b5f470e1fbbe85b5061aeb9aa2bb2438f9c948c81ef12e137fa8bf20a2",
   "core/meetings/contracts/stt-foundation.v1": "144b81e5dd0e5ce02af1765b57b527729f7f1b6c64c0184d27be3d5278d1d3fc",
   "core/meetings/contracts/stt-metrics.v1": "23cfc2d8d92bbb55f6d3fafcd3c83c2acd703a9aead9d5fe492738669120ea6f",
   "core/meetings/contracts/transcript-alignment.v1": "d88dd346d036d84e1b35f13fd2e2beca0c1f5b1788c4d8a756ce61df43c89209",
@@ -40,7 +43,5 @@
   "core/runtime/contracts/runtime.v1": "91055d8b14201cac1f99ef6e8c13f8556b0ece2edf94c7d90652ffed4670baf0",
   "core/runtime/contracts/schedule.v1": "1ee54ffef6c1be896d5a920cc8383b3a6e324b07530a69b02522fa555d4fc958",
   "deploy/contracts/config.v1": "a14c262feda834344081cd7e2d6e280c52ef127b5f1aba48e10847f79440e24f",
-  "deploy/contracts/execution-targets.v1": "431f2efdd308b42ea70059ac43bf41aa33595dc94bef9863ff3d4177303478cf",
-  "core/meetings/contracts/speech.v1": "2b43b7b5c2a25608ebef55190410da0139579ce1bcf34f8e647922c6e2a4026a",
-  "core/meetings/contracts/speech-room.v1": "b1481664aceccb15cb73251b69e9b4f503921a7e17c71d4604ba4ba4bbe37a58"
+  "deploy/contracts/execution-targets.v1": "431f2efdd308b42ea70059ac43bf41aa33595dc94bef9863ff3d4177303478cf"
 }

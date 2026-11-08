@@ -38,6 +38,7 @@ def fixture():
             "gateway": {"build": {"context": "."}, "ports": [{"target": 8000, "published": "28056"}]},
             "storage-init": {"entrypoint": ["true"]},
             "meeting-api": {"depends_on": {"storage-init": {"condition": "service_completed_successfully"}}},
+            "redis": {"image": "registry.example/valkey:fixture"},
         },
     }
 
@@ -67,7 +68,7 @@ class Docker:
                 if "--environment" in args:
                     values = {k: v for k, v in self.config["services"]["admin-api"]["environment"].items()
                               if k == "TINA_VIEGEM_TOKEN"}
-                    values.update({k: (env or {})[k] for k in ("TINA_VIEGEM_DEVICE", "COMPOSE_PROFILES") if k in (env or {})})
+                    values.update({k: (env or {})[k] for k in ("TINA_VIEGEM_DEVICE", "COMPOSE_PROFILES", "TINA_MEETING_VOICE", "TTS_API_TOKEN") if k in (env or {})})
                     out = "\n".join(f"{k}={v}" for k, v in values.items())
                 else:
                     out = json.dumps(self.config)
@@ -134,6 +135,40 @@ class EntryPointTest(unittest.TestCase):
         self.assertLess(max(checks), up)
         self.assertLess(up, access)
         self.assertTrue({"--wait", "--wait-timeout", "--no-build", "--pull", "never"} <= set(calls[up]))
+
+    def test_voice_profile_prepares_models_before_activation(self):
+        services = self.docker.config['services']
+        services['redis']['image'] = 'registry.example/valkey:fixture'
+        services.update({'meeting-voice-models': {'image': 'bot:resolved'},
+                         'tts-models': {'image': 'tts:fixture'},
+                         'tts': {'image': 'tts:fixture', 'build': {'context': '.'}, 'depends_on': {
+                             'meeting-voice-models': {'condition': 'service_completed_successfully'},
+                             'tts-models': {'condition': 'service_completed_successfully'}}}})
+        self.docker.rows.extend([{'Service': name, 'State': 'exited', 'ExitCode': 0}
+                                 for name in ('meeting-voice-models', 'tts-models')])
+        self.docker.rows.append({'Service': 'tts', 'State': 'running', 'Health': 'healthy'})
+        with patch.dict(os.environ, {'TINA_MEETING_VOICE': '1', 'TTS_API_TOKEN': 'test-only-' + 'x' * 40}):
+            self.invoke('all')
+        calls = [args for args, _ in self.docker.calls]
+        self.assertFalse(any('pull' in args and any(name in args for name in ('meeting-voice-models', 'tts-models')) for args in calls))
+        up = next(i for i, args in enumerate(calls) if 'up' in args)
+        for name in ('meeting-voice-models', 'tts-models'):
+            prepared = next(i for i, args in enumerate(calls) if 'run' in args and args[-1] == name)
+            self.assertLess(prepared, up)
+        self.assertTrue(any('--profile' in args and 'speech' in args for args in calls))
+        self.assertTrue(any('pull' in args and args[-1] == 'redis' for args in calls))
+
+    def test_asr_controller_can_preserve_voice_profile_without_receiving_tts_credentials(self):
+        with patch.dict(os.environ, {'TINA_MEETING_VOICE': '1', 'COMPOSE_PROFILES': 'asr,speech'}):
+            selected = stack.Stack('runtime-control')
+        self.assertIn('speech', selected.env['COMPOSE_PROFILES'].split(','))
+        self.assertNotIn('TTS_API_TOKEN', selected.env)
+
+    def test_voice_profile_refuses_missing_tts_token_before_build(self):
+        with patch.dict(os.environ, {'TINA_MEETING_VOICE': '1'}):
+            with self.assertRaisesRegex(stack.StackError, 'TTS_API_TOKEN'):
+                stack.Stack('all')
+        self.assertFalse(any('build' in args for args, _ in self.docker.calls))
 
     def test_failed_wait_does_not_mint_key(self):
         self.docker.fail_up = True

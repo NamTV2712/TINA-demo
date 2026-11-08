@@ -43,6 +43,7 @@ def _fixture(*, status: str = "completed", storage_cls=InMemoryStorage):
             "recordings": [_recording()],
             "processed": {"views": [{"doc": {"notes": ["derived"]}}]},
             "notes": "derived summary",
+            "voice_replies": {"reply": {"text": "Previously spoken answer"}},
             "share_grants": [{"id": "share"}],
             "transcript_viewers": [OTHER],
         },
@@ -78,6 +79,7 @@ def test_owner_deletes_completed_artifacts_but_terminal_meeting_row_survives():
     assert "recordings" not in meeting["data"]
     assert "processed" not in meeting["data"]
     assert "notes" not in meeting["data"]
+    assert "voice_replies" not in meeting["data"]
     assert meeting["data"]["artifact_deletion"]["backup_residuals"] == (
         "expire_under_deployment_retention_policy"
     )

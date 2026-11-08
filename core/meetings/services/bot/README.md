@@ -88,3 +88,7 @@ node core/meetings/services/bot/dist/audio-archive.js capture.jsonl observations
 The reader is bounded to 30 seconds, keeps channels separate, and refuses missing/overlapping data
 rather than filling silence. Existing recordings lacking source-clock annotations still have their
 original playback/replay path, but cannot claim exact sample-index recovery through this reader.
+
+Voice audio uses separate PulseAudio sinks: meeting_rx receives browser playback, while tts_sink
+feeds virtual_mic. The source stays unmuted so Meet sees a usable device; TTS sink mute plus the
+verified meeting UI gate speech. This does not change captured PCM or either ASR backend.

@@ -3,13 +3,33 @@
 The female **Trúc Ly** preset (Northern Vietnamese, natural style) from **VieNeu-TTS v3 Turbo**,
 using the ONNX CPU backend. This implements
 the bot's existing speech HTTP interface. STT, agent dispatch, transcripts and bot playback
-are unchanged. It is an optional separate Compose project, not part of `make all`.
+are unchanged. The standalone Compose project remains available. The main stack now also offers an opt-in `speech` profile through `TINA_MEETING_VOICE=1`; see [bot-hosted voice](../../docs/tina-meeting-voice.md).
 
 The Piper proposal is replaced because its eSpeak phonemizer/data introduces GPL, contrary
 to ADR-0004. VieNeu, sea-g2p and the chosen model/codec cards declare Apache-2.0.
 No reference recording, voice cloning or training is enabled.
 The SDK also installs transitive MPL/LGPL packages as separate unmodified dependencies;
 their scoped records are in the repository's `license-exceptions.json`.
+
+## Encrypted token for one machine
+
+A private pair at `~/.config/tina/tts-local/.env` and `~/.config/tina/tts-local/.env.keys`
+takes precedence over the shared repo token when no explicit `TINA_TTS_ENV_FILE` or
+`TINA_TTS_KEYS_FILE` is supplied. The local directory is private (0700), its files are 0600,
+and both files stay outside the checkout. This lets each self-hosted deployment use its own
+TTS API token without changing `deploy/tts/.env` or the main-stack key. An incomplete local
+pair fails closed; it does not silently switch back to shared credentials. Explicit file
+and key overrides retain priority.
+
+For bot-hosted voice, keep the speech profile enabled when recreating the stack:
+
+```sh
+TINA_MEETING_VOICE=1 python3 deploy/tts/run.py -- make all
+```
+
+The runner decrypts the token only into process memory and gives the same value to Meeting API
+and TTS. Spawned voice-enabled bots obtain that token through the existing server-side wiring;
+participants receive neither the service token nor its decryption key.
 
 ## Setup on another machine (Ubuntu/WSL or Linux)
 
@@ -174,7 +194,7 @@ playback. Discord speaking remains unsupported.
   reporting completion. Closing a connection cannot preempt native inference; its single
   synthesis lock remains held until inference actually returns.
 - GET `/health` and `/status` expose content-free readiness/format information.
-- One native synthesis at a time; a competing request gets 503, with no unbounded queue.
+- One native synthesis at a time; a FIFO queue permits three waiters for at most 15 seconds. Overflow/timeout returns 503; disconnected queued clients are removed.
 - No CORS, text storage or input/credential logging. Published port is loopback-only; bots use
   the authenticated service on the existing Docker network.
 - The response follows synthesis; this is not token/audio streaming. Native inference is not
@@ -214,3 +234,77 @@ With Dotenvx installed, this includes a real encrypt/decrypt transfer into anoth
 home: matching env/key succeeds, stale ambient token is replaced, unrelated values/private
 keys are absent from the probe, and a wrong key prevents execution. No Docker/model is needed.
 The CI TTS job installs pinned Dotenvx and runs these alongside the audio/protocol tests.
+
+`GET /ready` requires the same `X-API-Key` as synthesis, and performs no inference. The bot voice preflight uses it to check that shared credentials match. `/health` and `/status` remain content-free unauthenticated probes.
+
+Bot ASR-addressed voice now accepts its built-in TINA name variants at the beginning of a turn. The local service prewarms/caches only the fixed acknowledgment `Dạ, em nghe.`; bot answers are validated before sentence-by-sentence playback and never cached.
+
+### Verified replies and the spoken copy
+
+Voice workers generate the reply with a 25-second provider budget, then use a separate 15-second
+review against the supplied sources. Exact digit/date tokens absent from cited evidence are
+rejected before review. The reviewer checks entailment, the correct owner/task/unit/deadline,
+negation and proposal/decision contradictions. A rejected, malformed or unavailable review yields
+an insufficient-evidence reply; the unchecked draft is never sent to TTS. This is an additional
+model check, not a proof of factual correctness, and can increase voice response latency.
+
+TTS keeps `input` as the display/history text and derives a separate `speech_text` immediately before
+inference. The installed pinned `sea-g2p` normalizer handles selected time, full-date and currency
+spans; unary signs are preserved explicitly. A date such as `03/04` is spoken as literal digits and
+slash rather than assigning day/month. URLs, email and backtick code are excluded from this custom
+preprocessing; VieNeu still performs its own phonemization. The original answer and ASR are untouched.
+
+### Project pronunciation dictionary
+
+Edit `deploy/tts/pronunciations.json` and rebuild/recreate TTS with your normal deployment command.
+The file is packaged into the image; running processes do not reload edits. Defaults include TINA
+and API. To add a project and explicitly select it for two meeting IDs (the IDs in Terminal URLs):
+
+```json
+{
+  "default": {"TINA": "ti na", "API": "ây pi ai"},
+  "projects": {"demo": {"ACME": "ác mi"}},
+  "meeting_projects": {"14": "demo", "25": "demo"}
+}
+```
+
+Bots send their validated invocation `meeting_id`; previews/unknown meetings use only defaults.
+This is operator-approved pronunciation configuration, not content read from private workspaces.
+Clients cannot submit dictionaries. Review every pair before deployment: the service enforces word,
+size and numeric/markup restrictions but cannot prove two spellings sound like the same name.
+The fixed acknowledgment is exempt from project overrides. Speech text is bounded to 12,000
+characters and is never included in logs or saved over display text. Numbers in glossary entries
+are rejected so date/amount normalization stays in the controlled numeric rules.
+
+Focused offline checks (use a TTS image with its pinned dependencies installed):
+
+```sh
+python -m unittest test_speech_text test_server
+```
+
+### Streaming and one-sentence lookahead
+
+The sidecar now calls `infer_stream()` and returns PCM16 mono/24 kHz with HTTP/1.1 chunked transfer.
+A stateful soxr resampler carries its filter state between native 48 kHz chunks and flushes once at
+normal completion. The cached fixed acknowledgment remains a ready-made PCM stream. Private answers
+are not cached. First audio is generated before the response headers; failures before that return
+503, while later failures close the connection without a success chunk terminator. Clients must
+treat an incomplete response as failed, even if some audio has already been heard.
+
+The shared FIFO/connection/absolute time limits still apply. Cancellation is checked between native
+iterations and writes, closes the generator and releases its slot after any active native call
+returns. A native call already executing is not forcibly preempted. Slow readers exert TCP
+backpressure; the absolute connection deadline bounds a stalled client.
+
+Each bot holds at most two synthesis handles: the current sentence and one lookahead. Each uses a
+bounded PassThrough (24 KB high-water mark plus transport buffers); playback waits for 150 ms of PCM
+or a valid shorter finished stream. Lookahead never opens the microphone or starts the player. A
+failed lookahead cannot mute current playback. Source policy is checked again after preparation
+and before each sentence plays. Stop, departure, policy change and final cleanup cancel both
+handles. Completed receipts require the HTTP stream's normal end, valid PCM, successful player exit
+and microphone cleanup; process start is local audio injection, not remote audibility.
+
+The LLM answer remains fully validated before speech preparation. No unverified token streaming,
+new ASR backend, voice model or inference precision is introduced. `test_streaming.py` checks early
+HTTP audio, truncated streams and resampling continuity; bot voice/playback tests cover lookahead,
+Stop and policy revocation. Measure HTTP audio latency separately from meeting delivery latency.

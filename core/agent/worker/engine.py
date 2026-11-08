@@ -633,6 +633,8 @@ def start_prompt(start: dict) -> str | None:
 
 def _run_meeting_knowledge(stream, out_topic: str, start: dict) -> None:
     from shared.meeting_knowledge import PREFIX, SYSTEM, validate_answer
+    from shared.voice_knowledge import (VOICE_SYSTEM, VOICE_TOOLS, GENERAL_SYSTEM, VERIFY_SYSTEM,
+        validate_voice_answer, verify_voice_reply, voice_tool_calls)
     try:
         inline = start_prompt(start) or ''
         if not inline.startswith(PREFIX):
@@ -641,11 +643,34 @@ def _run_meeting_knowledge(stream, out_topic: str, start: dict) -> None:
         if os.environ.get('TINA_CHAT_SESSION') != 'meeting-knowledge-' + payload['request_id']:
             raise ValueError('Knowledge request mismatch')
         source = json.loads(payload['text'])
-        result = completion_from_env(timeout=45).complete(payload['text'], system=SYSTEM)
-        if len(result.text) > 50000:
-            raise ValueError('Knowledge answer too large')
-        validate_answer(result.text, source['sources'])
-        stream.xadd(out_topic, {'event': json.dumps({'type': 'message-delta', 'text': result.text})})
+        mode = source.get('mode')
+        voice = mode == 'voice'
+        provider = completion_from_env(timeout=25 if voice or mode == 'voice_general' else 45)
+        if mode == 'voice_web':
+            search = getattr(provider, 'search', None)
+            if search is None:
+                text = json.dumps({'reason': 'web_unavailable'})
+            else:
+                try:
+                    result = search(source['question'])
+                    text = json.dumps({'text': result.text, 'links': result.sources}, ensure_ascii=False)
+                except Exception:
+                    text = json.dumps({'reason': 'web_unavailable'})
+        else:
+            system = (VOICE_SYSTEM + ('\n' + VOICE_TOOLS if source.get('tools_remaining', 0) else '')) if voice else GENERAL_SYSTEM if mode == 'voice_general' else SYSTEM
+            result = provider.complete(payload['text'], system=system)
+            if len(result.text) > 50000:
+                raise ValueError('Knowledge answer too large')
+            if mode == 'voice_general':
+                text = result.text
+            elif voice and source.get('tools_remaining', 0) and voice_tool_calls(result.text) is not None:
+                text = result.text
+            else:
+                (validate_voice_answer if voice else validate_answer)(result.text, source['sources'])
+                text = verify_voice_reply(result.text, source['question'], source['sources'],
+                    lambda prompt: completion_from_env(timeout=15).complete(prompt, system=VERIFY_SYSTEM).text,
+                    diagnostics=True) if voice else result.text
+        stream.xadd(out_topic, {'event': json.dumps({'type': 'message-delta', 'text': text})})
     except Exception as exc:  # Never log questions, sources or provider responses.
         log.warning('meeting knowledge failed error=%s', type(exc).__name__)
     stream.xadd(out_topic, {'event': json.dumps({'type': 'turn-complete'})})

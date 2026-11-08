@@ -4,6 +4,7 @@ import {
   type BotMeeting,
 } from './bot-transcript';
 import type { TranscriptSegment } from './transcript-rendering';
+import type { VoiceReply } from './voice-replies';
 import { watchTranslation, type TranscriptLanguage, type TranslationSnapshot } from './translation';
 
 type Source = 'bot' | 'desktop';
@@ -21,6 +22,7 @@ let source: Source = 'bot';
 let meetings: BotMeeting[] = [];
 let selected: BotMeeting | null = null;
 let segments: TranscriptSegment[] = [];
+let replies: VoiceReply[] = [];
 let stopWatching = () => {};
 let listRequest: AbortController | null = null;
 let scope = 0;
@@ -96,6 +98,7 @@ function applyTheme(): void {
 
 function clearTranscript(): void {
   segments = [];
+  replies = [];
   feed.reset();
   $('emptyState').hidden = false;
   $('transcriptStatus').textContent = 'Choose a meeting to view its transcript.';
@@ -103,9 +106,9 @@ function clearTranscript(): void {
 }
 
 function renderTranscript(status?: string): void {
-  const hasText = segments.some(row => row.text?.trim());
+  const hasText = segments.some(row => row.text?.trim()) || replies.length > 0;
   $('emptyState').hidden = hasText;
-  feed.render(segments, 'Draft', source === 'bot' ? language : 'vi', translation?.groups ?? [], translationError || translation?.status === 'paused');
+  feed.render(segments, 'Draft', source === 'bot' ? language : 'vi', translation?.groups ?? [], translationError || translation?.status === 'paused', replies);
   renderTranslationControls();
   if (selected && !hasText) $('emptyStateText').textContent = 'Waiting for transcript text…';
   $('transcriptStatus').textContent = status || (selected ? selected.status === 'active' ? 'Live transcript' : 'Saved transcript' : 'Choose a meeting to view its transcript.');
@@ -156,9 +159,10 @@ function watchMeeting(meeting: BotMeeting, token: number): void {
   $('meetingTitle').textContent = meeting.title;
   $('meetingMeta').textContent = `${meeting.platform.replace(/_/g, ' ')} · ${meeting.status}`;
   $('emptyStateText').textContent = 'Waiting for transcript text…';
-  const onUpdate = (rows: TranscriptSegment[], status: string) => {
+  const onUpdate = (rows: TranscriptSegment[], status: string, voice: VoiceReply[] = []) => {
     if (token !== scope || !selected || currentKey(selected) !== currentKey(meeting)) return;
     segments = rows;
+    replies = voice;
     renderTranscript(status === 'active' ? 'Live transcript' : 'Saved transcript');
     setStatus('Connected', 'ready');
   };

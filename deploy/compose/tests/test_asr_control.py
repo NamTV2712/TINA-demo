@@ -60,6 +60,25 @@ class ControlTests(unittest.TestCase):
         self.assertEqual(len(calls), 2)
         sleep.assert_called_once_with(1)
 
+    def test_install_persists_enabled_profiles_without_persisting_tts_token(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            selected = SimpleNamespace(env={'COMPOSE_PROFILES': 'asr,speech', 'TTS_API_TOKEN': 'must-not-persist'},
+                env_file=root / 'main.env', project='fixture', files=[str(root / 'compose.yml')], control_port=18987,
+                services={'admin-api': {'environment': {'INTERNAL_API_SECRET': 'fixture-control-secret'}}})
+            identity = control.instance_of(selected)
+            fake_stack = SimpleNamespace(ROOT=root, HERE=BIN.parent, CUDA_OVERLAY='unused-overlay')
+            responses = [control.ControlError(503, 'not running'), {'instance': identity}]
+            with patch.dict('sys.modules', {'stack': fake_stack}), patch.object(control.Path, 'home', return_value=root), \
+                 patch.object(control.platform, 'system', return_value='Linux'), \
+                 patch.object(control, 'request_json', side_effect=responses), \
+                 patch.object(control.socket, 'socket') as sock, patch.object(control.subprocess, 'Popen'):
+                sock.return_value.__enter__.return_value.connect_ex.return_value = 1
+                control.install(selected)
+            saved = json.loads((root / '.config/tina/asr-control' / identity / 'config.json').read_text())
+            self.assertEqual(saved['env']['COMPOSE_PROFILES'], 'asr,speech')
+            self.assertNotIn('TTS_API_TOKEN', saved['env'])
+
     def test_missing_optional_viegem_profile_keeps_runtime_status_available(self):
         selected = SimpleNamespace(services={"admin-api": {"environment": {}}, "gipformer": {}},
             viegem_device="disabled", endpoint=lambda service, _: {"gipformer": "http://gipformer"}[service])

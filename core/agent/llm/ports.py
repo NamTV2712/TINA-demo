@@ -129,6 +129,7 @@ class CompletionResult:
 
     text: str
     model: str = ""
+    sources: tuple[dict, ...] = ()
 
 
 class CompletionPort(Protocol):

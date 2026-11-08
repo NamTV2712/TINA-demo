@@ -12,6 +12,7 @@
  */
 import { createTranscriptManager, type TranscriptSegment } from './transcript-rendering';
 import { createTranscriptFeed } from './transcript-feed';
+import type { VoiceReply } from './voice-replies';
 import { type CaptureStatus, isActive } from './capture-liveness';
 import { resolveEndpoints, resolveDashboardUrl, dashboardOverride, normalizeDeployment, DEFAULT_DEPLOYMENT } from './endpoints';
 import { botBase, listBotMeetings, watchBotTranscript, type BotMeeting } from './bot-transcript';
@@ -70,12 +71,13 @@ let transcriptSource: 'capture' | 'bot' = 'capture';
 let botMeetings: BotMeeting[] = [];
 let botMeeting: BotMeeting | null = null;
 let botWatching = false;
+let botReplies: VoiceReply[] = [];
 let botStop = () => {};
 let botListRequest: AbortController | null = null;
 
 function resetBot(clear = false): void {
   botStop(); botStop = () => {}; botWatching = false;
-  if (clear) { txSegs = []; transcriptFeed.reset(); renderFeed(); }
+  if (clear) { txSegs = []; botReplies = []; transcriptFeed.reset(); renderFeed(); }
 }
 
 function renderBot(): void {
@@ -141,8 +143,8 @@ function watchSelectedBot(): void {
   const meeting = botMeeting;
   $('botNotice').textContent = 'Đang kết nối transcript…';
   botStop = watchBotTranscript({ botGatewayUrl: cfg.botGatewayUrl, apiKey: cfg.apiKey }, meeting,
-    (rows, status) => {
-      txSegs = rows; $('botNotice').textContent = `#${meeting.id} · ${status} · Đang xem; không thu audio tại máy.`;
+    (rows, status, replies = []) => {
+      txSegs = rows; botReplies = replies; $('botNotice').textContent = `#${meeting.id} · ${status} · Đang xem; không thu audio tại máy.`;
       renderBot();
     }, (message, denied) => {
       if (denied) { resetBot(true); botMeeting = null; botMeetings = []; ($('botMeeting') as HTMLSelectElement).replaceChildren(); }
@@ -460,10 +462,10 @@ function feedStatus(text: string, isError = false): void {
 }
 
 function renderFeed(): void {
-  const hasTranscript = txSegs.some(segment => segment.text?.trim());
+  const hasTranscript = txSegs.some(segment => segment.text?.trim()) || transcriptSource === 'bot' && botReplies.length > 0;
   $('emptyState').hidden = hasTranscript;
   if (transcriptSource === 'bot') {
-    transcriptFeed.render(txSegs, 'Bản nháp · Bot đang nhận dạng…');
+    transcriptFeed.render(txSegs, 'Bản nháp · Bot đang nhận dạng…', 'vi', [], false, botReplies);
     $('captureNotice').hidden = true;
     $('emptyText').textContent = botWatching ? 'Đang chờ transcript từ Bot…' : 'Chọn cuộc họp rồi bấm Watch transcript.';
     return;

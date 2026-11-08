@@ -570,6 +570,23 @@ export class SpeakerStreamManager {
     return Array.from(this.buffers.keys());
   }
 
+  isFinalSubmission(speakerId: string): boolean {
+    return this.buffers.get(speakerId)?.idleSubmitted === true;
+  }
+
+  /** Check before observing a result; reset/deferred-close audio no longer owns that request. */
+  isCurrentSubmission(speakerId: string): boolean {
+    const buffer = this.buffers.get(speakerId);
+    return !!buffer && !buffer.pendingFinal && this.submitGeneration.get(speakerId) === buffer.generation;
+  }
+
+  /** VAD may advance the next request, without closing/resetting the transcript window. */
+  requestEarlySubmit(speakerId: string): void {
+    const buffer = this.buffers.get(speakerId);
+    if (!buffer || buffer.inFlight || buffer.idleSubmitted || buffer.pendingFinal || this.unconfirmedSamples(buffer) <= 0) return;
+    void this.submitBuffer(buffer);
+  }
+
   getBufferStartMs(speakerId: string): number {
     return this.buffers.get(speakerId)?.windowStartMs ?? Date.now();
   }

@@ -327,7 +327,7 @@ def install(selected):
     state.mkdir(parents=True, exist_ok=True, mode=0o700)
     revision = hashlib.sha256(Path(__file__).read_bytes() + Path(__file__).with_name("stack.py").read_bytes()).hexdigest()
     config = {"instance": instance_of(selected), "revision": revision, "env": {k: selected.env[k] for k in
-              ("DOCKER_CONTEXT", "PROJECT", "COMPOSE_PROJECT", "COMPOSE_PROJECT_NAME", "DOTENVX_BIN", "DOTENVX_KEY_FILE") if k in selected.env}}
+              ("DOCKER_CONTEXT", "PROJECT", "COMPOSE_PROJECT", "COMPOSE_PROJECT_NAME", "COMPOSE_PROFILES", "DOTENVX_BIN", "DOTENVX_KEY_FILE") if k in selected.env}}
     config["env"].update(ENV_FILE=str(selected.env_file.resolve()),
                          COMPOSE_FILE=os.pathsep.join(f for f in selected.files if f != stack.CUDA_OVERLAY))
     config_path = state / "config.json"

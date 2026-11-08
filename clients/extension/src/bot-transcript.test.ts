@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { botBase, botSegments, listBotMeetings, watchBotTranscript } from './bot-transcript';
+import { voiceReplies } from './voice-replies';
 
 const config = { botGatewayUrl: 'http://127.0.0.1:28056', apiKey: 'fixture-secret' };
 const meeting = { id: 12, platform: 'teams', nativeMeetingId: 'same-room', title: 'Review', status: 'active', startMs: Date.parse('2026-10-30T01:00:00Z') };
@@ -48,5 +49,37 @@ try {
   watchBotTranscript(config, meeting, () => {}, (_message, denied) => errors.push(denied));
   await turn(); assert.equal(errors.at(-1), true); assert.equal(timers.length, 0);
   assert.ok(calls.every(call => !call.options.method || call.options.method === 'GET'), 'viewer never mutates or starts/stops bots');
+  const reply = { request_id: '00000000-0000-4000-8000-000000000001', text: '<script>plain text</script>', state: 'stopped', created_at_ms: 1800000000000 };
+  assert.equal(voiceReplies([reply])[0].text, reply.text);
+  assert.equal(voiceReplies([{...reply,played_text:'<script>'}])[0].played_text,'<script>');
+  assert.throws(()=>voiceReplies([{...reply,played_text:'invented'}]));
+  assert.throws(()=>voiceReplies([{...reply,played_text:[]} ]));
+  assert.throws(() => voiceReplies([reply, { ...reply, text: 'x'.repeat(4001) }]));
+  assert.throws(() => voiceReplies([{ ...reply, state: 'constructor' }]));
+  assert.throws(() => voiceReplies([{ ...reply, state: ['started'] }]));
+  assert.throws(() => voiceReplies([{ ...reply, request_id: '-'.repeat(36) }]));
+  assert.deepEqual(voiceReplies(undefined), []);
+  const google = { ...meeting, platform: 'google_meet' };
+  const googleDoc = { ...doc(), platform: 'google_meet' };
+  let answerResponse!: (value: Response) => void;
+  globalThis.fetch = (async (url: any) => String(url).endsWith('/voice-assistant')
+    ? new Promise(resolve => { answerResponse = resolve; }) : Response.json(googleDoc)) as typeof fetch;
+  const received: any[] = [];
+  const watching = watchBotTranscript(config, google, (rows, _, replies) => received.push({ rows, replies }), () => {});
+  await turn(); assert.equal(received.length, 1, 'slow voice requests cannot stall ASR');
+  answerResponse(Response.json({ replies: [reply] })); await turn();
+  assert.deepEqual(received.at(-1).replies, [reply]);
+  timers.pop()!(); await turn(); watching();
+  const count = received.length; answerResponse(Response.json({ replies: [reply] })); await turn();
+  assert.equal(received.length, count, 'aborted voice history cannot reappear after account/meeting switch');
+  timers.length = 0;
 } finally { Object.assign(globalThis, original); }
 console.log('Bot transcript: scoped history/drafts/edits, reconnect, denied access and cancellation PASS');
+
+{
+  const item={request_id:'00000000-0000-4000-8000-000000000001',text:'Theo web.',state:'completed',created_at_ms:1,
+    answer_kind:'web',links:[{url:'https://redis.io/docs/',title:'Redis'}]};
+  assert.deepEqual(voiceReplies([item])[0].links,item.links);
+  for(const url of ['javascript:alert(1)','file:///tmp/secret','https://user:password@example.com'])
+    assert.throws(()=>voiceReplies([{...item,links:[{url,title:'bad'}]}]));
+}

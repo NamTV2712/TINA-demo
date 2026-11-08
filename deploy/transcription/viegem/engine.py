@@ -1,5 +1,7 @@
 """Pinned VieGem CTC + KenLM, with FSMN intervals on the original sample clock."""
 import json
+import copy
+import math
 import os
 import sys
 from pathlib import Path
@@ -11,6 +13,24 @@ from gipformer.engine import HERE as GIPFORMER_HERE, RATE, read_audio, speech_ra
 
 HERE = Path(__file__).resolve().parent
 MODEL = '5CD-AI/VieGem-ASR'
+
+
+def name_biased_decoder(lm, weight):
+    """Opt-in word-level name prior; never mutate the shared baseline decoder."""
+    weight = float(weight)
+    if not math.isfinite(weight) or not 0 <= weight <= 2:
+        raise ValueError('TINA_VIEGEM_NAME_BIAS must be a finite value from 0 to 2')
+    if weight == 0:
+        return lm
+    biased = copy.copy(lm)
+    biased.bias_words = {'tina'}
+    biased.bias_weight = weight
+    # Upstream uses its LM vocabulary to penalize partial/OOV words. Admit the name as well
+    # as boosting it; evaluate both effects because this can change competing hypotheses.
+    if lm.vocab is not None:
+        biased.vocab = lm.vocab | biased.bias_words
+        biased.prefixes = lm.prefixes | {word[:i] for word in biased.bias_words for i in range(1, len(word) + 1)}
+    return biased
 
 
 def verify_model_assets(directory):
@@ -62,14 +82,17 @@ class VieGemEngine:
         lm = LMDecoder(str(directory / 'viegem/lm/viegem_lm.bin'),
                        unigrams=(directory / 'viegem/lm/viegem_lm.unigrams.txt').read_text().split(),
                        alpha=0.35, beta=1.5)
+        weight = float(os.getenv('TINA_VIEGEM_NAME_BIAS', '0'))
+        lm = name_biased_decoder(lm, weight)
         engine = cls(vad, model, tokenizer, units, lm, device)
+        engine.name_bias = weight
         return engine
 
     def __init__(self, vad, model, tokenizer, units, lm, device):
         self.vad, self.model, self.tokenizer, self.units, self.lm, self.device = vad, model, tokenizer, units, lm, device
         self.pieces = ['', ''] + tokenizer.convert_ids_to_tokens(units.gemma_ids)
 
-    def decode(self, pcm):
+    def probabilities(self, pcm):
         import torch
 
         # Upstream feature extraction needs a complete analysis frame; padding is inference-only.
@@ -80,7 +103,13 @@ class VieGemEngine:
             probabilities = torch.log_softmax(logits[0, :int(lengths[0])].float(), -1).cpu().numpy()
         if not len(probabilities) or not np.isfinite(probabilities).all():
             raise RuntimeError('VieGem returned invalid CTC probabilities')
-        return self.units.decode(self.tokenizer, self.lm.decode(probabilities, self.pieces, beam_width=32))
+        return probabilities
+
+    def decode_probabilities(self, probabilities, lm=None):
+        return self.units.decode(self.tokenizer, (lm or self.lm).decode(probabilities, self.pieces, beam_width=32))
+
+    def decode(self, pcm):
+        return self.decode_probabilities(self.probabilities(pcm))
 
     def transcribe(self, content, silence_ms=800):
         pcm, duration = read_audio(content)

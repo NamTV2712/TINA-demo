@@ -105,3 +105,6 @@ flowchart LR
   extension -->|"call"| agent_api
   asr_control -->|"HTTP"| admin_api
   asr_control -->|"HTTP"| transcription
+  bot -->|"HTTP"| meeting_api
+  meeting_api -->|"HTTP"| agent_api
+  terminal -->|"HTTP via gateway and meeting-api"| tts_sidecar

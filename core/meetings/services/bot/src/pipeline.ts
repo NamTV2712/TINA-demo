@@ -25,6 +25,8 @@ import {
   type TranscriptSink as LaneTranscriptSink,
   type TranscriptSegment as LaneSegment,
   type SpeakerStreamManagerConfig,
+  type VoiceHypothesis,
+  type AsrDiagnostic,
 } from '@tina/gmeet-pipeline';
 import {
   ChunkedTranscriber,
@@ -91,6 +93,7 @@ export type TeamsTranscriberFactory = (options: TeamsCsrcGmeetPipelineOptions) =
 /** The Pipeline port extended with the capture entry the bridge pumps frames into. The
  *  orchestrator only sees start/stop; the capture bridge holds the BotPipeline to feedAudio. */
 export interface BotPipeline extends Pipeline {
+  requestEndpoint?(channel: number, endMs: number | null): void;
   /** One gmeet capture.v1 frame: CHANNEL index + glow NAME (undefined ⇒ no single glow now). */
   feedAudio(channel: number, glowName: string | undefined, pcm: Float32Array, tsMs: number, participantId?:string|null,startSample?:number):void;
   /** One mixed (Zoom/Teams) capture.v1 frame: a single mixed PCM stream, named downstream. */
@@ -251,9 +254,12 @@ function createGmeetBotPipeline(
   config?: SpeakerStreamManagerConfig,
   onError?: (e: unknown) => void,
   onsetGapMs?: number,
+  onHypothesis?: (value: VoiceHypothesis) => void,
+  onAsrDiagnostic?: (event: AsrDiagnostic) => void,
 ): BotPipeline {
-  const lane = createGmeetPipeline({ transcribe, sink: laneSink(sink, onError), config,onError,onsetGapMs,onTimelineEvent:event=>{if(event.kind!=="overflow")console.log("[audio-timeline]",JSON.stringify(event));} });
+  const lane = createGmeetPipeline({ transcribe, onHypothesis, onAsrDiagnostic, sink: laneSink(sink, onError), config,onError,onsetGapMs,onTimelineEvent:event=>{if(event.kind!=="overflow")console.log("[audio-timeline]",JSON.stringify(event));} });
   return {
+    requestEndpoint: (channel, endMs) => lane.requestEndpoint(channel, endMs),
     async start() { /* lane is lazy — begins on the first fed frame */ },
     async stop() {
       try { await lane.dispose(); }
@@ -525,12 +531,13 @@ function createMixedBotPipeline(
 /** Build the real STT transcribe closure from invocation.v1 — language baked into the call so
  *  the lane never knows about config. transcribeEnabled=false ⇒ a no-op transcribe (the engine
  *  still runs turn gating but emits empty text; recording-only meetings need no STT). */
-export function createTranscribe(inv: Invocation): Transcribe {
+export function createTranscribe(inv: Invocation, options: { maxRetries?: number } = {}): Transcribe {
   if (inv.transcribeEnabled === false || !inv.transcriptionServiceUrl) {
     return async () => ({ text: '', language: inv.language ?? 'en', duration: 0, segments: [] });
   }
   const client = new TranscriptionClient({
     source: 'meeting-bot',
+    maxRetries: options.maxRetries,
     serviceUrl: inv.transcriptionServiceUrl,
     apiToken: inv.transcriptionServiceToken,
     model: inv.transcriptionModel ?? undefined,
@@ -557,6 +564,8 @@ export function createBotPipeline(
   sink: TranscriptSink,
   opts: {
     transcribe?: Transcribe;
+    onHypothesis?: (value: VoiceHypothesis) => void;
+    onAsrDiagnostic?: (event: AsrDiagnostic) => void;
     config?: SpeakerStreamManagerConfig;
     onError?: (e: unknown) => void;
     /** Mixed-lane transcriber seam — the real ChunkedTranscriber unless a test injects an observer
@@ -587,6 +596,7 @@ export function createBotPipeline(
   }
   return createGmeetBotPipeline(
     transcribe, sink, perChannelLaneConfig(inv.platform, opts.config), opts.onError, perChannelOnsetGapMs(inv.platform),
+      opts.onHypothesis, opts.onAsrDiagnostic,
   );
 }
 

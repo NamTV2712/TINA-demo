@@ -117,6 +117,7 @@ def start():
         "RunAtLoad": True, "KeepAlive": True, "ThrottleInterval": 10,
         "StandardOutPath": str(logs / "viegem.stdout.log"), "StandardErrorPath": str(logs / "viegem.stderr.log"),
         "EnvironmentVariables": {"PATH": os.environ["PATH"], "TINA_VIEGEM_DEVICE": "mps",
+            "TINA_VIEGEM_NAME_BIAS": os.environ.get("TINA_VIEGEM_NAME_BIAS", "0"),
             "TINA_VIEGEM_HOST": os.environ.get("TINA_VIEGEM_HOST", "127.0.0.1"),
             "TOKENIZERS_PARALLELISM": "false", "TINA_VIEGEM_REVISION": fingerprint.hexdigest(),
             "TINA_VIEGEM_ENV_FILE": os.environ["TINA_VIEGEM_ENV_FILE"],

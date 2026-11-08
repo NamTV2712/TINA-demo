@@ -749,6 +749,24 @@
       "targets": [
         "compose"
       ]
+    },
+    {
+      "key": "TINA_MEETING_VOICE",
+      "class": "defaulted",
+      "default": "0",
+      "description": "Opt in to Google Meet bot-hosted KWS and shared TTS; requires speech profile assets and per-meeting owner source approval.",
+      "targets": [
+        "compose"
+      ]
+    },
+    {
+      "key": "AGENT_API_URL",
+      "class": "defaulted",
+      "default": "(unset — room voice unavailable)",
+      "description": "Internal Agent service for owner-scoped, source-validated meeting voice answers. No owner API key is sent to the bot.",
+      "targets": [
+        "compose"
+      ]
     }
   ],
   "capabilities": {

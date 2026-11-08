@@ -198,3 +198,9 @@ keeps shell networking offline; a globally forced proxy is rejected before start
 The real CLI smoke probes in `tests/codex_network_smoke.py` and `tests/codex_web_smoke.py` verify
 network/filesystem isolation and web-tool request construction without a provider account. Their
 fixture responses do not establish live search availability, provider quota, or account access.
+
+`OpenAIResponsesCompletion.search(question)` is a separate opt-in public-query capability. Ordinary
+`complete()` calls remain tool-less. Search requires a completed native web call and provider URL
+citations; it returns at most six validated source links in `CompletionResult.sources`. Room voice
+never passes its sources/history to this method. Other completion adapters have no implicit search
+fallback. API/model/account support must be verified on the target deployment.

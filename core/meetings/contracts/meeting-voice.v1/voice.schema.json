@@ -1,0 +1,698 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tina.local/contracts/meeting-voice.v1/voice.schema.json",
+  "$defs": {
+    "VoicePolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "default": false,
+          "title": "Enabled",
+          "type": "boolean"
+        },
+        "include_transcript": {
+          "default": false,
+          "title": "Include Transcript",
+          "type": "boolean"
+        },
+        "documents": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 8,
+          "title": "Documents",
+          "type": "array"
+        },
+        "revision": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Revision",
+          "type": "integer"
+        },
+        "wake_variants": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 8,
+          "title": "Wake Variants",
+          "type": "array"
+        },
+        "noise_suppression": {
+          "default": false,
+          "title": "Noise Suppression",
+          "type": "boolean"
+        },
+        "allow_general_knowledge": {
+          "default": false,
+          "title": "Allow General Knowledge",
+          "type": "boolean"
+        },
+        "allow_web_search": {
+          "default": false,
+          "title": "Allow Web Search",
+          "type": "boolean"
+        }
+      },
+      "title": "VoicePolicy",
+      "type": "object"
+    },
+    "VoiceQuestion": {
+      "additionalProperties": false,
+      "properties": {
+        "request_id": {
+          "format": "uuid",
+          "title": "Request Id",
+          "type": "string"
+        },
+        "question": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Question",
+          "type": "string"
+        },
+        "revision": {
+          "minimum": 0,
+          "title": "Revision",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "request_id",
+        "question",
+        "revision"
+      ],
+      "title": "VoiceQuestion",
+      "type": "object"
+    },
+    "VoiceDiagnostic": {
+      "additionalProperties": false,
+      "properties": {
+        "event_id": {
+          "format": "uuid",
+          "title": "Event Id",
+          "type": "string"
+        },
+        "code": {
+          "enum": [
+            "starting",
+            "listening",
+            "waiting_asr",
+            "tts_unavailable",
+            "sources_unavailable",
+            "name_not_matched",
+            "name_unconfirmed",
+            "wake_confirmed",
+            "waiting_speech_end",
+            "waiting_asr_tail",
+            "waiting_question",
+            "thinking",
+            "speaking",
+            "waiting_quiet",
+            "stopped",
+            "completed",
+            "question_timeout",
+            "ambiguous_audio",
+            "ambiguous_window",
+            "stale_asr",
+            "asr_unavailable",
+            "services_unavailable",
+            "worker_failed",
+            "kws_unavailable",
+            "answer_failed",
+            "no_evidence",
+            "playback_failed",
+            "policy_changed",
+            "interrupted",
+            "waiting_turn_end"
+          ],
+          "title": "Code",
+          "type": "string"
+        },
+        "observed_at_ms": {
+          "minimum": 0,
+          "title": "Observed At Ms",
+          "type": "integer"
+        },
+        "heard_prefix": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Heard Prefix"
+        },
+        "heard_at_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Heard At Ms"
+        },
+        "channel": {
+          "anyOf": [
+            {
+              "exclusiveMaximum": 65536,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Channel"
+        },
+        "source_start_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Start Ms"
+        }
+      },
+      "required": [
+        "event_id",
+        "code",
+        "observed_at_ms"
+      ],
+      "title": "VoiceDiagnostic",
+      "type": "object"
+    },
+    "VoiceState": {
+      "additionalProperties": false,
+      "properties": {
+        "state": {
+          "pattern": "^(LISTENING|CAPTURING|THINKING|SPEAKING|QUIET|ERROR|OFF)$",
+          "title": "State",
+          "type": "string"
+        },
+        "request_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Request Id"
+        },
+        "diagnostic": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/VoiceDiagnostic"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "audio": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AudioSnapshot"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "kws": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/KwsStatus"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "state"
+      ],
+      "title": "VoiceState",
+      "type": "object"
+    },
+    "VoiceReply": {
+      "additionalProperties": false,
+      "properties": {
+        "request_id": {
+          "format": "uuid",
+          "title": "Request Id",
+          "type": "string"
+        },
+        "text": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "played_text": {
+          "anyOf": [
+            {
+              "maxLength": 4000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Played Text"
+        },
+        "answer_kind": {
+          "default": "meeting",
+          "enum": [
+            "meeting",
+            "general",
+            "web"
+          ],
+          "title": "Answer Kind",
+          "type": "string"
+        },
+        "reason": {
+          "default": "answered",
+          "enum": [
+            "answered",
+            "clarification",
+            "no_shared_sources",
+            "retrieval_empty",
+            "insufficient_evidence",
+            "verification_rejected",
+            "verification_unavailable",
+            "llm_unavailable",
+            "general_disabled",
+            "web_disabled",
+            "web_unavailable",
+            "web_no_sources"
+          ],
+          "title": "Reason",
+          "type": "string"
+        },
+        "links": {
+          "items": {
+            "$ref": "#/$defs/VoiceLink"
+          },
+          "maxItems": 6,
+          "title": "Links",
+          "type": "array"
+        },
+        "lookups": {
+          "items": {
+            "$ref": "#/$defs/VoiceLookup"
+          },
+          "maxItems": 2,
+          "title": "Lookups",
+          "type": "array"
+        },
+        "state": {
+          "enum": [
+            "queued",
+            "started",
+            "completed",
+            "failed",
+            "stopped",
+            "unconfirmed"
+          ],
+          "title": "State",
+          "type": "string"
+        },
+        "created_at_ms": {
+          "minimum": 0,
+          "title": "Created At Ms",
+          "type": "integer"
+        },
+        "updated_at_ms": {
+          "minimum": 0,
+          "title": "Updated At Ms",
+          "type": "integer"
+        },
+        "started_at_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Started At Ms"
+        },
+        "ended_at_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Ended At Ms"
+        }
+      },
+      "required": [
+        "request_id",
+        "text",
+        "state",
+        "created_at_ms",
+        "updated_at_ms"
+      ],
+      "title": "VoiceReply",
+      "type": "object"
+    },
+    "AudioChannel": {
+      "additionalProperties": false,
+      "properties": {
+        "channel": {
+          "exclusiveMaximum": 65536,
+          "minimum": 0,
+          "title": "Channel",
+          "type": "integer"
+        },
+        "frames": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "title": "Frames",
+          "type": "integer"
+        },
+        "samples": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "title": "Samples",
+          "type": "integer"
+        },
+        "last_frame_ms": {
+          "minimum": 0,
+          "title": "Last Frame Ms",
+          "type": "integer"
+        },
+        "rms": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Rms",
+          "type": "number"
+        },
+        "sample_clock": {
+          "title": "Sample Clock",
+          "type": "boolean"
+        },
+        "gap_samples": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "title": "Gap Samples",
+          "type": "integer"
+        },
+        "overlap_samples": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "title": "Overlap Samples",
+          "type": "integer"
+        },
+        "clock_resets": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "title": "Clock Resets",
+          "type": "integer"
+        },
+        "asr_inflight": {
+          "maximum": 64,
+          "minimum": 0,
+          "title": "Asr Inflight",
+          "type": "integer"
+        },
+        "asr_errors": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "title": "Asr Errors",
+          "type": "integer"
+        },
+        "asr_at_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Asr At Ms"
+        },
+        "capture_lag_ms": {
+          "anyOf": [
+            {
+              "maximum": 3600000,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Capture Lag Ms"
+        },
+        "capture_age_ms": {
+          "anyOf": [
+            {
+              "maximum": 3600000,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Capture Age Ms"
+        },
+        "roundtrip_ms": {
+          "anyOf": [
+            {
+              "maximum": 3600000,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Roundtrip Ms"
+        },
+        "queue_ms": {
+          "anyOf": [
+            {
+              "maximum": 3600000,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Queue Ms"
+        }
+      },
+      "required": [
+        "channel",
+        "frames",
+        "samples",
+        "last_frame_ms",
+        "rms",
+        "sample_clock",
+        "gap_samples",
+        "overlap_samples",
+        "clock_resets",
+        "asr_inflight",
+        "asr_errors"
+      ],
+      "title": "AudioChannel",
+      "type": "object"
+    },
+    "AudioSnapshot": {
+      "additionalProperties": false,
+      "properties": {
+        "observed_at_ms": {
+          "minimum": 0,
+          "title": "Observed At Ms",
+          "type": "integer"
+        },
+        "channels": {
+          "items": {
+            "$ref": "#/$defs/AudioChannel"
+          },
+          "maxItems": 16,
+          "title": "Channels",
+          "type": "array"
+        },
+        "noise_suppression": {
+          "anyOf": [
+            {
+              "enum": [
+                "off",
+                "starting",
+                "low",
+                "failed"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Noise Suppression"
+        }
+      },
+      "required": [
+        "observed_at_ms",
+        "channels"
+      ],
+      "title": "AudioSnapshot",
+      "type": "object"
+    },
+    "KwsStatus": {
+      "additionalProperties": false,
+      "properties": {
+        "engine": {
+          "const": "livekit-wakeword",
+          "title": "Engine",
+          "type": "string"
+        },
+        "version": {
+          "const": "2.1.1",
+          "title": "Version",
+          "type": "string"
+        },
+        "mode": {
+          "const": "activation",
+          "title": "Mode",
+          "type": "string"
+        },
+        "device": {
+          "const": "cpu",
+          "title": "Device",
+          "type": "string"
+        },
+        "status": {
+          "enum": [
+            "off",
+            "starting",
+            "ready",
+            "failed"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "models": {
+          "items": {
+            "enum": [
+              "hey_tina",
+              "tina_oi"
+            ],
+            "type": "string"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "title": "Models",
+          "type": "array"
+        },
+        "observed_at_ms": {
+          "minimum": 0,
+          "title": "Observed At Ms",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "engine",
+        "version",
+        "mode",
+        "device",
+        "status",
+        "models",
+        "observed_at_ms"
+      ],
+      "title": "KwsStatus",
+      "type": "object"
+    },
+    "VoiceLink": {
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "maxLength": 300,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "url": {
+          "maxLength": 4096,
+          "minLength": 1,
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "url"
+      ],
+      "title": "VoiceLink",
+      "type": "object"
+    },
+    "VoiceLookup": {
+      "additionalProperties": false,
+      "properties": {
+        "tool": {
+          "enum": [
+            "get_recent_transcript",
+            "search_meeting",
+            "search_shared_documents"
+          ],
+          "title": "Tool",
+          "type": "string"
+        },
+        "source_count": {
+          "maximum": 32,
+          "minimum": 0,
+          "title": "Source Count",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "tool",
+        "source_count"
+      ],
+      "title": "VoiceLookup",
+      "type": "object"
+    }
+  }
+}

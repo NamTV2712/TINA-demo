@@ -135,12 +135,21 @@ class Stack:
                     values["INTERNAL_API_SECRET"].encode(), f"tina-asr-drain:v1:{backend}".encode(), "sha256").hexdigest()
         self.viegem_device = select_viegem_device(bool(values.get("TINA_VIEGEM_TOKEN")),
                                                   values.get("TINA_VIEGEM_DEVICE") or "auto")
+        self.env.setdefault('TINA_VIEGEM_NAME_BIAS', values.get('TINA_VIEGEM_NAME_BIAS') or '0')
         self._cuda_verified = False
         profiles = [p.strip() for p in values.get("COMPOSE_PROFILES", "").split(",") if p.strip()]
         if self.viegem_device == "mps":
             profiles = [p for p in profiles if p != "viegem"]
         elif self.viegem_device in {"cuda", "cpu"} and "viegem" not in profiles:
             profiles.append("viegem")
+        if values.get('TINA_MEETING_VOICE', '').lower() in {'1', 'true', 'yes'}:
+            token = values.get('TTS_API_TOKEN', '')
+            if action != 'runtime-control' and (len(token) < 32 or token.startswith('encrypted:') or not token.isascii() or any(ord(c) < 33 or ord(c) > 126 for c in token)):
+                raise StackError('Meeting voice requires TTS_API_TOKEN; load its encrypted env with deploy/tts/run.py.')
+            if not values.get('TTS_SERVICE_URL'):
+                self.env['TTS_SERVICE_URL'] = 'http://tts:8000'
+            if 'speech' not in profiles:
+                profiles.append('speech')
         self.env["COMPOSE_PROFILES"] = ",".join(profiles)
         # Global Docker context may change while a long build runs. Pin it once,
         # including Buildx, so builds, image checks and activation use one daemon.
@@ -302,11 +311,17 @@ class Stack:
         self.build_bot()
         names = [name for name, spec in self.services.items() if spec.get("build")]
         self.compose("build", *names, "agent-worker")
-        # Fresh hosts also need registry-provided infrastructure images before up.
-        self.compose("pull", "--ignore-buildable")
+        # Init jobs reuse source-built images without a build stanza of their own.
+        # Pull only registry images; --ignore-buildable alone still pulls those local aliases.
+        local_images = {spec.get('image') for spec in self.services.values() if spec.get('build')}
+        local_images.update(self.images().values())
+        registry_services = [name for name, spec in self.services.items()
+                             if spec.get('image') and spec['image'] not in local_images]
+        if registry_services:
+            self.compose("pull", "--ignore-buildable", *registry_services)
         self.check_images()
         self.verify_viegem_cuda()
-        for service in ("gipformer-models", "viegem-models"):
+        for service in ("gipformer-models", "viegem-models", "meeting-voice-models", "tts-models"):
             if service in self.services:
                 self.compose("run", "--rm", "--no-deps", service)
 

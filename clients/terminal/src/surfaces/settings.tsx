@@ -16,11 +16,12 @@ import { ModelPicker } from "./modelPicker";
 import { BEDROCK_REGIONS, fallbackChoicesForMode } from "./modelCatalog";
 import { AsrStatusPanel } from "./asrStatus";
 import { TranscriptionPicker } from "./transcriptionPicker";
+import { VoiceSettings } from './voiceSettings';
 import transcriptionStyles from "./transcriptionPicker.module.css";
 import { apiModelProvider, canSaveModelPrefs, getModelPrefs, setModelPrefs, getTranscriptionPrefs, setTranscriptionPrefs, getGlobalSetting, setGlobalSetting, testModels, testTranscription, type ConfigTestResult } from "./settingsApi";
 import { getAsrRuntime, setAsrRuntime, type AsrRuntime } from "./settingsApi";
 
-type SectionId = "calendar" | "models" | "asr" | "tokens" | "github" | "account";
+type SectionId = "calendar" | "models" | "voice" | "asr" | "tokens" | "github" | "account";
 type ModelSettingsScope = "agent" | "transcription" | "global";
 // shortcut: recognize legacy custom URLs; managed VieGem selections resolve their endpoint on the server.
 const TRANSCRIPTION_PRESETS: Record<string, { url: string; label: string }> = {
@@ -50,6 +51,7 @@ function transcriptionDisplay(value: { backend?: string | null; url?: string | n
 const SECTIONS: Array<{ id: SectionId; label: string }> = [
   { id: "calendar", label: "Calendar" },
   { id: "models", label: "Models" },
+  { id: "voice", label: "Voice assistant" },
   { id: "asr", label: "ASR status" },
   { id: "tokens", label: "API tokens" },
   { id: "github", label: "GitHub" },
@@ -57,13 +59,14 @@ const SECTIONS: Array<{ id: SectionId; label: string }> = [
 ];
 const SECTION_GROUPS: Array<{ label: string; ids: SectionId[] }> = [
   { label: "Workspace", ids: ["calendar"] },
-  { label: "AI & capture", ids: ["models", "asr"] },
+  { label: "AI & capture", ids: ["models", "voice", "asr"] },
   { label: "Connections", ids: ["tokens", "github"] },
   { label: "Profile", ids: ["account"] },
 ];
 const SECTION_SEARCH_TERMS: Record<SectionId, string> = {
   calendar: "calendar meeting schedule",
   models: "models agent transcription speech to text backend provider stt",
+  voice: 'voice wake word wakeword kws tts tina',
   asr: "asr recognition speech health backend",
   tokens: "api tokens credentials key secret",
   github: "github repositories connection",
@@ -72,6 +75,7 @@ const SECTION_SEARCH_TERMS: Record<SectionId, string> = {
 const SECTION_DESCRIPTIONS: Record<SectionId, string> = {
   calendar: "Manage the calendars connected to TINA.",
   models: "Choose the services behind agent replies, meeting notes and speech-to-text.",
+  voice: "Wake phrases, speech preview and new bot defaults.",
   asr: "View the speech recognition services available to this deployment.",
   tokens: "Manage API tokens used to connect clients and integrations.",
   github: "Manage the GitHub credential TINA uses for repository access.",
@@ -642,6 +646,7 @@ function SettingsBody({ hideHeading = false }: { hideHeading?: boolean } = {}) {
   const bodies: Record<SectionId, ReactNode> = {
     calendar: <CalendarConnectionsPanel />,
     models: <ModelsSection />,
+    voice: <VoiceSettings />,
     asr: <AsrStatusPanel />,
     tokens: <TokensPanel />,
     github: <GitHubTokenCard />,
