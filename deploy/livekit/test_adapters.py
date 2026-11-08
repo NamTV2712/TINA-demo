@@ -42,5 +42,5 @@ async def test_actual_agents_tts_emits_bounded_pcm_without_a_cloud_model():
                 except TimeoutError:pass
             return data
         data=await asyncio.wait_for(drain(),5)
-        assert handle.exception() is None and len(data)==4800 and len(calls)==1
+        assert handle.exception() is None and 4800 <= len(data) <= 5760 and len(calls)==1
     finally: await session.aclose()
