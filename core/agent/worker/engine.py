@@ -39,6 +39,7 @@ from llm import (
     HarnessPort,
     auth_error_event,
     completion_from_env,
+    completion_failure_code,
     harness_from_env,
     looks_like_auth_failure,
     preflight_provider_guard,
@@ -731,6 +732,7 @@ def _run_dictation_translate(stream, out_topic: str, start: dict) -> None:
     """Translate one confirmed transcript segment; never write it into transcript history."""
     inline = start_prompt(start) or ""
     request_id = os.environ.get("TINA_CHAT_SESSION", "").removeprefix("dictation-translate-")
+    completion = {"type": "turn-complete"}
     try:
         if not inline.startswith(DICTATION_TRANSLATE_PREFIX):
             raise ValueError("missing translation marker")
@@ -762,10 +764,11 @@ def _run_dictation_translate(stream, out_topic: str, start: dict) -> None:
         event = {"type": "message-delta", "text": translated}
     except Exception as exc:  # noqa: BLE001 — do not log transcript or provider response text
         log.warning("dictation translation failed request_id=%s error=%s", request_id, type(exc).__name__)
+        completion['translation_error'] = completion_failure_code(exc)
         event = None
     if event is not None:
         stream.xadd(out_topic, {"event": json.dumps(event)})
-    stream.xadd(out_topic, {"event": json.dumps({"type": "turn-complete"})})
+    stream.xadd(out_topic, {"event": json.dumps(completion)})
     stream.expire(out_topic, 300)
 
 

@@ -131,7 +131,7 @@ system flows  # the reaction engine; owns the reaction row and its effect receip
 
 system foreground-application  # User-selected local application with the focused text field; receives only the transcript pasted after the explicit dictation hotkey is released.
 
-system speech-client  # Optional host speech CLI: per-microphone KWS, bounded pre-roll and Silero VAD question capture, explicit Start/Stop and participant-only credentials. Opt-in run/run-file sends bounded WAV to the single-room speech coordinator; ordinary listen/file remain local. Wake is activation, not authentication. Default TTS remains Truc Ly. Room-wide polling suppresses KWS/pre-roll while busy; stale status/boot changes disarm until explicit restart; idle requires 800 ms quiet.
+system speech-client  # Optional host speech CLI: per-microphone KWS, bounded pre-roll and Silero VAD question capture, explicit Start/Stop and participant-only credentials. A 1200 ms post-wake continuation window retains a question after the wake's VAD endpoint; anchored ASR validation also accepts the spelling hay tina, never mid-sentence or empty questions. Opt-in run/run-file sends bounded WAV to the single-room speech coordinator; ordinary listen/file remain local. Wake is activation, not authentication. Default TTS remains Truc Ly. Room-wide polling suppresses KWS/pre-roll while busy; stale status/boot changes disarm until explicit restart; idle requires 800 ms quiet.
 
 edges:
   bot -write-> segments-stream
@@ -236,7 +236,7 @@ edges:
   speech-coordinator -req-> transcription  # Bounded consented question WAV including up to two seconds wake pre-roll; existing authenticated OpenAI-compatible STT.
   bot -req-> meeting-api  # Internal-secret-authenticated speech.v1 receipts bound to the recorded bot session.
   meeting-api -write-> speech-playback  # Meeting API alone owns the ephemeral Redis playback state.
-  agent-api -write-> meeting-translation-cache  # Owner-scoped SQLite phrase cache, live-tail observations and job leases; every HTTP access first reauthorizes canonical transcript and meeting status.
+  agent-api -write-> meeting-translation-cache  # Owner-scoped SQLite phrase cache, revision-bound attempts, live-tail observations, atomic job leases and owner service cooldown generations. HTTP access reauthorizes canonical transcript and meeting status; completion reloads source/access before publishing a result.
   terminal-app -call-> agent-api  # Authenticated English/bilingual view reads and advances the shared translation overlay; original ASR remains independent.
   extension -call-> agent-api  # Meeting Bot viewer requests the same gateway-authorized translation cache; provider secrets remain server-side.
   terminal-app -call-> asr-control  # Authenticated account-only ASR start/stop and safe resource status through Terminal proxy; private derived host key.

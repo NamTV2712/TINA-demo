@@ -22,11 +22,22 @@ and meeting status through Meeting API. GET observes live-tail stability without
 POST advances one ready phrase, joining consecutive ASR fragments of the same speaker
 through the existing tool-less translation worker and the user's saved Meeting model.
 SQLite results and atomic 120-second leases live outside workspace Git trees on the existing
-workspace volume. Web/extension share cache entries by owner, meeting, phrase and exact source members.
+workspace volume. Web/extension share cache entries by owner, meeting, phrase and exact source members,
+including canonical revision. POST reauthorizes and reloads canonical state after inference; results
+from an edited, deleted or regrouped source are discarded. Cache and lease are rechecked atomically
+before claiming a phrase, so simultaneous viewers do not translate the same phrase twice.
 Sentence endings, speaker changes and pauses close a phrase; size/time limits bound latency.
 An unfinished live tail waits five seconds without new finalized text. Stopping the meeting
 flushes it immediately. Old fragment cache entries remain on disk but are not reused.
-Failures back off 15/60/300 seconds; an explicit retry bypasses the backoff. Drafts, raw ASR,
+Phrase timeouts, rejected requests and unusable output retry separately after 15 then 60 seconds,
+with at most three automatic attempts per source revision. Other ready phrases continue. Exhausted
+phrases require explicit **Thử lại**; successful translations are not called again. Authentication,
+model configuration, quota and service failures instead apply an owner-wide 15/60/300-second
+cooldown across meetings. Only fixed error codes leave the worker. A newer service failure cannot
+be cleared by an older in-flight success. Optional `can_advance`, `service_error` and per-group
+status/attempt/retry fields are documented in the v2 contract. Existing private SQLite state migrates
+automatically, preserving cached results, active leases and pending cooldowns.
+An explicit retry bypasses cooldowns, never a live lease or grouping wait. Drafts, raw ASR,
 canonical revisions and capture continue independently. With all translated views closed,
 new translation calls pause until a client reopens one.
 

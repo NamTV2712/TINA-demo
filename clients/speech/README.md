@@ -174,10 +174,16 @@ no-question deadline and Silero VAD silence endpointing. The callback remains no
 
 Audio sent to STT includes up to two seconds of pre-roll, preserving an immediately following
 question and the wake phrase; it can include brief preceding microphone context. The coordinator
-requires ASR to **begin** with the wake phrase before removing that anchored prefix. Earlier
+requires ASR to **begin** with the wake phrase before removing that anchored prefix. The
+unaccented ASR spelling **hay tina** is accepted alongside **Hey Tina**; this does not change
+the acoustic wake phrase, accept a prefix in mid-sentence, or permit an empty question. Earlier
 conversation or an empty/unrecognized wake/question fails closed instead of being trimmed into
 a different question. The pinned KWS Python result omits the absolute offset after native silence
 resets, so relative token timestamps are not used as a precise acoustic crop.
+
+If VAD already ended buffered speech when KWS reports the wake, capture allows 1200 ms for
+the following question to start instead of immediately uploading a wake-only clip. A question
+entirely in pre-roll remains preserved, with that bounded extra wait.
 
 State: ARMED -> CAPTURING -> WAITING -> SPEAKING -> QUIET -> ARMED. Wake dispatch stays disabled throughout
 capture/wait/playback. Only validated `claims[].text` with approved current sources is spoken;

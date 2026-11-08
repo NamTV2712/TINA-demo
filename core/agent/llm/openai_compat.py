@@ -59,10 +59,10 @@ class OpenAICompatCompletion:
             raise LLMError(f"completion transport failure against {self._base}: {detail}") from exc
         if r.status_code in (401, 403):
             detail = r.text.replace(self._key, "[redacted]") if self._key else r.text
-            raise LLMAuthError(f"{r.status_code} from {self._base}: {detail[:300]}")
+            raise LLMAuthError(f"{r.status_code} from {self._base}: {detail[:300]}", status_code=r.status_code)
         if r.status_code >= 400:
             detail = r.text.replace(self._key, "[redacted]") if self._key else r.text
-            raise LLMError(f"{r.status_code} from {self._base}: {detail[:300]}")
+            raise LLMError(f"{r.status_code} from {self._base}: {detail[:300]}", status_code=r.status_code)
         try:
             choice = (r.json().get("choices") or [{}])[0]
             text = (choice.get("message") or {}).get("content") or ""

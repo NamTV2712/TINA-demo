@@ -11,6 +11,10 @@ playback. Backend-owned groups join source fragments into one original/English p
 The live tail shows **Đang gom câu…** until a sentence boundary or stable pause; stopping
 the meeting flushes it immediately. Missing translations retain Vietnamese; errors expose
 retry without stopping ASR. Editing any member invalidates its entire English phrase.
+Phrase failures show their own waiting/manual-retry state; other phrases continue advancing.
+The poller honors `can_advance` without stopping GET updates. Quota/auth/configuration/service
+cooldowns have specific recovery hints, and explicit retry bypasses cooldowns without redoing
+successful translations. Known canonical revisions are checked even if source words are unchanged.
 The meeting info rail starts collapsed to leave more space for paired paragraphs.
 
 Translation files:

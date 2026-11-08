@@ -32,6 +32,12 @@ fakes.
 HTTP completion adapters use raw `httpx`; CLI harnesses use the provider's supported local process
 interface so TINA can keep its existing workspace and event boundary.
 
+Completion exceptions retain typed HTTP status in `LLMError.status_code`. The public
+`completion_failure_code()` helper maps only typed auth/config/status/timeout/parse errors to
+fixed recovery codes, never interpreting provider or model text. Live translation uses this
+metadata for isolated phrase retries and shared auth/quota/service cooldowns; other completion
+and harness behavior is unchanged. Existing wrapped exceptions retain their causes.
+
 ## Configuration
 
 | Env var | Meaning | Default |

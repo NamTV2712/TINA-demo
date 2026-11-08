@@ -76,8 +76,11 @@ export function createTranscriptFeed(feed: HTMLElement, root: HTMLElement, lates
             }
             span.classList.add('segment-bilingual');
             const result = segment.translation?.text;
+            let pendingTranslation = segment.completed === false ? 'Chờ đoạn nói hoàn tất…' : paused ? 'Chưa dịch được · bản gốc vẫn được giữ' : segment.translation?.ready ? 'Đang dịch…' : 'Đang gom câu…';
+            if (segment.completed !== false && segment.translation?.status === 'failed') pendingTranslation = 'Chưa dịch được đoạn này · bấm Thử lại';
+            if (segment.completed !== false && segment.translation?.status === 'retrying') pendingTranslation = 'Đoạn này đang chờ thử lại…';
             text(original, segment.text.trim()); original.hidden = language === 'en' && !!result;
-            text(english, `EN  ${result || (segment.completed === false ? 'Chờ đoạn nói hoàn tất…' : paused ? 'Chưa dịch được · bản gốc vẫn được giữ' : segment.translation?.ready ? 'Đang dịch…' : 'Đang gom câu…')}`);
+            text(english, `EN  ${result || pendingTranslation}`);
           }
           (segment.completed === false ? pending : confirmed).push(span);
         }
