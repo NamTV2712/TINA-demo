@@ -100,18 +100,19 @@ export function VoiceSettings(){
 }
 
 interface RoomPolicy {enabled:boolean;include_transcript:boolean;documents:string[];revision:number;wake_variants:string[];
-  noise_suppression:boolean;allow_general_knowledge?:boolean;allow_web_search?:boolean}
+  noise_suppression:boolean;allow_general_knowledge?:boolean;allow_web_search?:boolean;engine?:'tina'|'livekit'}
 function RoomVoiceSettings({sessions}:{sessions:Array<{meeting_id:number;status:string}>}){
   const [meeting,setMeeting]=useState(''),[policy,setPolicy]=useState<RoomPolicy|null>(null);
   const [documents,setDocuments]=useState<Array<{path:string;title:string}>>([]),[reason,setReason]=useState('');
   const [busy,setBusy]=useState(false),[message,setMessage]=useState('');
+  const [livekit,setLivekit]=useState(false);
   const identity=useRef(meeting);identity.current=meeting;
   useEffect(()=>{
     if(!meeting)return;const abort=new AbortController();setPolicy(null);setMessage('');setDocuments([]);setReason('');
     void Promise.all([fetch(`/api/meetings/${meeting}/voice-assistant`,{cache:'no-store',signal:abort.signal}),
       fetch(`/api/workspace/meeting-knowledge/${meeting}`,{cache:'no-store',signal:abort.signal})]).then(async([room,docs])=>{
       if(!room.ok)throw Error();const r=await room.json(),d=docs.ok?await docs.json():{documents:[]};
-      if(abort.signal.aborted)return;setPolicy(r.policy);setDocuments(d.documents||[]);
+      if(abort.signal.aborted)return;setPolicy(r.policy);setDocuments(d.documents||[]);setLivekit(r.livekit_available===true);
       setReason(r.replies?.at(-1)?.reason||'');
     }).catch(()=>{if(!abort.signal.aborted)setMessage('Could not load room settings.');});
     return()=>abort.abort();
@@ -132,6 +133,12 @@ function RoomVoiceSettings({sessions}:{sessions:Array<{meeting_id:number;status:
     </select>
     {!sessions.length&&<span style={{fontSize:12,color:'var(--t3)'}}>Start a Google Meet bot to configure its answer sources.</span>}
     {meeting&&policy&&<>
+      <label htmlFor="voice-runtime">Voice runtime</label>
+      <select id="voice-runtime" value={policy.engine||'tina'} disabled={busy} style={button}
+        onChange={e=>setPolicy({...policy,engine:e.target.value as 'tina'|'livekit'})}>
+        <option value="tina">TINA</option><option value="livekit" disabled={!livekit}>LiveKit Agents · local pilot{livekit?'':' · not configured'}</option>
+      </select>
+      {policy.engine==='livekit'&&<span style={{fontSize:12,color:'var(--t3)'}}>One meeting at a time. Uses the same ASR, approved sources and local voice. Select TINA to return.</span>}
       {([['enabled','Enable voice'],['include_transcript','Use this meeting’s transcript'],
         ['allow_general_knowledge','Allow general knowledge'],['allow_web_search','Allow public web search']] as const).map(([key,label])=>
         <label key={key}><input type="checkbox" checked={!!policy[key]} disabled={busy} onChange={e=>setPolicy({...policy,[key]:e.target.checked})}/> {label}</label>)}

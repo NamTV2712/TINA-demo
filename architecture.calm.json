@@ -1959,7 +1959,7 @@
    "unique-id": "meeting-voice.v1",
    "node-type": "data-asset",
    "name": "meeting-voice.v1 policy and turn protocol",
-   "description": "Owner-approved room-shared sources and revision-checked policy; active meeting/session-bound bot capability. No participant account is inferred from voice or display names. Owner-approved ASR name variants are optional, revision-bound, and cannot use greeting prefixes; fixed base names are TINA/Tina/TINA ơi. Generic human-call alias anh ơi is rejected; suggested specific variants require owner approval. Optional bounded owner diagnostics carry original observation/heard timestamps and reason codes, independently expiring within 30s; legacy state messages remain valid. Revision-bound noise_suppression is boolean/default false, separate from room sharing; optional audio snapshot reports off/starting/low/failed. Owner-requested defaults are seeded on new capable transcribing Google Meet spawns: voice on, NS on, own transcript allowed, no documents. Existing saved policies survive continuation; absent policies are initialized. tin ơi is a fixed anchored case-insensitive invocation. ti na ơi, tiên na ơi, tinh anh ơi and tin anh ơi are also built-in anchored case-insensitive names by owner request, with no per-room Save. Custom alias records remain unchanged; raw ASR is never rewritten. After rearm, stale channel-onset windows admit only complete, ordered, text-aligned timed ASR speech intervals starting after the fence; wholly fresh source windows remain valid. Voice-only projection preserves raw ASR and request count. A confirmed name-only utterance receives the cached source-free acknowledgment without an LLM call, then after quiet rearm permits one same-channel fresh question within 10s. Known transport participant identity must match; missing identity remains channel-only. Waiting rearm expires in 15s. Stop/failure/policy change fences continuation and late ASR; follow-up answer omits a duplicate acknowledgment. During post-ack quiet gating, at most eight same-channel ASR hypotheses are retained and VAD continues endpoint tracking; quiet rearm replays only through existing source/participant fences. Pure acknowledgment echo is ignored. Voice answer completion uses a dedicated concise/clarifying prompt with BM25 relevance, recent 120-second transcript and adjacent evidence, bounded to 32 sources/24000 characters; no embeddings or external tools. Voice drafts receive an exact digit/date citation guard and a separate selected-model entailment/contradiction review. Provider budgets are 25s generation plus 15s review; rejected/unavailable review never releases the unchecked draft.",
+   "description": "Owner-approved room-shared sources and revision-checked policy; active meeting/session-bound bot capability. No participant account is inferred from voice or display names. Owner-approved ASR name variants are optional, revision-bound, and cannot use greeting prefixes; fixed base names are TINA/Tina/TINA ơi. Generic human-call alias anh ơi is rejected; suggested specific variants require owner approval. Optional bounded owner diagnostics carry original observation/heard timestamps and reason codes, independently expiring within 30s; legacy state messages remain valid. Revision-bound noise_suppression is boolean/default false, separate from room sharing; optional audio snapshot reports off/starting/low/failed. Owner-requested defaults are seeded on new capable transcribing Google Meet spawns: voice on, NS on, own transcript allowed, no documents. Existing saved policies survive continuation; absent policies are initialized. tin ơi is a fixed anchored case-insensitive invocation. ti na ơi, tiên na ơi, tinh anh ơi and tin anh ơi are also built-in anchored case-insensitive names by owner request, with no per-room Save. Custom alias records remain unchanged; raw ASR is never rewritten. After rearm, stale channel-onset windows admit only complete, ordered, text-aligned timed ASR speech intervals starting after the fence; wholly fresh source windows remain valid. Voice-only projection preserves raw ASR and request count. A confirmed name-only utterance receives the cached source-free acknowledgment without an LLM call, then after quiet rearm permits one same-channel fresh question within 10s. Known transport participant identity must match; missing identity remains channel-only. Waiting rearm expires in 15s. Stop/failure/policy change fences continuation and late ASR; follow-up answer omits a duplicate acknowledgment. During post-ack quiet gating, at most eight same-channel ASR hypotheses are retained and VAD continues endpoint tracking; quiet rearm replays only through existing source/participant fences. Pure acknowledgment echo is ignored. Voice answer completion uses a dedicated concise/clarifying prompt with BM25 relevance, recent 120-second transcript and adjacent evidence, bounded to 32 sources/24000 characters; no embeddings or external tools. Voice drafts receive an exact digit/date citation guard and a separate selected-model entailment/contradiction review. Provider budgets are 25s generation plus 15s review; rejected/unavailable review never releases the unchecked draft. Optional owner-selected engine=tina|livekit defaults to tina. The one-meeting self-hosted Agents pilot uses confirmed ASR questions over custom HTTP I/O and sends PCM back through the existing bot playback; raw meeting audio and canonical transcripts stay on their original path. New bots advertise bridge support; legacy bots refuse the pilot instead of silently using native voice.",
    "metadata": [
     {
      "path": "core/meetings/contracts/meeting-voice.v1"
@@ -2034,6 +2034,35 @@
      ]
     }
    }
+  },
+  {
+   "unique-id": "livekit-agent",
+   "node-type": "service",
+   "name": "Optional local LiveKit Agents pilot",
+   "description": "Pinned LiveKit Agents 1.8.11 worker, one room and AgentSession at a time. Custom LLM adapter calls the existing capability-scoped TINA answer endpoint; custom TTS adapter calls shared VieNeu. No owner/provider API keys or workspace mounts. Each text request has an isolated SDK chat context; TINA controls source-verified played-history. PCM HTTP output is bounded and carries no microphone playback receipt. Stop UUID fences, disconnect cancellation, policy reaping and 90s idle cleanup apply. Raw room audio/text inputs, room transcript outputs and recording are disabled. Per-request synthesis completion is tracked independently of SpeechHandle; partial TTS failure aborts the HTTP PCM stream without a success terminator. Header guards use pure ASGI to preserve transport errors. Cleanup claims the exact registry generation under the opening lock and each generation has a unique room name, preventing stale/delayed deletion of a replacement. Configuration distinguishes permission/session rejection from transient service errors: 401/403/404 deny, 409 invalidates, and other non-200 responses become 503. Transient errors preserve busy/recent rooms without authorizing new requests or bypassing source checks.",
+   "metadata": [
+    {
+     "path": "deploy/livekit"
+    }
+   ],
+   "interfaces": [
+    {
+     "unique-id": "livekit-agent-http",
+     "type": "api"
+    }
+   ]
+  },
+  {
+   "unique-id": "livekit-server",
+   "node-type": "service",
+   "name": "Self-hosted LiveKit server",
+   "description": "Pinned LiveKit server 1.13.11 on the private Compose network, opt-in livekit profile. Authenticated per-meeting rooms scope AgentSession lifecycle; custom HTTP I/O handles confirmed text/PCM in this pilot. No public ports or Cloud Inference. API secrets are domain-separated HMAC derivatives of the existing encrypted control-plane secret.",
+   "interfaces": [
+    {
+     "unique-id": "livekit-server-ws",
+     "type": "api"
+    }
+   ]
   }
  ],
  "relationships": [
@@ -4570,6 +4599,81 @@
      "access": "invoke"
     }
    ]
+  },
+  {
+   "unique-id": "bot-livekit-agent",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "bot"
+     },
+     "destination": {
+      "node": "livekit-agent"
+     }
+    }
+   },
+   "protocol": "HTTP",
+   "description": "Selected pilot only: meeting/session capability, revision, request UUID and hashed transport speaker key. Confirmed question in, bounded answer metadata and PCM out. Stop cancels the matching request. Bot owns actual microphone receipts. The fixed source-free acknowledgment stays on direct prewarmed local TTS so it does not wait behind pending LLM generation."
+  },
+  {
+   "unique-id": "livekit-agent-meeting-api",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "livekit-agent"
+     },
+     "destination": {
+      "node": "meeting-api"
+     }
+    }
+   },
+   "protocol": "HTTP",
+   "description": "Revalidate active meeting, engine and owner policy before every operation; call the same source-checked answer API. No full owner credential or direct workspace access. The internal endpoint is http://meeting-api:8080, matching the gateway; readiness checks that API as well as the LiveKit server."
+  },
+  {
+   "unique-id": "meeting-api-livekit-health",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "meeting-api"
+     },
+     "destination": {
+      "node": "livekit-agent"
+     }
+    }
+   },
+   "protocol": "HTTP",
+   "description": "Optional ready probe; unavailable pilot disarms voice without stopping ASR. Only bridge-capable bots can select this path."
+  },
+  {
+   "unique-id": "livekit-agent-local-tts",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "livekit-agent"
+     },
+     "destination": {
+      "node": "tts-sidecar"
+     }
+    }
+   },
+   "protocol": "HTTP",
+   "description": "Bounded text to existing shared local VieNeu-TTS; PCM16 mono 24 kHz. Shared TTS token stays inside the worker; bot uses only its scoped capability for pilot I/O."
+  },
+  {
+   "unique-id": "livekit-agent-server",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "livekit-agent"
+     },
+     "destination": {
+      "node": "livekit-server"
+     }
+    }
+   },
+   "protocol": "WebSocket",
+   "description": "Agent joins only its named per-meeting room, without publish/subscribe/data grants. SDK RoomIO inputs/outputs and session hosting are disabled in this custom-I/O pilot; no raw meeting audio or private transcripts are published."
   }
  ],
  "flows": [

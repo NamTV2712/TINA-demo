@@ -103,6 +103,16 @@ def select_viegem_device(enabled, requested="auto"):
     return requested
 
 
+def livekit_credentials(values):
+    """Separate local server keys, derived from the existing encrypted control-plane secret."""
+    secret = values.get('INTERNAL_API_SECRET', '')
+    if len(secret) < 32 or secret.startswith('encrypted:'):
+        raise StackError('LiveKit pilot requires the encrypted INTERNAL_API_SECRET.')
+    key = 'tina-local'
+    derived = hmac.new(secret.encode(), b'tina-livekit-server:v1', 'sha256').hexdigest()
+    return {'LIVEKIT_API_KEY': key, 'LIVEKIT_API_SECRET': derived, 'LIVEKIT_KEYS': f'{key}: {derived}'}
+
+
 class Stack:
     def __init__(self, action, *, env=None):
         self.env = dict(os.environ if env is None else env)
@@ -138,6 +148,10 @@ class Stack:
         self.env.setdefault('TINA_VIEGEM_NAME_BIAS', values.get('TINA_VIEGEM_NAME_BIAS') or '0')
         self._cuda_verified = False
         profiles = [p.strip() for p in values.get("COMPOSE_PROFILES", "").split(",") if p.strip()]
+        if values.get('LIVEKIT_AGENT_URL'):
+            self.env.update(livekit_credentials(values))
+            if 'livekit' not in profiles:
+                profiles.append('livekit')
         if self.viegem_device == "mps":
             profiles = [p for p in profiles if p != "viegem"]
         elif self.viegem_device in {"cuda", "cpu"} and "viegem" not in profiles:

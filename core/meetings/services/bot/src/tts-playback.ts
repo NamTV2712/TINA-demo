@@ -29,6 +29,7 @@ export interface TtsPlaybackOptions {
   setMute?: (muted: boolean) => void;
   spawnProcess?: () => ChildProcess;
   requestTimeoutMs?: number;
+  service?: (text:string) => {baseUrl:string;token:string;revision:number;requestId:string} | undefined;
 }
 
 export function createTtsPlayback(log: (m: string) => void = () => {}, options: TtsPlaybackOptions = {}): TtsPlayback {
@@ -84,14 +85,19 @@ export function createTtsPlayback(log: (m: string) => void = () => {}, options: 
     // Current stream + exactly one lookahead, never a private-answer cache.
     if (handles.size >= 2) { finish('failed'); return handle; }
     handles.add(handle);
-    const base = process.env.TTS_SERVICE_URL?.trim();
+    const service = options.service?.(text);
+    const base = service?.baseUrl ?? process.env.TTS_SERVICE_URL?.trim();
     let url: URL;
     try { if (!base) throw new Error(); url = new URL(base.replace(/\/$/, '') + '/v1/audio/speech'); }
     catch { finish('failed'); return handle; }
     const data = JSON.stringify({ model: 'tts-1', input: text, voice, response_format: 'pcm',
       ...(Number.isSafeInteger(options.meetingId) && options.meetingId! > 0 ? { meeting_id: options.meetingId } : {}) });
     const headers: Record<string, string> = { 'Content-Type': 'application/json', 'Content-Length': String(Buffer.byteLength(data)) };
-    if (process.env.TTS_API_TOKEN?.trim()) headers['X-API-Key'] = process.env.TTS_API_TOKEN.trim();
+    if (service) {
+      headers.Authorization = `Bearer ${service.token}`;
+      headers['X-Voice-Revision'] = String(service.revision);
+      headers['X-Voice-Request-Id'] = service.requestId;
+    } else if (process.env.TTS_API_TOKEN?.trim()) headers['X-API-Key'] = process.env.TTS_API_TOKEN.trim();
     try {
       request = (url.protocol === 'https:' ? https : http).request({ hostname: url.hostname,
         port: url.port || (url.protocol === 'https:' ? 443 : 80), path: url.pathname + url.search, method: 'POST', headers }, res => {

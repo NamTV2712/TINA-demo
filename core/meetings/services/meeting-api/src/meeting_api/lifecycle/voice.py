@@ -39,6 +39,7 @@ class VoicePolicy(BaseModel):
     noise_suppression: StrictBool = False
     allow_general_knowledge: StrictBool = False
     allow_web_search: StrictBool = False
+    engine: Literal['tina', 'livekit'] = 'tina'
 
     @field_validator('wake_variants')
     @classmethod
@@ -81,7 +82,7 @@ DiagnosticCode = Literal[
     'waiting_quiet', 'stopped', 'completed', 'question_timeout', 'ambiguous_audio',
     'ambiguous_window', 'stale_asr', 'asr_unavailable', 'services_unavailable',
     'worker_failed', 'kws_unavailable', 'answer_failed', 'no_evidence', 'playback_failed', 'policy_changed',
-    'interrupted', 'waiting_turn_end',
+    'interrupted', 'waiting_turn_end', 'livekit_unavailable',
 ]
 DIAGNOSTIC_TTL_SECONDS = 30
 
@@ -244,6 +245,7 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
                 or detail.get('expires_at_ms', 0) <= int(time.time() * 1000)):
             detail = None
         return {'replies': public_replies(row, active_session, bool(runtime)),
+                'livekit_available': bool(os.environ.get('LIVEKIT_AGENT_URL', '').strip()),
                 'available': bool((row.get('data') or {}).get('voice_assistant_capable')),
                 'policy': policy_of(row).model_dump(), 'runtime': {
                     **runtime, 'state': runtime.get('state', 'OFF'), 'session_active': bool(active_session),
@@ -257,6 +259,8 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
         if body.noise_suppression and (row.get('platform') != 'google_meet' or not (row.get('data') or {}).get('voice_assistant_capable')):
             raise HTTPException(409, 'Start a new voice-capable Google Meet bot before testing noise suppression')
         if body.enabled:
+            if body.engine == 'livekit' and not os.environ.get('LIVEKIT_AGENT_URL', '').strip():
+                raise HTTPException(503, 'The self-hosted LiveKit pilot is not configured')
             if row.get('status') not in {'requested', 'joining', 'awaiting_admission', 'active'}:
                 raise HTTPException(409, 'Start a new bot session before enabling voice')
             if row.get('platform') != 'google_meet':
@@ -279,13 +283,16 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
         return {'policy': saved, 'runtime': {'state': 'OFF' if not body.enabled else 'QUIET'}}
 
     @router.get('/bots/voice/{mid}/{session}/config', include_in_schema=False)
-    async def config(mid: int, session: str, authorization: str | None = Header(default=None)):
+    async def config(mid: int, session: str, authorization: str | None = Header(default=None),
+                     x_tina_voice_runtime: str | None = Header(default=None)):
         row = await meeting(mid, session=session, authorization=authorization)
         policy = policy_of(row)
         ready = False
         reason = None
         if policy.enabled:
             ready_key = f'meeting:voice:{mid}:{session}:ready:{policy.revision}'
+            bridge = x_tina_voice_runtime == 'livekit-v1'
+            if policy.engine == 'livekit': ready_key += ':bridge' if bridge else ':legacy'
             cached = await redis.get(ready_key)
             if cached is not None:
                 if cached in ('1', b'1', '0', b'0'):
@@ -294,6 +301,7 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
                     verdict = json.loads(cached)
                     ready, reason = verdict['ready'], verdict.get('reason')
             else:
+                if policy.engine == 'livekit' and not bridge: reason = 'livekit_unavailable'
                 try:
                     available = await agent(row, 'ready')
                     if any(path not in available['documents'] for path in policy.documents):
@@ -310,9 +318,22 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
                     except httpx.HTTPError:
                         pass
                     if not ready: reason = 'tts_unavailable'
+                if reason is None and policy.engine == 'livekit':
+                    base = os.environ.get('LIVEKIT_AGENT_URL', '').rstrip('/')
+                    try:
+                        async with client_factory(timeout=4, follow_redirects=False) as client:
+                            response = await client.get(base + '/health') if base else None
+                            ready = bool(response is not None and response.status_code == 200
+                                         and response.json().get('engine') == 'livekit-agents')
+                    except (httpx.HTTPError, ValueError):
+                        ready = False
+                    if not ready: reason = 'livekit_unavailable'
                 # Readiness is advisory; answers always recheck live policy/source fingerprints.
                 await redis.set(ready_key, json.dumps({'ready': ready, 'reason': reason}), ex=10)
         return {'enabled': policy.enabled, 'ready': ready, 'revision': policy.revision,
+                'engine': policy.engine,
+                'agent_url': (os.environ.get('LIVEKIT_AGENT_URL', '').rstrip('/') + f'/bots/{mid}/{session}')
+                    if policy.engine == 'livekit' and os.environ.get('LIVEKIT_AGENT_URL', '').strip() else None,
                 'wake_variants': policy.wake_variants, 'noise_suppression':policy.noise_suppression, 'unavailable_reason': reason}
 
     @router.post('/bots/voice/{mid}/{session}/state', include_in_schema=False)

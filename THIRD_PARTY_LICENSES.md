@@ -112,3 +112,10 @@ encoder using VieNeu synthetic speech. Their sizes/hashes are pinned in
 `core/meetings/modules/voice-engine/tina_meeting_voice/livekit-models.json`; weights are not committed
 or baked into images. Upstream LICENSE and NOTICE are preserved in that package as `livekit.LICENSE`
 and `livekit.NOTICE` and copied alongside the weights by `deploy/wakeword/install_local.py`.
+
+## Optional self-hosted LiveKit Agents pilot
+
+`deploy/livekit` pins LiveKit Agents 1.8.11 (Apache-2.0) and its SDK dependencies in `uv.lock`.
+The separate `livekit/livekit-server:v1.13.11` upstream image is Apache-2.0. Upstream license and
+package notices are retained in their installed distributions/images. This pilot uses custom
+HTTP text/PCM I/O and no LiveKit Cloud Inference or proprietary noise cancellation plugin.

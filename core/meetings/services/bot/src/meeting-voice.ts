@@ -18,7 +18,7 @@ export type VoiceDiagnosticCode = 'starting' | 'listening' | 'waiting_asr' | 'tt
   | 'waiting_quiet' | 'stopped' | 'completed' | 'question_timeout' | 'ambiguous_audio'
   | 'ambiguous_window' | 'stale_asr' | 'asr_unavailable' | 'services_unavailable'
   | 'worker_failed' | 'kws_unavailable' | 'answer_failed' | 'no_evidence' | 'playback_failed' | 'policy_changed'
-  | 'interrupted' | 'waiting_turn_end';
+  | 'interrupted' | 'waiting_turn_end' | 'livekit_unavailable';
 export interface KwsStatus {
   engine: 'livekit-wakeword'; version: '2.1.1'; mode: 'activation'; device: 'cpu';
   status: 'off' | 'starting' | 'ready' | 'failed'; models: string[]; observed_at_ms: number;
@@ -27,11 +27,13 @@ export interface VoiceDiagnostic {
   event_id: string; code: VoiceDiagnosticCode; observed_at_ms: number;
   heard_prefix?: string; heard_at_ms?: number; channel?: number; source_start_ms?: number;
 }
-export interface VoiceConfig { enabled: boolean; ready: boolean; revision: number; wake_variants?: string[]; noise_suppression?:boolean; unavailable_reason?: 'tts_unavailable' | 'sources_unavailable' | null }
+export interface VoiceConfig { enabled: boolean; ready: boolean; revision: number; wake_variants?: string[]; noise_suppression?:boolean; unavailable_reason?: 'tts_unavailable' | 'sources_unavailable' | 'livekit_unavailable' | null; engine?:'tina'|'livekit'; agent_url?:string|null }
 export interface VoiceApi {
   config(signal: AbortSignal): Promise<VoiceConfig>;
   answer(question: string, requestId: string, revision: number, signal: AbortSignal, speakerKey?: string): Promise<{ text: string; evidence_available?: boolean; clarification?: boolean; reason?:string; answer_kind?:string }>;
   state(state: VoiceState, requestId?: string, diagnostic?: VoiceDiagnostic, audio?: AudioSnapshot, kws?: KwsStatus): Promise<void>;
+  speechService?(text?:string): {baseUrl:string;token:string;revision:number;requestId:string} | undefined;
+  cancelTurn?(requestId:string): void;
 }
 export interface VoiceWorker {
   send(message: object): boolean;
@@ -95,9 +97,10 @@ export async function voiceAsrReady(inv: Invocation, fetchImpl = globalThis.fetc
 }
 
 export function voiceApi(url: string, token: string, fetchImpl = globalThis.fetch): VoiceApi {
-  async function call(path: string, method: string, body?: object, signal?: AbortSignal, speakerKey?: string) {
-    const response = await fetchImpl(url + path, { method, headers: {
-      Authorization: `Bearer ${token}`, 'Content-Type': 'application/json',
+  let agent: {baseUrl:string;token:string;revision:number} | undefined, currentId: string | undefined;
+  async function call(path: string, method: string, body?: object, signal?: AbortSignal, speakerKey?: string, base = url) {
+    const response = await fetchImpl(base + path, { method, headers: {
+      Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'X-TINA-Voice-Runtime':'livekit-v1',
       ...(speakerKey ? { 'X-Voice-Speaker-Key': speakerKey } : {}) },
       body: body ? JSON.stringify(body) : undefined, signal: signal
         ? AbortSignal.any([signal, AbortSignal.timeout(100_000)]) : AbortSignal.timeout(3000) });
@@ -106,19 +109,41 @@ export function voiceApi(url: string, token: string, fetchImpl = globalThis.fetc
     if (text.length > 200_000) throw new Error('Voice response exceeds bound');
     return JSON.parse(text);
   }
+  const cancelTurn = (requestId:string) => {
+    if(currentId===requestId)currentId=undefined;
+    if(agent) void call('/turn','DELETE',{request_id:requestId},AbortSignal.timeout(3000),undefined,agent.baseUrl).catch(()=>{});
+  };
   return {
     config: async signal => {
       const value = await call('/config', 'GET', undefined, signal);
       if (typeof value.enabled !== 'boolean' || typeof value.ready !== 'boolean' || !Number.isSafeInteger(value.revision) || value.revision < 0) throw new Error('Invalid voice config');
       if (value.wake_variants !== undefined && (!Array.isArray(value.wake_variants) || value.wake_variants.length > 8 || value.wake_variants.some((v: unknown) => typeof v !== 'string' || v.length > 40))) throw new Error('Invalid voice variants');
-      if (value.unavailable_reason != null && !['tts_unavailable', 'sources_unavailable'].includes(value.unavailable_reason)) throw new Error('Invalid voice readiness reason');
+      if (value.unavailable_reason != null && !['tts_unavailable', 'sources_unavailable', 'livekit_unavailable'].includes(value.unavailable_reason)) throw new Error('Invalid voice readiness reason');
       if (value.noise_suppression !== undefined && typeof value.noise_suppression !== 'boolean') throw new Error('Invalid NS setting');
+      if (value.engine != null && !['tina','livekit'].includes(value.engine)) throw new Error('Invalid voice runtime');
+      agent = undefined;
+      if (value.engine === 'livekit') {
+        const target = new URL(value.agent_url);
+        if (!['http:','https:'].includes(target.protocol) || target.username || target.password || target.search || target.hash) throw new Error('Invalid agent endpoint');
+        agent = {baseUrl:target.href.replace(/\/$/,''),token,revision:value.revision};
+      }
       return value;
     },
-    answer: (question, requestId, revision, signal, speakerKey) => call('/answer', 'POST',
-      { question, request_id: requestId, revision }, signal, speakerKey),
-    state: (state, requestId, diagnostic, audio, kws) => call('/state', 'POST', { state, request_id: requestId,
-      ...(diagnostic ? { diagnostic } : {}), ...(audio ? {audio} : {}), ...(kws ? {kws} : {}) }).then(() => {}),
+    answer: (question, requestId, revision, signal, speakerKey) => {
+      currentId=requestId;
+      return call('/answer','POST',{question,request_id:requestId,revision},signal,speakerKey,agent?.baseUrl);
+    },
+    state: async (state, requestId, diagnostic, audio, kws) => {
+      if(requestId && ['CAPTURING','THINKING','SPEAKING'].includes(state)) currentId=requestId;
+      if(agent && requestId && ['QUIET','OFF'].includes(state)) {
+        cancelTurn(requestId);
+      }
+      await call('/state','POST',{state,request_id:requestId,
+        ...(diagnostic?{diagnostic}:{}),...(audio?{audio}:{}),...(kws?{kws}:{})});
+    },
+    // A fixed acknowledgment must not queue behind the Agents session's in-flight LLM task.
+    speechService: text => text !== 'Dạ, em nghe.' && agent && currentId ? {...agent,requestId:currentId} : undefined,
+    cancelTurn,
   };
 }
 
@@ -366,6 +391,7 @@ export class MeetingVoice {
   }
   private async cancel(dispose = false, reason: VoiceDiagnosticCode = 'stopped') {
     const requestId=this.requestId,playedText=this.playedText,started=this.playbackStarted;
+    if(requestId)this.api.cancelTurn?.(requestId);
     this.finishTiming(reason);
     const generation = ++this.generation;
     this.epoch++; this.processing = false; this.externalSpeaking = false;

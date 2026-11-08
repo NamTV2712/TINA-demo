@@ -43,4 +43,5 @@ async def test_actual_agents_tts_emits_bounded_pcm_without_a_cloud_model():
             return data
         data=await asyncio.wait_for(drain(),5)
         assert handle.exception() is None and 4800 <= len(data) <= 5760 and len(calls)==1
+        assert model.synthesis.complete
     finally: await session.aclose()

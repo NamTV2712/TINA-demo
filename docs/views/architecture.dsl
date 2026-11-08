@@ -252,6 +252,11 @@ edges:
   admin-api -write-> voice-account-defaults  # Row-locked authenticated self-serve voice preference; no ASR or sharing changes.
   voice-account-defaults -read-> meeting-api  # Reuse existing internal bot-context to resolve new manual Google Meet voice capability.
   terminal -invoke-> tts-sidecar  # Authenticated readiness and fixed preview: server-held TTS credentials; bounded WAV returned only to the account browser, no meeting command.
+  bot -req-> livekit-agent  # Selected pilot only: meeting/session capability, revision, request UUID and hashed transport speaker key. Confirmed question in, bounded answer metadata and PCM out. Stop cancels the matching request. Bot owns actual microphone receipts. The fixed source-free acknowledgment stays on direct prewarmed local TTS so it does not wait behind pending LLM generation.
+  livekit-agent -req-> meeting-api  # Revalidate active meeting, engine and owner policy before every operation; call the same source-checked answer API. No full owner credential or direct workspace access. The internal endpoint is http://meeting-api:8080, matching the gateway; readiness checks that API as well as the LiveKit server.
+  meeting-api -req-> livekit-agent  # Optional ready probe; unavailable pilot disarms voice without stopping ASR. Only bridge-capable bots can select this path.
+  livekit-agent -req-> tts-sidecar  # Bounded text to existing shared local VieNeu-TTS; PCM16 mono 24 kHz. Shared TTS token stays inside the worker; bot uses only its scoped capability for pilot I/O.
+  livekit-agent -req-> livekit-server  # Agent joins only its named per-meeting room, without publish/subscribe/data grants. SDK RoomIO inputs/outputs and session hosting are disabled in this custom-I/O pilot; no raw meeting audio or private transcripts are published.
   bot, agent-worker deployed-in runtime
   gateway, meeting-api, agent-api, admin-api, runtime, redis, postgres, object-store, transcription, asr-control deployed-in deploy
   flows-api, flows-worker deployed-in deploy

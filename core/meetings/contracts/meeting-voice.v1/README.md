@@ -91,3 +91,12 @@ Public links come from provider citation metadata, are validated as HTTP(S) and 
 in Terminal and Extension. They are not fabricated from model text. Existing replies default to
 meeting/answered with no links. No model, audio window, canonical ASR row or source permission is
 changed by these answer-mode additions.
+
+`VoicePolicy.engine` is `tina` (default, including old records) or `livekit` (explicit one-meeting
+self-hosted pilot). The owner changes it with the existing revision check and Stop fence. LiveKit
+configuration/readiness is separate from TTS readiness. New bots advertise `X-TINA-Voice-Runtime:
+livekit-v1`; old bots cannot silently run native voice under a selected pilot policy. The bot config
+carries the scoped internal agent URL; no LiveKit server secret or owner API key reaches the bot.
+Confirmed selected-ASR text goes through AgentSession's TINA LLM adapter and local VieNeu TTS
+adapter over custom HTTP I/O. Actual heard-prefix/Stop receipts remain controlled by the bot,
+not by SDK audio-delivery events. Source, session and caller fences remain unchanged.

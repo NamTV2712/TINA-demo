@@ -81,3 +81,24 @@ it('room answer permissions preserve the full CAS policy and do not touch other 
   const body=JSON.parse(fetch.mock.calls.find(([url,init])=>url==='/api/meetings/14/voice-assistant'&&init?.method==='PUT')![1]!.body as string);
   expect(body).toEqual({...policy,allow_general_knowledge:true,allow_web_search:true});
 });
+
+it('LiveKit runtime is an explicit room choice and preserves source permissions',async()=>{
+  const policy={enabled:true,include_transcript:true,documents:['wiki/shared.md'],revision:4,wake_variants:[],noise_suppression:true,
+    allow_general_knowledge:true,allow_web_search:false,engine:'tina'};
+  const fetch=vi.fn(async(input:RequestInfo|URL,init?:RequestInit)=>{
+    const path=String(input);
+    if(path==='/api/user/voice')return Response.json({prepare_new_bots:null});
+    if(path==='/api/user/transcription')return Response.json({});
+    if(path==='/api/bots/voice/services')return Response.json({...services,wake:{...services.wake,sessions:[{meeting_id:14,status:'ready'}]}});
+    if(path==='/api/meetings/14/voice-assistant')return Response.json({policy:init?.method==='PUT'?{...JSON.parse(init.body as string),revision:5}:policy,livekit_available:true});
+    if(path==='/api/workspace/meeting-knowledge/14')return Response.json({documents:[]});
+    return new Response('',{status:404});
+  });vi.stubGlobal('fetch',fetch);
+  render(<SettingsDialog onClose={()=>{}}/>);fireEvent.click(screen.getByRole('button',{name:'Voice assistant'}));
+  await screen.findByText('Meeting #14 · Ready');fireEvent.change(screen.getByLabelText('Active meeting'),{target:{value:'14'}});
+  const runtime=await screen.findByLabelText('Voice runtime');fireEvent.change(runtime,{target:{value:'livekit'}});
+  expect(screen.getByText(/One meeting at a time/)).toBeTruthy();fireEvent.click(screen.getByRole('button',{name:'Save room settings'}));
+  await screen.findByText('Saved. The current voice turn stops when settings change.');
+  const body=JSON.parse(fetch.mock.calls.find(([url,init])=>url==='/api/meetings/14/voice-assistant'&&init?.method==='PUT')![1]!.body as string);
+  expect(body).toEqual({...policy,engine:'livekit'});
+});

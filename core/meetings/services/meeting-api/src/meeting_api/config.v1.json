@@ -767,6 +767,15 @@
       "targets": [
         "compose"
       ]
+    },
+    {
+      "key": "LIVEKIT_AGENT_URL",
+      "class": "defaulted",
+      "default": "",
+      "targets": [
+        "compose"
+      ],
+      "description": "Optional internal self-hosted LiveKit Agents pilot. Empty keeps TINA native voice; per-room owner opt-in is required."
     }
   ],
   "capabilities": {

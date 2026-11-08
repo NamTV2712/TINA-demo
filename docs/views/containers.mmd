@@ -52,6 +52,8 @@ flowchart LR
   dashboard["dashboard (deprecated)"]
   native_capture["TINA Capture"]
   speech_coordinator["Optional single-room speech coordinator"]
+  livekit_agent["Optional local LiveKit Agents pilot"]
+  livekit_server["Self-hosted LiveKit server"]
   meeting_api -->|"write"| segments_table
   bot -->|"HTTPS"| transcription
   meeting_api -->|"JDBC"| postgres
@@ -108,3 +110,8 @@ flowchart LR
   bot -->|"HTTP"| meeting_api
   meeting_api -->|"HTTP"| agent_api
   terminal -->|"HTTP via gateway and meeting-api"| tts_sidecar
+  bot -->|"HTTP"| livekit_agent
+  livekit_agent -->|"HTTP"| meeting_api
+  meeting_api -->|"HTTP"| livekit_agent
+  livekit_agent -->|"HTTP"| tts_sidecar
+  livekit_agent -->|"WebSocket"| livekit_server

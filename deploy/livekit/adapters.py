@@ -1,9 +1,11 @@
 """LiveKit model/PCM adapters. TINA remains the authority for sources and heard-text history."""
 import asyncio
+from dataclasses import dataclass
 from uuid import uuid4
 
 from livekit import rtc
 from livekit.agents import llm, tts
+from livekit.agents import APIConnectionError
 from livekit.agents.voice import io
 from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS
 
@@ -42,10 +44,22 @@ class TinaStream(llm.LLMStream):
         self._event_ch.send_nowait(llm.ChatChunk(id=str(uuid4()), delta=llm.ChoiceDelta(role='assistant', content=result['text'])))
 
 
+@dataclass
+class SynthesisStatus:
+    started: int = 0
+    completed: int = 0
+    failed: bool = False
+
+    @property
+    def complete(self):
+        return self.started > 0 and self.completed == self.started and not self.failed
+
+
 class VieNeuTTS(tts.TTS):
     def __init__(self, synthesize):
         super().__init__(capabilities=tts.TTSCapabilities(streaming=False), sample_rate=SAMPLE_RATE, num_channels=1)
         self.speech = synthesize
+        self.synthesis = SynthesisStatus()
 
     @property
     def model(self): return 'vieneu-v3-turbo'
@@ -60,18 +74,29 @@ class VieNeuTTS(tts.TTS):
 class VieNeuStream(tts.ChunkedStream):
     def __init__(self, model, **kwargs):
         self.model = model
+        self.synthesis = model.synthesis
         super().__init__(tts=model, **kwargs)
 
     async def _run(self, output_emitter):
+        self.synthesis.started += 1
         output_emitter.initialize(request_id=str(uuid4()), sample_rate=SAMPLE_RATE, num_channels=1,
                                   mime_type='audio/pcm', frame_size_ms=20)
-        size = 0
-        async for chunk in self.model.speech(self._input_text):
-            size += len(chunk)
-            if size > MAX_AUDIO_BYTES: raise RuntimeError('Audio exceeds bound')
-            output_emitter.push(chunk)
-        if not size or size % 2: raise RuntimeError('Invalid PCM stream')
-        output_emitter.end_input()
+        try:
+            size = 0
+            async for chunk in self.model.speech(self._input_text):
+                size += len(chunk)
+                if size > MAX_AUDIO_BYTES: raise RuntimeError('Audio exceeds bound')
+                output_emitter.push(chunk)
+            if not size or size % 2: raise RuntimeError('Invalid PCM stream')
+            output_emitter.end_input()
+            await output_emitter.join()
+            self.synthesis.completed += 1
+        except asyncio.CancelledError:
+            self.synthesis.failed = True
+            raise
+        except Exception:
+            self.synthesis.failed = True
+            raise APIConnectionError('Local TTS synthesis failed', retryable=False) from None
 
 
 class HttpAudioOutput(io.AudioOutput):

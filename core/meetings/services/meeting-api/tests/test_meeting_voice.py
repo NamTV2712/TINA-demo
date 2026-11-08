@@ -39,6 +39,8 @@ async def setup(monkeypatch):
     blocked = [False]
     async def upstream(request):
         calls.append(request)
+        if request.url.host == 'livekit.test':
+            return httpx.Response(200,json={'ready':True,'engine':'livekit-agents'})
         if request.url.path.endswith('/answer'):
             entered.set()
             if blocked[0]: await release.wait()
@@ -82,7 +84,7 @@ async def test_capability_is_scoped_to_active_session_and_owner_policy_is_privat
     assert (await client.get('/bots/voice/1/current/config')).status_code == 401
     assert (await client.get('/bots/voice/1/old/config', headers=headers('old'))).status_code == 409
     result = await client.get('/bots/voice/1/current/config', headers=headers())
-    assert result.json() == {'enabled': True, 'ready': True, 'revision': 1, 'wake_variants': [], 'noise_suppression':False, 'unavailable_reason': None}
+    assert result.json() == {'enabled': True, 'ready': True, 'revision': 1, 'wake_variants': [], 'noise_suppression':False, 'unavailable_reason': None,'engine':'tina','agent_url':None}
 
 
 async def test_source_selection_is_explicit_and_policy_save_uses_revision(setup):
@@ -510,3 +512,25 @@ def test_public_answer_metadata_is_validated_and_survives_playback_projection():
     assert public_replies(row,'current')[0]['links']==reply['links']
     for url in ['javascript:alert(1)','https://user:pass@example.com','file:///tmp/secret']:
         with pytest.raises(ValueError): VoiceReply.model_validate(reply|{'links':[{'url':url,'title':'bad'}]})
+
+
+async def test_livekit_pilot_is_explicit_and_unavailable_does_not_claim_ready(setup,monkeypatch):
+    client,repo,redis,*_=setup
+    policy={'enabled':True,'include_transcript':True,'documents':[],'revision':1,'engine':'livekit'}
+    assert (await client.put('/meetings/1/voice-assistant',headers={'X-User-Id':'7'},json=policy)).status_code==503
+    monkeypatch.setenv('LIVEKIT_AGENT_URL','http://pilot.test')
+    result=await client.put('/meetings/1/voice-assistant',headers={'X-User-Id':'7'},json=policy)
+    assert result.status_code==200 and result.json()['policy']['engine']=='livekit'
+    config=(await client.get('/bots/voice/1/current/config',headers=headers())).json()
+    assert not config['ready'] and config['unavailable_reason']=='livekit_unavailable'
+    assert config['agent_url']=='http://pilot.test/bots/1/current'
+
+
+async def test_only_bridge_capable_bots_claim_a_healthy_livekit_runtime(setup,monkeypatch):
+    client,repo,redis,*_=setup
+    monkeypatch.setenv('LIVEKIT_AGENT_URL','http://livekit.test')
+    repo.row['data']['voice_assistant']['engine']='livekit'
+    legacy=(await client.get('/bots/voice/1/current/config',headers=headers())).json()
+    assert not legacy['ready'] and legacy['unavailable_reason']=='livekit_unavailable'
+    current=(await client.get('/bots/voice/1/current/config',headers=headers()|{'X-TINA-Voice-Runtime':'livekit-v1'})).json()
+    assert current['ready'] and current['engine']=='livekit'

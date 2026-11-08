@@ -326,3 +326,17 @@ Reload the unpacked Extension after rebuilding it. These changes preserve VieGem
 Gipformer + FSMN-VAD, the two LiveKit wake-word models, VieNeu-TTS, and canonical transcript history.
 See `core/agent/eval/voice/README.md` for the 30-question synthetic check; it is not a real meeting
 quality benchmark or an end-to-end latency measurement.
+
+## Optional self-hosted LiveKit Agents pilot
+
+After starting a bot with the current image, select **Settings → Voice assistant → Room answers →
+Voice runtime → LiveKit Agents · local pilot** and save. One meeting at a time is supported. Keep
+**TINA** selected for the existing pipeline; changing runtime stops the current turn and keeps source
+permissions unchanged. The pilot deployment is enabled by an encrypted `LIVEKIT_AGENT_URL` and
+started by `make all` through its optional profile. See `deploy/livekit/README.md`.
+
+This first integration uses custom HTTP I/O: confirmed questions from the existing ASR/KWS enter
+AgentSession, and generated PCM returns to the same microphone player. Raw audio is not republished
+through LiveKit rooms. TINA still owns model settings, authorized RAG/tool retrieval and heard-prefix
+history. Agents handles the custom LLM/TTS nodes and task cancellation. Native Agents automatic voice
+endpointing/barge-in and a replacement tool planner are outside this pilot.

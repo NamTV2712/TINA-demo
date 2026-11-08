@@ -28,6 +28,7 @@ import type { Act, LifecycleEvent, TranscriptSegment } from './contracts.js';
 import { createOrchestrator } from './orchestrator.js';
 import { createHttpLifecycleSink } from './adapters/lifecycle-http.js';
 import { MeetingVoice, voiceApi, voiceAsrReady, nativeKwsWorker } from './meeting-voice.js';
+import { createTtsPlayback } from './tts-playback.js';
 import { createSpeechHandler, createSpeechReporter } from './speech-status.js';
 import { createRedisTranscriptSink, redisClientFrom } from './adapters/transcript-redis.js';
 import { createRedisActsSource, redisActsClientFrom } from './adapters/acts-redis.js';
@@ -247,10 +248,12 @@ export async function main(env: NodeJS.ProcessEnv = process.env): Promise<number
   try {
     session = await launchBrowser(inv, { signal: restoreAbort.signal });  // L4 (O6/VM)
     join = createBrowserJoinDriver(session.page, inv);
-    const speak = createSpeakController(session.page, inv);
+    const api = env.TINA_VOICE_URL && env.TINA_VOICE_TOKEN ? voiceApi(env.TINA_VOICE_URL, env.TINA_VOICE_TOKEN) : undefined;
+    const speak = createSpeakController(session.page, inv, log => createTtsPlayback(log,
+      {meetingId:inv.meeting_id,service:text=>api?.speechService?.(text)}));
     const reporter = createSpeechReporter(inv);
     const voice = inv.platform === 'google_meet' && inv.voiceAgentEnabled && env.TINA_VOICE_URL && env.TINA_VOICE_TOKEN
-      ? new MeetingVoice(voiceApi(env.TINA_VOICE_URL, env.TINA_VOICE_TOKEN), speak, reporter, undefined, undefined, () => voiceAsrReady(inv),
+      ? new MeetingVoice(api!, speak, reporter, undefined, undefined, () => voiceAsrReady(inv),
           (channel, endMs) => botPipeline?.requestEndpoint?.(channel, endMs), nativeKwsWorker)
       : undefined;
     botPipeline = createBotPipeline(inv, transcript, {

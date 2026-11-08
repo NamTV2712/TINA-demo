@@ -36,6 +36,7 @@ const diagnosticLabel: Record<string, string> = {
   services_unavailable: 'Dịch vụ trả lời hoặc TTS chưa sẵn sàng. Kiểm tra nguồn, model và TTS.',
   worker_failed: 'Bộ nhận câu hỏi bị lỗi. Kiểm tra bot rồi lưu lại cấu hình để khởi động lại.',
   kws_unavailable: 'Wake-word chưa sẵn sàng. Hãy tạo bot mới sau khi kiểm tra model.',
+  livekit_unavailable: 'LiveKit Agents chưa sẵn sàng hoặc bot cần image mới. Kiểm tra dịch vụ hoặc chọn lại TINA trong Settings.',
   interrupted: 'Đã dừng theo lời người gọi.',
   waiting_turn_end: 'Đang chờ bạn nói hết ý.',
   answer_failed: 'Chưa lấy được câu trả lời. Kiểm tra model và nguồn được chia sẻ rồi thử lại.',

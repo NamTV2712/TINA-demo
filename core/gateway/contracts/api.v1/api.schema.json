@@ -3626,6 +3626,15 @@
                           "default": false,
                           "title": "Allow Web Search",
                           "type": "boolean"
+                        },
+                        "engine": {
+                          "default": "tina",
+                          "enum": [
+                            "tina",
+                            "livekit"
+                          ],
+                          "title": "Engine",
+                          "type": "string"
                         }
                       },
                       "title": "VoicePolicy",
@@ -3654,6 +3663,10 @@
                     },
                     "available": {
                       "type": "boolean"
+                    },
+                    "livekit_available": {
+                      "type": "boolean",
+                      "description": "The local LiveKit pilot is configured; runtime readiness is checked separately."
                     }
                   }
                 }
@@ -3740,6 +3753,15 @@
                           "default": false,
                           "title": "Allow Web Search",
                           "type": "boolean"
+                        },
+                        "engine": {
+                          "default": "tina",
+                          "enum": [
+                            "tina",
+                            "livekit"
+                          ],
+                          "title": "Engine",
+                          "type": "string"
                         }
                       },
                       "title": "VoicePolicy",
@@ -3828,6 +3850,15 @@
                     "default": false,
                     "title": "Allow Web Search",
                     "type": "boolean"
+                  },
+                  "engine": {
+                    "default": "tina",
+                    "enum": [
+                      "tina",
+                      "livekit"
+                    ],
+                    "title": "Engine",
+                    "type": "string"
                   }
                 },
                 "title": "VoicePolicy",

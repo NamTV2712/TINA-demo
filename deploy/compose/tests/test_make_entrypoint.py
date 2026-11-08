@@ -616,5 +616,16 @@ class ComposeConfigTest(unittest.TestCase):
             self.assertIn("IMAGE_TAG=fixture", env_file.read_text())
 
 
+class LiveKitCredentialTests(unittest.TestCase):
+    def test_keys_are_separate_deterministic_and_never_plain_control_secret(self):
+        secret='private-fixture-control-secret-32-characters'
+        result=stack.livekit_credentials({'INTERNAL_API_SECRET':secret})
+        self.assertEqual(result,stack.livekit_credentials({'INTERNAL_API_SECRET':secret}))
+        self.assertEqual(len(result['LIVEKIT_API_SECRET']),64)
+        self.assertNotIn(secret,result['LIVEKIT_KEYS'])
+        self.assertNotEqual(result,stack.livekit_credentials({'INTERNAL_API_SECRET':secret+'2'}))
+        with self.assertRaises(stack.StackError):stack.livekit_credentials({'INTERNAL_API_SECRET':''})
+
+
 if __name__ == "__main__":
     unittest.main()

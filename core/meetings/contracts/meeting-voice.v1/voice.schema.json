@@ -51,6 +51,15 @@
           "default": false,
           "title": "Allow Web Search",
           "type": "boolean"
+        },
+        "engine": {
+          "default": "tina",
+          "enum": [
+            "tina",
+            "livekit"
+          ],
+          "title": "Engine",
+          "type": "string"
         }
       },
       "title": "VoicePolicy",
@@ -123,7 +132,8 @@
             "playback_failed",
             "policy_changed",
             "interrupted",
-            "waiting_turn_end"
+            "waiting_turn_end",
+            "livekit_unavailable"
           ],
           "title": "Code",
           "type": "string"

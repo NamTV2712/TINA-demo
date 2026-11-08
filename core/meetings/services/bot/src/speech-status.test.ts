@@ -251,3 +251,19 @@ test('prepared audio waits before opening the meeting mic and mic refusal cancel
     assert.equal(plays,0);assert.equal(cancels,1);
   }
 });
+
+test('pilot PCM uses only the scoped voice capability and binds revision/turn',async()=>{
+  let received: import('node:http').IncomingHttpHeaders|undefined;
+  const server=createServer((req,res)=>{received=req.headers;req.resume();req.once('end',()=>{res.writeHead(200);res.end(Buffer.alloc(4800));});});
+  await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const tts=createTtsPlayback(()=>{},{meetingId:1,setMute(){},service:()=>({
+    baseUrl:`http://127.0.0.1:${(server.address() as AddressInfo).port}/bots/1/session`,token:'scoped-fixture',revision:4,requestId:'00000000-0000-4000-8000-000000000001'}),
+    spawnProcess(){const child=new EventEmitter() as unknown as ChildProcess;
+      Object.assign(child,{stdin:new PassThrough(),stderr:new PassThrough(),kill(){child.emit('exit',null);return true;}});
+      child.stdin!.on('finish',()=>setImmediate(()=>child.emit('exit',0)));setImmediate(()=>child.emit('spawn'));return child;}});
+  try{
+    assert.equal(await tts.speak('Dạ, em nghe.'),'completed');
+    assert.equal(received?.authorization,'Bearer scoped-fixture');assert.equal(received?.['x-voice-revision'],'4');
+    assert.equal(received?.['x-api-key'],undefined);assert.equal(received?.['x-voice-request-id'],'00000000-0000-4000-8000-000000000001');
+  }finally{tts.stop();await new Promise<void>(resolve=>server.close(()=>resolve()));}
+});
