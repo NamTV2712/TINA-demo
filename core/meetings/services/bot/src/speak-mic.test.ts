@@ -53,3 +53,24 @@ test('playback requires observed mic state, including delayed UI changes and rej
     }
   } finally { (globalThis as any).document = previous; }
 });
+
+test('Google Meet remote participant mute controls cannot establish the bot microphone state',async()=>{
+  const previous=(globalThis as any).document;
+  let on=false,remoteClicks=0,localClicks=0,spoken=0;
+  const remote=(label:string)=>({getAttribute:(key:string)=>key==='aria-label'?label:null,click(){remoteClicks++;}});
+  const local={disabled:false,getAttribute(key:string){
+    if(key==='aria-label')return on?'Turn off microphone':'Turn on microphone';
+    if(key==='data-is-muted')return String(!on);
+    return null;
+  },click(){localClicks++;on=!on;}};
+  (globalThis as any).document={querySelectorAll:()=>[
+    remote("You can't remotely mute a participant's microphone"),remote("Mute another participant's microphone"),local]};
+  const page={async evaluate(fn:any,arg:any){return fn(arg);}};
+  try{
+    const controller=createSpeakController(page as any,{platform:'google_meet',voiceAgentEnabled:true} as any,
+      ()=>({async speak(){assert(on);spoken++;return 'completed';},stop(){}}));
+    assert.equal(await controller.speak('Synthetic reply'),'completed');
+    assert.equal(spoken,1);assert.equal(remoteClicks,0);assert.equal(localClicks,2);assert.equal(on,false);
+    await controller.stop();assert.equal(localClicks,2);
+  }finally{(globalThis as any).document=previous;}
+});

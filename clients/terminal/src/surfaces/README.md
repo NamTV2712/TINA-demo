@@ -105,3 +105,7 @@ The review filter includes a flagged second-pass suggestion at its exact source
 revision, even when source text was unflagged. Stale evidence is hidden after edits;
 after Apply only evidence matching the applied proposal/revision remains visible.
 Legacy jobs without text/proposal checks remain readable. Apply stays explicit.
+
+Meeting voice labels distinguish assistant replies from meeting evidence, general knowledge and public web.
+
+VoiceReplySources displays fresh owner-authorized evidence under voice replies. Source reads revalidate every five seconds while expanded, abort on meeting changes/unmount, and clear quotes on permission/outage failures; transcript anchors and existing document navigation open originals.

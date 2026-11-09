@@ -1,6 +1,7 @@
+import { createVoiceActivity } from './voice-activity-view';
 import { createTranscriptFeed } from './transcript-feed';
 import {
-  apiBase, listBotMeetings, listDesktopMeetings, watchBotTranscript, watchDesktopTranscript,
+  listBotMeetings, listDesktopMeetings, watchBotTranscript, watchDesktopTranscript, readBotVoiceSources,
   type BotMeeting,
 } from './bot-transcript';
 import type { TranscriptSegment } from './transcript-rendering';
@@ -16,7 +17,11 @@ const defaults: Config = {
   gatewayUrl: 'http://127.0.0.1:8056', dashboardUrl: 'http://127.0.0.1:13001',
   botGatewayUrl: 'http://127.0.0.1:18056', terminalUrl: 'http://127.0.0.1:13000', language: 'vi',
 };
-const feed = createTranscriptFeed($('feed'), $('transcriptTurns'), $('latestBtn') as HTMLButtonElement);
+const voiceActivityView = createVoiceActivity($('voiceActivity'));
+const feed = createTranscriptFeed($('feed'), $('transcriptTurns'), $('latestBtn') as HTMLButtonElement, {
+  load: (id, signal) => { if (!selected || source !== 'bot') throw new Error('No Bot meeting'); return readBotVoiceSources(config, selected.id, id, signal); },
+  url: (id, index) => safePageUrl(config.terminalUrl, `/meetings/${selected!.id}?voiceSource=${encodeURIComponent(id)}#voice-source-${id}-${index}`),
+});
 let config = { ...defaults };
 let source: Source = 'bot';
 let meetings: BotMeeting[] = [];
@@ -112,6 +117,7 @@ function applyTheme(): void {
 }
 
 function clearTranscript(): void {
+  voiceActivityView.reset();
   segments = [];
   replies = [];
   feed.reset();
@@ -152,17 +158,14 @@ function renderMeetings(): void {
 
 function updateDestinations(): void {
   const terminal = $('openTerminal') as HTMLButtonElement;
-  const dashboard = $('openDashboard') as HTMLButtonElement;
   terminal.disabled = !selected || source !== 'bot';
   terminal.title = source === 'desktop' ? 'Desktop archive meetings are not Bot rows in TINA Terminal.' : '';
-  dashboard.disabled = !selected || source === 'bot' && !config.dashboardUrl.trim();
-  dashboard.textContent = source === 'desktop' ? 'Open Desktop review ↗' : 'Open Dashboard ↗';
 }
 
 function stopCurrentWatch(clear = false): number {
   scope++;
   stopTranslation(); stopTranslation = () => {}; translation = null; translationError = false;
-  stopWatching(); stopWatching = () => {};
+  stopWatching(); stopWatching = () => {}; voiceActivityView.reset();
   if (clear) clearTranscript();
   return scope;
 }
@@ -174,15 +177,19 @@ function watchMeeting(meeting: BotMeeting, token: number): void {
   $('meetingTitle').textContent = meeting.title;
   $('meetingMeta').textContent = `${meeting.platform.replace(/_/g, ' ')} · ${meeting.status}`;
   $('emptyStateText').textContent = 'Waiting for transcript text…';
-  const onUpdate = (rows: TranscriptSegment[], status: string, voice: VoiceReply[] = []) => {
+  const onUpdate = (rows: TranscriptSegment[], status: string, voice: VoiceReply[] = [], activity?: unknown) => {
     if (token !== scope || !selected || currentKey(selected) !== currentKey(meeting)) return;
     segments = rows;
     replies = voice;
+    if (source === 'bot' && meeting.platform === 'google_meet') {
+      voiceActivityView.update(activity, ['completed','failed','stopped','ended','past'].includes(status));
+    }
     renderTranscript(status === 'active' ? 'Live transcript' : 'Saved transcript');
     setStatus('Connected', 'ready');
   };
   const onError = (message: string, denied: boolean) => {
     if (token !== scope) return;
+    if (source === 'bot' && meeting.platform === 'google_meet') voiceActivityView.update(null);
     if (denied) { segments = []; clearTranscript(); }
     setStatus(denied ? 'Access unavailable' : 'Reconnecting…', denied ? 'error' : 'loading');
     $('transcriptStatus').textContent = message;
@@ -252,17 +259,12 @@ function safePageUrl(baseValue: string, path: string): string {
   return new URL(path.replace(/^\/+/, ''), url.href.replace(/\/*$/, '/') ).href;
 }
 
-function openDestination(destination: 'terminal' | 'dashboard'): void {
-  if (!selected) return;
+function openTerminal(): void {
+  if (!selected || source !== 'bot') return;
   try {
-    let url: string;
-    if (source === 'bot' && destination === 'terminal') url = safePageUrl(config.terminalUrl, `/meetings/${selected.id}`);
-    else if (source === 'bot') url = safePageUrl(config.dashboardUrl, `/meetings/${selected.id}`);
-    else if (destination === 'dashboard') url = safePageUrl(apiBase(desktopGatewayUrl()), `/transcripts/${encodeURIComponent(selected.platform)}/${encodeURIComponent(selected.nativeMeetingId)}/review`);
-    else return;
-    void chrome.tabs.create({ url });
+    void chrome.tabs.create({ url: safePageUrl(config.terminalUrl, `/meetings/${selected.id}`) });
   } catch (error) {
-    setStatus(error instanceof Error ? error.message : 'Unable to open this destination.', 'error');
+    setStatus(error instanceof Error ? error.message : 'Unable to open Terminal.', 'error');
   }
 }
 
@@ -320,8 +322,7 @@ function bindSettings(): void {
   });
   $('meetingSelect').addEventListener('change', selectMeeting);
   $('refreshBtn').addEventListener('click', () => void refreshMeetings(true));
-  $('openTerminal').addEventListener('click', () => openDestination('terminal'));
-  $('openDashboard').addEventListener('click', () => openDestination('dashboard'));
+  $('openTerminal').addEventListener('click', openTerminal);
   $('gearBtn').addEventListener('click', () => showSettings(true));
   $('backBtn').addEventListener('click', () => showSettings(false));
   $('doneBtn').addEventListener('click', () => showSettings(false));

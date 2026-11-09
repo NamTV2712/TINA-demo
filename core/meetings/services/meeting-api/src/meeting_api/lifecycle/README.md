@@ -67,3 +67,11 @@ TRANSIENT → retry: `awaiting_admission_timeout`, `join_failure`. PERMANENT →
 `test_join_retry.py` (P3d: FakeClock-driven bounded retries). Ride `gate:python`.
 
 `voice.py` owns room-shared voice policy, active-session capability checks, turn reservations and state. Policy changes cancel thought/playback; only approved current evidence may reach TTS.
+
+LiveKit agent operations reserve the existing room turn and budget up to two planned tools. Finalization accepts only actual heard caller context and completed queries; Stop and policy/session changes fence late work.
+
+Managed Agents turns allow two plans/four attempted lookups in a shared 30-second phase. Opaque context handles come only from prior successful results in that turn. Timeouts skip new work and finalization uses successful queries; Stop, final dispatch, policy/session changes and request fingerprint checks fence every later tool.
+
+Verified answers persist at most 32 evidence references with playback receipts. Public reply history exposes only source_count. GET /meetings/{meeting_id}/voice-assistant/sources/{request_id} checks owner/artifact state and resolves current authorized quotes through Agent API; old replies without refs cannot gain invented citations.
+
+Native and LiveKit turn admission share a WATCH/CAS reservation. It rechecks the latest known bot session, reclaims only a well-formed lease belonging to a provably retired session, and preserves current/unknown ownership. Retired playback is marked stopped through PlaybackStore CAS, retaining completed prefixes and preventing late receipts from reopening it or clearing a replacement command.

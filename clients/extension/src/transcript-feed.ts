@@ -1,6 +1,6 @@
 import { groupSegments, type TranscriptSegment } from './transcript-rendering';
 import { translationSegments, type TranscriptLanguage, type TranslationGroup, type PhraseTranslation } from './translation';
-import { replyLabel, type VoiceReply } from './voice-replies';
+import { replyLabel, type VoiceReply, type VoiceSources } from './voice-replies';
 
 type Segment = TranscriptSegment & { speaker_key?: string; translation?: PhraseTranslation };
 const identity = (s: Segment): string => s.segment_id || `${s.speaker_key || s.speaker || ''}:${s.absolute_start_time}`;
@@ -14,13 +14,52 @@ function reconcile(parent: HTMLElement, children: HTMLElement[]): void {
 }
 
 /** Update only changed text; keep the reader's scroll anchor through live revisions. */
-export function createTranscriptFeed(feed: HTMLElement, root: HTMLElement, latest: HTMLButtonElement) {
+export function createTranscriptFeed(feed: HTMLElement, root: HTMLElement, latest: HTMLButtonElement, evidence?: {
+  load: (requestId: string, signal: AbortSignal) => Promise<VoiceSources>;
+  url: (requestId: string, sourceId: string) => string;
+}) {
   const rows = new Map<string, ReturnType<typeof createTurn>>();
   const spans = new Map<string, HTMLSpanElement>();
   const translations = new Map<string, HTMLSpanElement>();
   const originals = new Map<string, HTMLSpanElement>();
   const replyRows = new Map<string, { row: HTMLElement; time: HTMLTimeElement; state: HTMLElement; copy: HTMLElement; note: HTMLElement; sources:HTMLElement }>();
   let following = true;
+  let sourceAbort: AbortController | undefined, sourceTimer: ReturnType<typeof setTimeout> | undefined;
+  let openSources: HTMLDetailsElement | undefined;
+  function clearSources() { sourceAbort?.abort(); clearTimeout(sourceTimer); }
+  function sourceDetails(reply: VoiceReply) {
+    const details = element('details', 'voice-evidence');
+    const summary = element('summary', 'voice-source-toggle'); text(summary, `Nguồn · ${reply.source_count}`);
+    const content = element('div', 'voice-source-quotes'); details.append(summary, content);
+    details.addEventListener('toggle', () => {
+      if (!details.isConnected) return;
+      if (!details.open) { if (openSources === details) { clearSources(); openSources = undefined; } content.replaceChildren(); return; }
+      clearSources(); if (openSources && openSources !== details) openSources.open = false;
+      openSources = details; sourceAbort = new AbortController(); const signal = sourceAbort.signal;
+      async function refresh() {
+        try {
+          const result = await evidence!.load(reply.request_id, signal);
+          if (signal.aborted || !details.isConnected) return;
+          const children: HTMLElement[] = [];
+          if (result.unavailable) { const note = element('p', 'turn-time'); note.setAttribute('role', 'status'); text(note, `${result.unavailable} nguồn đã thay đổi hoặc không còn được chia sẻ.`); children.push(note); }
+          for (const source of result.sources) {
+            const card = element('div', 'voice-source-quote'), label = element('div', 'turn-time');
+            const ms = source.start_ms;
+            const time = ms == null ? '' : ms > 1e12 ? new Date(ms).toLocaleTimeString('vi-VN') : `${Math.floor(ms / 60000)}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}`;
+            text(label, source.kind === 'transcript' ? `${source.speaker_name || 'Người nói'} · ${time}` : `${source.path} · đoạn ${(source.paragraph ?? 0) + 1}`);
+            const quote = element('blockquote', 'turn-copy'); text(quote, source.quote);
+            const link = element('a', 'voice-source'); link.href = evidence!.url(reply.request_id, source.id); link.target = '_blank'; link.rel = 'noopener noreferrer'; text(link, 'Mở nguồn trong Terminal ↗');
+            card.append(label, quote, link); children.push(card);
+          }
+          if (!children.length) { const empty = element('p', 'turn-time'); text(empty, 'Câu trả lời này chưa lưu nguồn trích dẫn.'); children.push(empty); }
+          content.replaceChildren(...children);
+        } catch { if (!signal.aborted) { content.replaceChildren(); const error = element('p', 'turn-time'); error.setAttribute('role', 'status'); text(error, 'Chưa kiểm tra được nguồn. Đang thử lại…'); content.append(error); } }
+        finally { if (!signal.aborted) sourceTimer = setTimeout(refresh, 5000); }
+      }
+      text(content, 'Đang kiểm tra nguồn…'); void refresh();
+    });
+    return details;
+  }
   function createTurn() {
     const row = element('article', 'transcript-turn'); row.setAttribute('role', 'listitem');
     const header = element('header', 'turn-header');
@@ -39,7 +78,7 @@ export function createTranscriptFeed(feed: HTMLElement, root: HTMLElement, lates
   }, { passive: true });
   latest.addEventListener('click', scrollToLatest);
   return {
-    reset() { rows.clear(); spans.clear(); translations.clear(); originals.clear(); replyRows.clear(); root.replaceChildren(); following = true; latest.hidden = true; feed.scrollTop = 0; },
+    reset() { clearSources(); openSources = undefined; rows.clear(); spans.clear(); translations.clear(); originals.clear(); replyRows.clear(); root.replaceChildren(); following = true; latest.hidden = true; feed.scrollTop = 0; },
     reveal() { if (following) scrollToLatest(); },
     render(segments: Segment[], draftLabel: string, language: TranscriptLanguage = 'vi', translationGroups: TranslationGroup[] = [], paused = false, replies: VoiceReply[] = []) {
       const selection = document.getSelection?.();
@@ -103,10 +142,11 @@ export function createTranscriptFeed(feed: HTMLElement, root: HTMLElement, lates
           item = { row, state, time, copy, note, sources }; replyRows.set(reply.request_id, item);
         }
         const partial=reply.state==='stopped'&&reply.played_text!==undefined;
-        text(item.state, replyLabel[reply.state]+(reply.answer_kind==='web'?' · Web':reply.answer_kind==='general'?' · Kiến thức chung':'')); text(item.copy, partial ? reply.played_text||'Chưa có câu nào được phát trọn vẹn.' : reply.text);
-        const signature=JSON.stringify(reply.links||[]);
+        text(item.state, replyLabel[reply.state]+(reply.answer_kind==='web'?' · Web':reply.answer_kind==='general'?' · Kiến thức chung':reply.answer_kind==='assistant'?' · Trợ lý':'')); text(item.copy, partial ? reply.played_text||'Chưa có câu nào được phát trọn vẹn.' : reply.text);
+        const signature=JSON.stringify([reply.links||[],reply.source_count||0]);
         if(item.sources.dataset.links!==signature){
           item.sources.replaceChildren(...(reply.links||[]).map(link=>{const a=element('a','voice-source');a.href=link.url;a.target='_blank';a.rel='noopener noreferrer';text(a,link.title);a.style.marginRight='10px';return a;}));
+          if (reply.source_count && evidence) item.sources.append(sourceDetails(reply));
           item.sources.dataset.links=signature;
         }
         const date = new Date(reply.created_at_ms); item.time.dateTime = date.toISOString();
@@ -116,7 +156,10 @@ export function createTranscriptFeed(feed: HTMLElement, root: HTMLElement, lates
         item.note.hidden = !item.note.textContent;
         ordered.push(item.row);
       }
-      for (const id of replyRows.keys()) if (!activeReplies.has(id)) replyRows.delete(id);
+      for (const id of replyRows.keys()) if (!activeReplies.has(id)) {
+        if (openSources && replyRows.get(id)!.row.contains(openSources)) { clearSources(); openSources = undefined; }
+        replyRows.delete(id);
+      }
       ordered.sort((a, b) => Number(a.dataset.sourceTime) - Number(b.dataset.sourceTime));
       reconcile(root, ordered);
       for (const key of rows.keys()) if (!activeRows.has(key)) rows.delete(key);

@@ -26,6 +26,7 @@ async def service(monkeypatch):
             await asyncio.sleep(.1)
             raise httpx.ReadError('synthetic TTS connection lost after partial PCM')
     state={'engine':'livekit','enabled':True,'revision':1}
+    heard={};planned=set()
     async def upstream(request):
         calls.append(request)
         if request.url.path.endswith('/config'):
@@ -33,6 +34,19 @@ async def service(monkeypatch):
             if config_hook[0]: await config_hook[0]()
             if request.headers.get('Authorization')!=HEADERS['Authorization']:return httpx.Response(401)
             return httpx.Response(config_status[0],json=state)
+        if request.url.path.endswith('/agent'):
+            import json
+            body=json.loads(request.content)
+            if body['operation']=='plan' and state.get('planning_unavailable'):
+                return httpx.Response(503,json={'detail':'Synthetic planner outage'})
+            if body['operation']=='context': return httpx.Response(200,json={'history':heard.get(request.headers.get('X-Voice-Speaker-Key'),[]),'available_tools':['search_meeting']})
+            if body['operation']=='plan':
+                if body['request_id'] in planned:return httpx.Response(200,json={'tool_calls':[]})
+                planned.add(body['request_id'])
+                plan=[{'name':'search_meeting','query':'demo'}]
+                if state.get('two_tools'):plan.append({'name':'search_shared_documents','query':'demo'})
+                return httpx.Response(200,json={'tool_calls':plan})
+            return httpx.Response(200,json={'tool':'search_meeting','source_count':1,'sources':[{'id':'s0','text':'Lan phụ trách demo.'}]})
         if request.url.path.endswith('/answer'):
             entered.set()
             if blocked[0]: await blocked[0].wait()
@@ -57,6 +71,7 @@ async def service(monkeypatch):
         app.state.broken_tts=broken_tts
         app.state.config_hook=config_hook
         app.state.config_status=config_status
+        app.state.heard=heard
         async with app.router.lifespan_context(app):
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url='http://pilot') as client:
                 yield client,calls,state,app
@@ -87,6 +102,10 @@ async def test_real_agents_answer_preserves_citations_and_speaker_scope(service)
     assert response.json()['voice_runtime']=='livekit' and response.json()['sources']==[{'id':'s0'}]
     answers=[r for r in calls if r.url.path.endswith('/answer')]
     assert len(answers)==1 and answers[0].headers['X-Voice-Speaker-Key']=='a'*64
+    import json
+    operations=[json.loads(r.content)['operation'] for r in calls if r.url.path.endswith('/agent')]
+    assert operations==['context','plan','lookup','plan']
+    assert json.loads(answers[0].content)['agent_context']==[]
     assert len(app.state.rows)==1
     assert (await client.post(f'/bots/2/{uuid4()}/answer',headers=HEADERS,json=question())).status_code==503
 
@@ -293,3 +312,47 @@ async def test_transient_503_keeps_an_inflight_answer_and_recovers_without_repla
     finally:
         gate.set()
         if not task.done():task.cancel()
+
+
+async def test_sdk_chat_context_is_per_caller_and_refreshes_only_played_prefixes(service):
+    import json,time
+    client,calls,state,app=service
+    a,b='a'*64,'b'*64
+    turn={'question':'Ai làm demo?','answer':'Lan phụ trách demo.', 'created_at_ms':int(time.time()*1000)-1000}
+    app.state.heard[a]=[turn]
+    for speaker in (a,b,a):
+        if speaker==a and len([r for r in calls if r.url.path.endswith('/answer')])==2:
+            app.state.heard[a]=[turn|{'answer':'Lan phụ trách'}]  # Actual stopped playback prefix.
+        response=await client.post(URL+'/answer',headers=HEADERS|{'X-Voice-Speaker-Key':speaker},json=question())
+        assert response.status_code==200,response.text
+    bodies=[json.loads(r.content) for r in calls if r.url.path.endswith('/answer')]
+    assert [b['agent_context'] for b in bodies]==[[turn],[],[turn|{'answer':'Lan phụ trách'}]]
+    row=next(iter(app.state.rows.values()))
+    assert server.context_turns(row.contexts[a][1])==[turn|{'answer':'Lan phụ trách'}]
+    assert server.context_turns(row.contexts[b][1])==[]
+    messages=row.session.current_agent.chat_ctx.items
+    assert [m.text_content for m in messages if m.type=='message' and m.role=='assistant']==['Lan phụ trách']
+
+
+async def test_repeated_planner_failures_release_core_turn_and_recover_when_service_returns(service):
+    import json
+    client,calls,state,app=service
+    state['planning_unavailable']=True
+    for _ in range(4):
+        response=await client.post(URL+'/answer',headers=HEADERS,json=question())
+        assert response.status_code==503
+    state['planning_unavailable']=False
+    assert (await client.post(URL+'/answer',headers=HEADERS,json=question())).status_code==200
+    cancelled=[json.loads(r.content) for r in calls if r.url.path.endswith('/state')]
+    assert len(cancelled)==4 and all(c['state']=='QUIET' for c in cancelled)
+
+
+async def test_sdk_executes_transcript_and_wiki_tools_before_one_verified_final(service):
+    import json
+    client,calls,state,app=service
+    state['two_tools']=True
+    assert (await client.post(URL+'/answer',headers=HEADERS,json=question())).status_code==200
+    operations=[json.loads(r.content) for r in calls if r.url.path.endswith('/agent')]
+    assert len([op for op in operations if op['operation']=='plan'])==2
+    assert {op['lookup']['name'] for op in operations if op['operation']=='lookup'}=={'search_meeting','search_shared_documents'}
+    assert len([r for r in calls if r.url.path.endswith('/answer')])==1

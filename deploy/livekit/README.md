@@ -7,10 +7,10 @@ back to the existing bot microphone. This pilot does not publish raw meeting aud
 or add a second ASR/transcript writer.
 
 Agents runs a custom LLM adapter calling TINA's capability-authenticated, policy-checked answer API
-and a TTS adapter calling the existing local VieNeu service. LLM choice, read-only tools, source
-verification and played-prefix history remain in TINA. The agent does not receive an owner API key or
-access private workspaces. Its own chat context is isolated per request; only TINA's revalidated history
-is used as evidence/context. This is an orchestration pilot, not a new model or a quality guarantee.
+and a TTS adapter calling the existing local VieNeu service. LLM choice, retrieval permissions, source verification and actual playback receipts remain in TINA.
+Agents executes up to two batches of two SDK function tools, using the selected LLM through TINA's
+credential boundary. It does not receive an owner API key or access private workspaces. Per-caller
+ChatContext is refreshed from source-valid heard history; history resolves references, never facts. This is an orchestration pilot, not a new model or a quality guarantee.
 
 ## Enable and select
 
@@ -38,9 +38,11 @@ The pilot does not change ASR model selection, audio windows or canonical transc
 
 The bot owns KWS/VAD endpointing, wake/follow-up speaker ownership and explicit interruption commands.
 Agents runs the LLM/TTS model adapters and generation/playout task cancellation. The TINA answer API
-still owns retrieval tools, source verification, model selection and played-prefix history. HTTP PCM
+still owns authorized retrieval, source verification, model selection and played-prefix receipts. HTTP PCM
 delivery is not proof that anyone heard it; only existing bot microphone receipts establish that.
-Automatic Agents voice turn detection/barge-in and SDK-native multi-tool planning are not enabled.
+Agents handles the native function-tool loop for transcript, shared Wiki/documents and explicit public
+web queries. Automatic Agents turn detection/barge-in remains disabled. See
+[tools and context](../../docs/tina-livekit-tools-context.md) for the internal protocol and limits.
 
 ## Checks
 
@@ -84,3 +86,21 @@ access, 409 invalidates the room session/policy, and other non-200 service respo
 A transient service outage does not make the reaper revoke a busy or recently used room. New requests
 still require a successful policy check; retaining a room grants no additional source access. The
 existing idle cleanup remains bounded, and a later explicit revocation still closes the session.
+
+Planner/tool/final generation failures release the core turn and retire the SDK runtime before the
+next request, so repeated LLM outages cannot leave a closed Agents session permanently unusable.
+Heard history stays in TINA and is restored only after successful policy/source validation.
+
+A second bounded plan can change search terms or read surrounding original text when the first
+lookup does not answer every part of the question. The core caps the retrieval phase at 30 seconds
+and four attempted tools. Context reads require a per-turn handle returned by an earlier tool.
+A deadline skip keeps the successful earlier results for final generation; Stop and changed
+permissions reject every late operation. No new tool result is retained as heard chat history.
+
+Supplemental service failures also keep successful prior queries available for verified final
+generation. SDK calls are bound to the exact turn object/call ID, preventing a late callback from
+attaching itself to a later question. No source or permission check is bypassed by this fallback.
+
+The shared bot controller treats the optional acknowledgment as best effort and re-prepares a failed unplayed lookahead once when its playback turn arrives, including a LiveKit stream that fails before any PCM is ready. It rechecks generation/policy before replacement and playback; Stop and actual played-prefix receipts remain authoritative. No already-started audio is retried.
+
+Shared bot recovery also handles buffered-but-unplayed stream failures, with at most one retry and no retry after playback starts. Acknowledgment TTS has its own three-second deadline. Core admission reclaims only provably retired session reservations using CAS, including stale playback ownership, while current session and late-result fences remain enforced.

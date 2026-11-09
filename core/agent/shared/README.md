@@ -29,3 +29,15 @@ Voice answers can request one bounded round of read-only transcript/shared-docum
 allowlisted failure explanations. Explicit public queries and general definitions are isolated from
 meeting history/evidence. `eval/voice` contains 30 synthetic regression questions, not a real ASR or
 meeting-quality benchmark.
+
+Voice planning validates at most two authorized lookup names/queries; current heard history is revalidated against source fingerprints before entering any meeting prompt.
+
+Voice routes include conservative server-owned assistant intents. Numeric/semantic verification can repair one rejected draft against the same sources, reverify it, and return bounded content-free check codes.
+
+Voice-only retrieval splits long approved sources into sentence/word-aware slices of at most 1200 characters with 200-character overlap. Each slice carries parent key/fingerprint and exact character offsets; original segment timestamps remain parent intervals, not inferred chunk timing. Short sources retain their existing identity.
+
+Voice ranking accepts an injected semantic candidate ranking and fuses it with BM25 using reciprocal ranks before selecting anchors and neighboring evidence. Shared code and worker require no embedding dependency; absent/busy/failed semantic retrieval leaves lexical retrieval available.
+
+voice_summary owns conservative whole-meeting recap intent detection, chronological bounded transcript parts and separate map/selection prompts. Local/time-limited recaps retain normal query retrieval.
+
+Supplemental voice context uses opaque key/fingerprint hashes and at most three adjacent original chunks on each side. Multi-query merging shares the existing budget across lookup groups so earlier useful evidence is retained.

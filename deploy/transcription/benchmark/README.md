@@ -389,3 +389,22 @@ TINA_VIEGEM_DEVICE=mps HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
 
 This sweep intentionally sets the baseline prior to zero regardless of the caller's ambient
 configuration. No model weights or production settings are changed by running it.
+
+## Paired VieGem custom-word experiment
+
+custom_words_ab.py scores a private manifest of 1-32 labeled clips (each at most 12 seconds)
+with the bundled or supplied UTF-8 custom word list. It computes FSMN ranges and CTC probabilities
+once per clip, then decodes those same probabilities with custom bias weights 0, 0.25, 0.5, and 1.
+The default silence endpoint is the production VieGem value, 1200 ms. Reports contain aggregate
+WER/CER, per-clip error counts, target-term recall/false insertions, hashes, and timings, but no
+transcript text or source paths; write the manifest/report outside Git in a private directory.
+
+```sh
+TINA_VIEGEM_DEVICE=mps HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+  .venv/viegem/bin/python deploy/transcription/benchmark/custom_words_ab.py \
+  /private/path/manifest.json /private/path/report.json
+```
+
+Real meeting clips need manually checked references and consent. Keep unlabeled clips separate;
+they can show output changes but cannot support WER/CER or target recall claims. A synthetic fixture
+only measures the words and voices it actually contains and is not meeting-quality evidence.

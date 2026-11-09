@@ -217,7 +217,7 @@ test('B wake cannot steal A unconfirmed follow-up draft or an answer still think
   }finally{pending.resolve({text:'Thứ Sáu.'});await f.voice.stop();}
 });
 
-test('completed KWS answer keeps a 15s same-person follow-up, including clarification, without another ack', async () => {
+test('completed KWS answer keeps a 5s same-person follow-up, including clarification, without another ack', async () => {
   let calls=0;
   const f=acousticFixture(async()=>++calls===1 ? {text:'Bạn hỏi demo hay production?',clarification:true} : {text:'Production giao thứ Sáu.'});
   try {
@@ -243,6 +243,31 @@ test('completed KWS answer keeps a 15s same-person follow-up, including clarific
     f.voice.hypothesis({...h,startMs:stopped,endMs:stopped+10,text:'Còn chi phí?'});
     await tick(350);assert.equal(f.questions.length,2);
   }finally{await f.voice.stop();}
+});
+
+test('same-person follow-up expires after five seconds and requires a new acoustic wake', async (t) => {
+  const wallNow = Date.now.bind(Date);
+  let advance = 0;
+  t.mock.method(Date, 'now', () => wallNow() + advance);
+  const f = acousticFixture();
+  try {
+    await f.voice.start(); f.emit({event:'state',state:'LISTENING'}); f.ready();
+    const start=Date.now()+1; await tick(5); f.wake(start);
+    f.voice.hypothesis({channel:2,participant:'transport-id',speakerKey:'s',startMs:start,endMs:start+100,
+      text:'TINA ơi ai phụ trách demo?',final:true});
+    f.emit({event:'activity',channel:2,speech:false,endMs:start+100,stamp:start+100}); await tick(450);
+    assert.equal(f.questions.length,1);
+    f.emit({event:'state',state:'LISTENING'});
+    advance=5001;
+    const next=Date.now()+1; await tick(5);
+    const h={channel:2,participant:'transport-id',speakerKey:'next',startMs:next,endMs:next+100,
+      text:'Còn hạn bàn giao?',final:true};
+    f.voice.hypothesis(h);
+    f.emit({event:'activity',channel:2,speech:false,endMs:h.endMs,stamp:h.endMs}); await tick(450);
+    assert.equal(f.questions.length,1,'an expired follow-up cannot bypass KWS');
+    f.wake(next); await tick(450);
+    assert.equal(f.questions.length,2,'a fresh wake authorizes the next question');
+  } finally { await f.voice.stop(); }
 });
 
 test('unknown identity and failed playback never open post-answer follow-up', async () => {
@@ -797,4 +822,115 @@ test('a pure echo of the fixed acknowledgment cannot consume the pending questio
  assert.equal(t.feed(h),'ignore');assert(!t.active);
  assert.equal(t.feed({...h,startMs:1300,endMs:1500,text:'Ai làm demo?'}),'wake');
  now+=350;assert.equal(t.question(1500),'Ai làm demo?');
+});
+
+
+test('failed optional acknowledgment does not discard a verified answer; Stop still fences late answers', async () => {
+  for (const failure of ['failed', 'rejected', 'stopped'] as const) {
+    const result = deferred<{text: string}>(), ackStarted = deferred<void>();
+    const spoken: string[] = [];
+    const f = fixture(() => result.promise, {
+      async speak(text, _, started) {
+        spoken.push(text);
+        if (text === 'Dạ, em nghe.') {
+          ackStarted.resolve();
+          if (failure === 'rejected') throw Error('synthetic acknowledgment failure');
+          return 'failed';
+        }
+        started?.(); return 'completed';
+      }, async stop() {},
+    });
+    try {
+      await f.voice.start(); await f.capture();
+      await Promise.race([ackStarted.promise, tick(2000).then(() => { throw Error('Acknowledgment did not start'); })]);
+      if (failure === 'stopped') await f.voice.external({action: 'speak_stop'}, async () => {});
+      result.resolve({text: 'Lan phụ trách demo.'}); await tick(40);
+      assert.deepEqual(spoken, failure === 'stopped' ? ['Dạ, em nghe.'] : ['Dạ, em nghe.', 'Lan phụ trách demo.']);
+      assert.equal(f.reports.includes('completed'), failure !== 'stopped');
+    } finally { result.resolve({text: 'Lan phụ trách demo.'}); await f.voice.stop(); }
+  }
+});
+
+test('expired unplayed lookahead is retried once at playback time, respecting Stop and changed policy', async () => {
+  for (const scenario of ['recovered', 'unavailable', 'stopped', 'revoked'] as const) {
+    const first = deferred<'completed' | 'stopped'>();
+    const prepared: string[] = [], played: string[] = [];
+    let nextAttempts = 0;
+    const player: SpeakController = {
+      async speak() { throw Error('Unexpected unprepared playback'); },
+      async stop() { first.resolve('stopped'); },
+      prepare(text) {
+        prepared.push(text);
+        const firstSentence = text.startsWith('Lan');
+        const ready = firstSentence || ++nextAttempts === 2 && scenario === 'recovered';
+        return {ready: Promise.resolve(ready), cancel() {}, async play(started) {
+          if (!ready) return 'failed';
+          played.push(text); started?.();
+          return firstSentence ? first.promise : 'completed';
+        }};
+      },
+    };
+    const f = fixture(undefined, player);
+    try {
+      await f.voice.start(); await f.capture();
+      assert.deepEqual(prepared, ['Lan phụ trách demo.', 'Hạn là thứ Sáu.']);
+      assert.deepEqual(played, ['Lan phụ trách demo.']);
+      if (scenario === 'stopped') await f.voice.external({action: 'speak_stop'}, async () => {});
+      if (scenario === 'revoked') f.setConfig({enabled: true, ready: true, revision: 2, wake_variants: []});
+      first.resolve('completed'); await tick(40);
+      assert.equal(nextAttempts, ['recovered', 'unavailable'].includes(scenario) ? 2 : 1);
+      assert.deepEqual(played, scenario === 'recovered' ? ['Lan phụ trách demo.', 'Hạn là thứ Sáu.'] : ['Lan phụ trách demo.']);
+      assert.equal(f.reports.includes('completed'), scenario === 'recovered');
+      if (scenario === 'unavailable') assert(f.reports.includes('failed'));
+    } finally { first.resolve('stopped'); await f.voice.stop(); }
+  }
+});
+
+test('buffered lookahead failure is retried even during mic setup, but started audio is never retried', async () => {
+  for (const scenario of ['buffered-failure', 'started-failure'] as const) {
+    const first = deferred<'completed'>();
+    let attempts = 0;
+    const played: string[] = [];
+    const f = fixture(undefined, {
+      async speak() { throw Error('prepared playback required'); }, async stop() { first.resolve('completed'); },
+      prepare(text) {
+        const initial = text.startsWith('Lan'), number = initial ? 0 : ++attempts;
+        let failed = false;
+        return {ready: Promise.resolve(true), get failedBeforePlayback() { return failed; }, cancel() {}, async play(started) {
+          if (!initial && number === 1) {
+            if (scenario === 'started-failure') { played.push(text); started?.(); }
+            else failed = true;
+            return 'failed';
+          }
+          played.push(text); started?.(); if (initial) await first.promise;
+          return 'completed';
+        }};
+      },
+    });
+    try {
+      await f.voice.start(); await f.capture(); first.resolve('completed'); await tick(40);
+      assert.equal(attempts, scenario === 'buffered-failure' ? 2 : 1);
+      assert.deepEqual(played, ['Lan phụ trách demo.', 'Hạn là thứ Sáu.']);
+      assert.equal(f.reports.includes('completed'), scenario === 'buffered-failure');
+    } finally { first.resolve('completed'); await f.voice.stop(); }
+  }
+});
+
+test('both optional and name-only acknowledgments receive a three-second TTS deadline', async () => {
+  const ready = deferred<void>(), answer = deferred<{text: string}>();
+  const deadlines: Array<number | undefined> = [], spoken: string[] = [];
+  const player: SpeakController = {async stop() {}, async speak(text, _voice, started, timeout) {
+    spoken.push(text);
+    if (text === 'Dạ, em nghe.') { deadlines.push(timeout); ready.resolve(); return 'failed'; }
+    started?.(); return 'completed';
+  }};
+  const f = fixture(() => answer.promise, player);
+  try {
+    await f.voice.start(); await f.capture(); await ready.promise;
+    answer.resolve({text: 'Lan phụ trách demo.'}); await tick(30);
+    assert.deepEqual(deadlines, [3000]); assert(spoken.includes('Lan phụ trách demo.'));
+  } finally { answer.resolve({text: 'Lan phụ trách demo.'}); await f.voice.stop(); }
+  const g = fixture(undefined, player);
+  try { await g.voice.start(); await g.capture('TINA ơi'); assert.deepEqual(deadlines, [3000, 3000]); }
+  finally { await g.voice.stop(); }
 });

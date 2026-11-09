@@ -100,3 +100,32 @@ carries the scoped internal agent URL; no LiveKit server secret or owner API key
 Confirmed selected-ASR text goes through AgentSession's TINA LLM adapter and local VieNeu TTS
 adapter over custom HTTP I/O. Actual heard-prefix/Stop receipts remain controlled by the bot,
 not by SDK audio-delivery events. Source, session and caller fences remain unchanged.
+
+LiveKit Agents uses internal capability-only `POST /bots/voice/{meeting}/{session}/agent`
+(`VoiceAgentQuestion`: context, plan, lookup). Context reserves the request and returns at most three
+source-valid heard turns. The selected LLM plans at most two read-only queries; SDK function tools
+execute only that plan. Final `VoiceQuestion.agent_context` must match the caller's actual completed
+or stopped-prefix playback history; source references stay server-side. Query and completion budgets
+are reserved atomically; Stop, policy/session changes and mismatched callers fence later operations.
+Native TINA requests omit `agent_context` and keep their existing tool loop. `VoiceLookup.tool` also
+accepts `search_web`, authorized only for an explicit public query and room web opt-in.
+
+`VoiceReply.answer_kind=assistant` marks fixed server-owned identity, greeting, thanks, capability
+and unsupported-action responses. These contain no meeting facts and grant no new sources.
+Compound or unrecognized requests retain conservative meeting routing; public web remains explicit.
+`verification` records up to two content-free codes: approved, numeric_mismatch, unsupported_claim,
+contradiction, ambiguous, unavailable, repair_failed. A first rejected draft may be repaired once
+against the same approved evidence and must pass numeric and semantic checks again. A provider
+outage skips repair. Supported claims may include a separately validated short follow-up question.
+Original drafts and reviewer prose are never persisted in this metadata. Source fingerprints,
+policy/session/Stop fences and actual played-prefix history remain authoritative.
+
+Voice retrieval may expose a bounded chunk of an authorized parent source, identified by a deterministic voice-chunk key. Source fingerprints include the parent fingerprint and the exact character range. Per-chunk timestamps retain the parent interval. Source references still use key/fingerprint; they grant no additional source authority.
+
+VoiceReply.reason adds summary_pending for incomplete recap preparation. Its text reports progress and asks the caller to repeat; sources are empty, so no partial result is represented as a whole-meeting factual answer. Completed recaps retain answer_kind meeting and existing original-source references/verification.
+
+The LiveKit agent protocol now allows at most two plans, two tools per plan and four attempted lookups total. VoiceLookup/VoiceLookupQuery add read_source_context, whose query must match ctx-[0-9a-f]{64} and appear in the same turn allowlist. VoiceReply.lookups holds at most four traces. The 30-second retrieval deadline skips unfinished work without discarding successful earlier queries; finalization waits for attempted/skipped tools and uses executed queries only. Native tool planning remains one round; recap preparation uses its separate protocol.
+
+VoiceReply.source_refs is internal durable metadata (key/fingerprint only); public history strips it and derives source_count. VoiceSources returns up to 32 freshly authorized source quotes and an unavailable count. Source reads recheck current room sharing, linked documents, source fingerprints and artifact deletion; ended meetings remain owner-readable. Sources do not enter public transcript/share payloads.
+
+Turn ownership remains exclusive per meeting. Admission may atomically replace a reservation only when its known bot session has been superseded; current and unrecognized reservations remain fenced. Retired playback is stopped without rewriting canonical transcript or source policy. No request/response schema changed for this recovery.

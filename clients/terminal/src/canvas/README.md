@@ -65,3 +65,7 @@ the live waiting state and empty search results keep their separate messages.
 Raw transcript segments preserve accepted source text, stable speaker keys and speaker status.
 The English overlay keeps its exact-source pairing while speaker corrections and live draft
 updates retain the same identity and original wording.
+
+VoiceActivity is a compact read-only runtime indicator in the transcript toolbar. Owner-scoped polling is sequential and cancelled on room changes; failed or expired snapshots cannot retain listening readiness.
+
+LiveTranscriptEngine exposes focusable source segment anchors, including IDs in merged speaker blocks, for verified voice citation navigation.

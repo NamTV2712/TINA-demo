@@ -33,6 +33,7 @@ def main():
     os.environ.setdefault('HF_HUB_OFFLINE', '1')
     os.environ.setdefault('TRANSFORMERS_OFFLINE', '1')
     os.environ['TINA_VIEGEM_NAME_BIAS'] = '0'
+    os.environ['TINA_VIEGEM_CUSTOM_WEIGHT'] = '0'
     rows = json.loads(args.manifest.read_text())
     if not isinstance(rows, list) or not 1 <= len(rows) <= 32:
         raise ValueError('Use a bounded manifest of 1-32 clips')

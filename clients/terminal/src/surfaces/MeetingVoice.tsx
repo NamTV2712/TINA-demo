@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from 'react';
+import { VoiceReplySources } from './VoiceReplySources';
 
 interface Policy { enabled: boolean; include_transcript: boolean; documents: string[]; revision: number; wake_variants: string[]; noise_suppression:boolean; allow_general_knowledge?:boolean; allow_web_search?:boolean }
 const button = { padding: '6px 10px', background: 'var(--panel2)', color: 'var(--t1)', border: '1px solid var(--line2)', borderRadius: 6, cursor: 'pointer' } as const;
@@ -14,7 +15,7 @@ interface AudioSnapshot { observed_at_ms: number; channels: AudioChannel[]; nois
 interface Runtime { state: string; request_id?: string; session_active?: boolean; heartbeat_fresh?: boolean; diagnostic?: Diagnostic | null; audio?: AudioSnapshot | null }
 const ms = (value?: number | null) => typeof value === 'number' && Number.isFinite(value) ? `${Math.round(value)} ms` : '—';
 interface VoiceReply { request_id: string; text: string; played_text?:string|null; state: string; created_at_ms: number;
-  answer_kind?:string;reason?:string;links?:Array<{url:string;title:string}> }
+  source_count?:number;answer_kind?:string;reason?:string;links?:Array<{url:string;title:string}> }
 const replyLabel: Record<string, string> = { queued: 'Đang chuẩn bị đọc', started: 'Đang đọc', completed: 'Đã đọc', stopped: 'Đã dừng', failed: 'Phát thất bại', unconfirmed: 'Chưa xác nhận phát xong' };
 const diagnosticLabel: Record<string, string> = {
   waiting_asr: 'Bot đã nhận tiếng nói; đang chờ ASR trả text để nhận tên TINA.',
@@ -52,6 +53,7 @@ const stateLabel: Record<string, string> = { OFF: 'Đang tắt', LISTENING: 'Đa
 export function MeetingVoice({ meetingId, nativeId }: { meetingId: string; nativeId?: string }) {
   const [policy, setPolicy] = useState<Policy>(empty);
   const [runtime, setRuntime] = useState<Runtime>({ state: 'OFF' });
+  const [sourceReply, setSourceReply] = useState<string | null>(null);
   const [replies, setReplies] = useState<VoiceReply[]>([]);
   const [documents, setDocuments] = useState<Array<{ path: string; title: string }>>([]);
   const [available, setAvailable] = useState(false);
@@ -69,6 +71,7 @@ export function MeetingVoice({ meetingId, nativeId }: { meetingId: string; nativ
     let expiryTimer: ReturnType<typeof setTimeout>;
     const statusError = 'Không tải được trạng thái Voice assistant.';
     const stale = () => setRuntime(current => ({ ...current, heartbeat_fresh: false, diagnostic: null, audio: null }));
+    setSourceReply(new URLSearchParams(window.location.search).get('voiceSource'));
     dirty.current = false; setLoaded(false); setPolicy(empty); setRuntime({ state: 'OFF' }); setReplies([]); setError(''); setDocuments([]);
     async function refresh() {
       try {
@@ -213,11 +216,19 @@ export function MeetingVoice({ meetingId, nativeId }: { meetingId: string; nativ
       {[...replies].reverse().map(reply => <article key={reply.request_id} style={{ padding: 12, border: '1px solid var(--line2)', borderRadius: 8, background: 'var(--panel2)' }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', fontSize: 12 }}>
           <strong>TINA trả lời</strong><span role="status" style={{ color: 'var(--t2)' }}>{replyLabel[reply.state] || 'Chưa xác nhận'}</span>
-          {reply.answer_kind&&<span style={{color:'var(--t3)'}}>{reply.answer_kind==='web'?'Web':reply.answer_kind==='general'?'Kiến thức chung':'Nguồn meeting'}</span>}
+          {reply.answer_kind&&<span style={{color:'var(--t3)'}}>{reply.answer_kind==='web'?'Web':reply.answer_kind==='general'?'Kiến thức chung':reply.answer_kind==='assistant'?'Trợ lý':'Nguồn meeting'}</span>}
           <time dateTime={new Date(reply.created_at_ms).toISOString()} style={{ marginLeft: 'auto', color: 'var(--t3)' }}>{new Date(reply.created_at_ms).toLocaleTimeString('vi-VN')}</time>
         </div>
         <p style={{ margin: '8px 0 0', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', fontSize: 14, lineHeight: 1.6 }}>{reply.state==='stopped'&&reply.played_text!=null ? reply.played_text||'Chưa có câu nào được phát trọn vẹn.' : reply.text}</p>
         {!!reply.links?.length&&<div style={{display:'flex',gap:10,flexWrap:'wrap',marginTop:6}}>{reply.links.filter(link=>/^https?:\/\//i.test(link.url)).map(link=><a key={link.url} href={link.url} target="_blank" rel="noopener noreferrer" style={{color:'var(--accent)',fontSize:12}}>{link.title}</a>)}</div>}
+        {!!reply.source_count && <div style={{ marginTop: 8 }}>
+          <button type="button" aria-expanded={sourceReply === reply.request_id}
+            onClick={() => setSourceReply(sourceReply === reply.request_id ? null : reply.request_id)}
+            style={{ ...button, fontSize: 12, padding: '4px 8px', color: 'var(--accent)' }}>
+            {sourceReply === reply.request_id ? 'Ẩn nguồn' : `Nguồn · ${reply.source_count}`}
+          </button>
+          {sourceReply === reply.request_id && <VoiceReplySources key={`${meetingId}:${reply.request_id}`} base={base} requestId={reply.request_id} />}
+        </div>}
         {['stopped', 'failed', 'unconfirmed'].includes(reply.state) && <p style={{ margin: '6px 0 0', fontSize: 12, color: 'var(--t3)' }}>{reply.state==='stopped'&&reply.played_text!=null?'Chỉ hiển thị các câu đã phát trọn vẹn.':'TINA có thể chưa đọc hết nội dung này.'}</p>}
       </article>)}
     </section>}

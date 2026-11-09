@@ -12,6 +12,9 @@ import type { AsrDiagnostic } from '@tina/gmeet-pipeline';
 import {NoiseSuppressor,type NoiseFrame} from './noise-suppression.js';
 import type { PreparedSpeech } from './tts-playback.js';
 
+const FOLLOW_UP_MS = 5_000;
+const ACK_TIMEOUT_MS = 3_000;
+
 export type VoiceState = 'OFF' | 'LISTENING' | 'CAPTURING' | 'THINKING' | 'SPEAKING' | 'QUIET' | 'ERROR';
 export type VoiceDiagnosticCode = 'starting' | 'listening' | 'waiting_asr' | 'tts_unavailable' | 'sources_unavailable' | 'name_not_matched' | 'name_unconfirmed' | 'wake_confirmed'
   | 'waiting_speech_end' | 'waiting_asr_tail' | 'waiting_question' | 'thinking' | 'speaking'
@@ -562,7 +565,7 @@ export class MeetingVoice {
     try{
       const current = await this.cancel(false,'interrupted');
       if(!current||this.closed||this.state!=='QUIET'||!command.resume)return;
-      this.waitingCaller={...caller,after:command.question?command.value.startMs:command.value.endMs,expires:Date.now()+15000,
+      this.waitingCaller={...caller,after:command.question?command.value.startMs:command.value.endMs,expires:Date.now()+FOLLOW_UP_MS,
         ...(command.question?{endMs:command.value.endMs}:{})};
       this.continuationHypotheses=command.question?[{...command.value,text:command.question,segments:undefined}]:[];
       this.diagnose('waiting_question');
@@ -608,11 +611,11 @@ export class MeetingVoice {
       const config = await this.api.config(this.abort.signal);
       if (!live()) return;
       if (!config.enabled || !config.ready || config.revision !== this.revision) throw new Error('Voice policy changed');
-      const outcome = await this.speak.speak('Dạ, em nghe.', 'auto', () => { if (live()) this.markTiming('ack_playback_started'); });
+      const outcome = await this.speak.speak('Dạ, em nghe.', 'auto', () => { if (live()) this.markTiming('ack_playback_started'); }, ACK_TIMEOUT_MS);
       if (!live()) return;
       if (outcome !== 'completed') throw new Error('Acknowledgment playback failed');
       completed = true;
-      this.waitingCaller = {...caller, expires: Date.now() + 15000, after: Date.now()};
+      this.waitingCaller = {...caller, expires: Date.now() + FOLLOW_UP_MS, after: Date.now()};
       this.diagnose('waiting_question');
     } catch {
       if (live()) { this.waitingCaller = undefined; this.continuationHypotheses = []; this.diagnose('playback_failed'); }
@@ -664,8 +667,8 @@ export class MeetingVoice {
       this.speakingText='Dạ, em nghe.';
       ack = this.speak.speak('Dạ, em nghe.', 'auto', () => {
         if (live()) this.markTiming('ack_playback_started');
-      }).then(result => { if (result !== 'completed') throw new Error('Acknowledgment playback failed'); });
-      void ack.catch(() => {});
+      }, ACK_TIMEOUT_MS).then(result => { if (result !== 'completed' && live()) this.log('ack_playback_failed'); },
+        () => { if (live()) this.log('ack_playback_failed'); });
     }, 900);
     const timeout = setTimeout(() => { if (live()) void this.cancel(false, 'answer_failed').then(current => { if (current) this.setState('ERROR'); }); }, 210_000);
     try {
@@ -683,37 +686,50 @@ export class MeetingVoice {
       const sentences = speechSentences(answer.text);
       for (let index = 0; index < sentences.length; index++) {
         const sentence = sentences[index];
+        const prefetched = !!pending;
         prepared = pending; pending = undefined;
-        if (!prepared) {
-          const current = await this.api.config(this.abort.signal);
-          if (!live() || !current.enabled || !current.ready || current.revision !== this.revision) { if (live()) this.diagnose('policy_changed'); return; }
-          prepared = this.speak.prepare?.(sentence, 'auto');
-        }
-        if (prepared) {
-          await prepared.ready;
+        for (let attempt = 0; attempt < (prefetched ? 2 : 1); attempt++) {
+          if (!prepared) {
+            const current = await this.api.config(this.abort.signal);
+            if (!live() || !current.enabled || !current.ready || current.revision !== this.revision) { if (live()) this.diagnose('policy_changed'); return; }
+            prepared = this.speak.prepare?.(sentence, 'auto');
+          }
+          let buffered = true;
+          if (prepared) {
+            buffered = await prepared.ready;
+            if (!live()) return;
+            const fresh = await this.api.config(this.abort.signal);
+            if (!live() || !fresh.enabled || !fresh.ready || fresh.revision !== this.revision) { if (live()) this.diagnose('policy_changed'); return; }
+          }
+          let sentenceStarted = false;
+          const onStarted = () => {
+            sentenceStarted = true;
+            if (!didStart && live()) { didStart = true; this.playbackStarted=true;this.markTiming('answer_playback_started'); started = this.report(id, 'started'); void started.catch(() => {}); }
+          };
+          this.speakingText=sentence;
+          const playback = prepared ? prepared.play(onStarted) : this.speak.speak(sentence, 'auto', onStarted);
+          if (index + 1 < sentences.length) pending = this.speak.prepare?.(sentences[index + 1], 'auto');
+          const result = await playback;
           if (!live()) return;
-          const fresh = await this.api.config(this.abort.signal);
-          if (!live() || !fresh.enabled || !fresh.ready || fresh.revision !== this.revision) { if (live()) this.diagnose('policy_changed'); return; }
+          await started;
+          if (result === 'failed' && prefetched && attempt === 0 && !sentenceStarted
+              && (!buffered || prepared?.failedBeforePlayback)) {
+            // Cancel later lookahead before retrying so it cannot hold the shared TTS worker ahead of this sentence.
+            prepared?.cancel(); pending?.cancel(); prepared = undefined; pending = undefined;
+            continue;
+          }
+          if (result !== 'completed') { this.diagnose('playback_failed'); await this.report(id, result ?? 'failed'); return; }
+          this.playedText=(this.playedText+' '+sentence).trim();this.speakingText='';
+          await this.report(id,'started',this.playedText);
+          if(!live())return;
+          break;
         }
-        const onStarted = () => {
-          if (!didStart && live()) { didStart = true; this.playbackStarted=true;this.markTiming('answer_playback_started'); started = this.report(id, 'started'); void started.catch(() => {}); }
-        };
-        this.speakingText=sentence;
-        const playback = prepared ? prepared.play(onStarted) : this.speak.speak(sentence, 'auto', onStarted);
-        if (index + 1 < sentences.length) pending = this.speak.prepare?.(sentences[index + 1], 'auto');
-        const outcome = await playback;
-        if (!live()) return;
-        await started;
-        if (outcome !== 'completed') { this.diagnose('playback_failed'); await this.report(id, outcome ?? 'failed'); return; }
-        this.playedText=(this.playedText+' '+sentence).trim();this.speakingText='';
-        await this.report(id,'started',this.playedText);
-        if(!live())return;
       }
       await this.report(id, 'completed');
       if (!live()) return;
       outcome = answer.clarification ? 'clarification' : unanswered ? 'no_evidence' : 'completed';
       if (caller?.participant && speakerKey) {
-        this.waitingCaller = {...caller, after: Date.now(), expires: Date.now() + 15000};
+        this.waitingCaller = {...caller, after: Date.now(), expires: Date.now() + FOLLOW_UP_MS};
         this.continuationHypotheses = [];
       }
       if (answer.clarification || answer.evidence_available !== false) this.diagnose('completed');

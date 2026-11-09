@@ -119,3 +119,11 @@ and `livekit.NOTICE` and copied alongside the weights by `deploy/wakeword/instal
 The separate `livekit/livekit-server:v1.13.11` upstream image is Apache-2.0. Upstream license and
 package notices are retained in their installed distributions/images. This pilot uses custom
 HTTP text/PCM I/O and no LiveKit Cloud Inference or proprietary noise cancellation plugin.
+
+## Local voice semantic retrieval
+
+Agent API bakes the INT8 ONNX conversion `Xenova/multilingual-e5-small` (MIT), revision
+`761b726dd34fb83930e26aab4e9ac3899aa1fa78`, derived from `intfloat/multilingual-e5-small`.
+Model/tokenizer SHA-256 values are pinned in `control_plane/voice_retrieval.py`. The notice is
+`licenses/multilingual-e5-small.LICENSE.txt` and `/opt/tina/voice-retrieval/LICENSE.txt` in the image.
+ONNX Runtime, NumPy and Tokenizers are control-plane-only runtime dependencies in the Python lock.

@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { CanvasActionsProvider, useActions, OPEN_ENTITY_EVENT } from "./actions";
+import { VoiceActivity } from "./VoiceActivity";
 import { MeetingHealthBanner } from "./MeetingHealthBanner";
 import { LiveTranscriptEngine, type EngineActions, type EngineEntity, type EngineSignal } from "./LiveTranscriptEngine";
 import { useMeetingNotes } from "./notes";
@@ -350,6 +351,7 @@ function MeetingCanvasBody({ meetingId, meetingRecord, onDeleteMeeting, deleting
             </button>
             {!canPlayMeetingAudio && meetingRecord?.has_recording && <span className={transcriptStyles.meta}>Recording available</span>}
           </div>
+          {dialogMeetingId && ["google_meet", "Google Meet"].includes(meetingRecord?.platform || "") && <VoiceActivity meetingId={dialogMeetingId} ended={durableTerminal || meetingRecord?.status === "past"} />}
           {meetingRecord && <button type="button" className={transcriptStyles.info} aria-expanded={detailsOpen} onClick={() => setDetailsOpen((open) => !open)}>
             {detailsOpen ? "Hide meeting info" : "Meeting info"}
           </button>}

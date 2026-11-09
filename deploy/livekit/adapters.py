@@ -1,10 +1,11 @@
 """LiveKit model/PCM adapters. TINA remains the authority for sources and heard-text history."""
 import asyncio
+import json
 from dataclasses import dataclass
 from uuid import uuid4
 
 from livekit import rtc
-from livekit.agents import llm, tts
+from livekit.agents import llm, tts, function_tool, RunContext
 from livekit.agents import APIConnectionError
 from livekit.agents.voice import io
 from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS
@@ -14,11 +15,27 @@ MAX_AUDIO_BYTES = SAMPLE_RATE * 2 * 120
 
 
 class TinaLLM(llm.LLM):
-    def __init__(self, answer):
+    def __init__(self, answer, agent=None):
         super().__init__()
         self.answer = answer
+        self.agent = agent
         self.request = None
         self.result = None
+        self.plan_rounds = 0
+        self.tool_requests = {}
+
+    def tools(self):
+        def tool(name, description):
+            async def lookup(context: RunContext, query: str = ''):
+                request = self.tool_requests.pop(context.function_call.call_id, None)
+                if request is None or request is not self.request: raise RuntimeError('No authorized TINA turn')
+                return await self.agent(request, 'lookup', {'name': name, 'query': query})
+            return function_tool(lookup, name=name, description=description)
+        return [tool('get_recent_transcript', 'Read the recently shared meeting transcript.'),
+                tool('search_meeting', 'Search the shared meeting transcript.'),
+                tool('search_shared_documents', 'Search Wiki and documents shared with this room.'),
+                tool('read_source_context', 'Read nearby original text using a context_handle returned in this turn.'),
+                tool('search_web', 'Search only an explicitly requested public web query authorized by TINA.')]
 
     @property
     def model(self): return 'tina-selected-backend'
@@ -28,16 +45,31 @@ class TinaLLM(llm.LLM):
 
     def chat(self, *, chat_ctx, tools=None, conn_options=DEFAULT_API_CONNECT_OPTIONS, **kwargs):
         if self.request is None: raise RuntimeError('No authorized TINA turn')
-        return TinaStream(self, self.request, chat_ctx, conn_options)
+        return TinaStream(self, self.request, chat_ctx, tools or [], conn_options)
 
 
 class TinaStream(llm.LLMStream):
-    def __init__(self, model, request, chat_ctx, conn_options):
+    def __init__(self, model, request, chat_ctx, tools, conn_options):
         self.model, self.request = model, request
-        super().__init__(model, chat_ctx=chat_ctx, tools=[], conn_options=conn_options)
+        super().__init__(model, chat_ctx=chat_ctx, tools=tools, conn_options=conn_options)
 
     async def _run(self):
+        if self.model.request is not self.request: raise RuntimeError('TINA turn changed')
+        if self.model.agent and self.model.plan_rounds < 2:
+            self.model.plan_rounds += 1
+            plan = await self.model.agent(self.request, 'plan')
+            if self.model.request is not self.request: raise RuntimeError('TINA turn changed')
+            calls = plan['tool_calls']
+            if len(calls) > 2: raise RuntimeError('Tool budget exceeded')
+            if calls:
+                tool_calls = [llm.FunctionToolCall(name=c['name'], arguments=json.dumps({'query':c['query']}),
+                                                   call_id=str(uuid4())) for c in calls]
+                self.model.tool_requests.update((c.call_id,self.request) for c in tool_calls)
+                self._event_ch.send_nowait(llm.ChatChunk(id=str(uuid4()), delta=llm.ChoiceDelta(
+                    role='assistant', tool_calls=tool_calls)))
+                return
         result = await self.model.answer(self.request)
+        if self.model.request is not self.request: raise RuntimeError('TINA turn changed')
         if not isinstance(result.get('text'), str) or not 1 <= len(result['text']) <= 4000:
             raise RuntimeError('Invalid TINA answer')
         self.model.result = result

@@ -107,9 +107,13 @@ class OpenAIResponsesCompletion:
                     elif event_type in ("response.failed", "error"):
                         detail = event.get("error") or event.get("message") or "Responses stream failed"
                         raise LLMError(f"OpenAI Responses stream failed: {str(detail)[:300]}")
+                    elif event_type == "response.incomplete":
+                        raise LLMError("OpenAI Responses stream did not complete")
                     elif event_type == "response.completed":
-                        completed = True
                         body = event.get("response") or {}
+                        if body.get('status', 'completed') != 'completed':
+                            raise LLMError("OpenAI Responses stream did not complete")
+                        completed = True
                         output = body.get('output', []) or []
                         searched = searched or any(item.get('type') == 'web_search_call' and item.get('status') == 'completed' for item in output)
                         for item in output:
@@ -130,6 +134,8 @@ class OpenAIResponsesCompletion:
                                     )
         except httpx.HTTPError as exc:
             raise LLMError(f"OpenAI Responses transport failure against {self._base}: {exc}") from exc
-        if web_search and (not completed or not searched or not sources):
+        if not completed:
+            raise LLMError("OpenAI Responses stream did not complete")
+        if web_search and (not searched or not sources):
             raise LLMError('Web search returned no completed cited answer')
         return CompletionResult(text="".join(text_parts), model=target, sources=tuple(list(sources.values())[:6]))

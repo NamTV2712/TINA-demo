@@ -60,3 +60,9 @@ revocation checks, verifier diagnostics and required native search citations. Se
 The refinement Apply/Restore translation regression verifies that canonical text changes
 invalidate the affected phrase's cached translation, retain other phrases, and translate
 restored source text again without returning the previous revision's translation.
+
+`test_meeting_voice.py` covers LiveKit tool planning, authorized retrieval, explicit public-query isolation, heard-history revocation and final generation without a nested tool loop.
+
+Voice regression cases cover conservative assistant intents, partial replies, one-repair limits, forged citations, verifier outages and bounded completion timeouts.
+
+test_llm_openai_responses_voice.py covers valid JSON generation/verdict deltas followed by early EOF, [DONE], incomplete/failed events, or invalid terminal status, plus successful completion with/without deltas and existing web citation validation. All provider calls are synthetic.

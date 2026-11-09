@@ -35,6 +35,14 @@ class PlaybackStore:
         value = await self.redis.get(self.key(meeting_id, command_id))
         return json.loads(value) if value else None
 
+    async def retire_previous_sessions(self, meeting_id, retired_sessions):
+        active = await self.redis.get(f"speech:active:{meeting_id}")
+        if isinstance(active, bytes): active = active.decode()
+        record = await self.get(meeting_id, active) if active else None
+        if record and record['session_uid'] in retired_sessions and record['state'] not in TERMINAL:
+            # report uses CAS and deletes active ownership only if it still belongs to this command.
+            await self.report(meeting_id, active, record['session_uid'], 'stopped')
+
     async def update(self, meeting_id, command_id, change, *, receipt=False, persist=True):
         key, active_key = self.key(meeting_id, command_id), f"speech:active:{meeting_id}"
         for _ in range(4):

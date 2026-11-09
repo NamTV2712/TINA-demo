@@ -24,7 +24,11 @@ def voice(tmp_path, monkeypatch):
         return deepcopy(canonical if path.endswith('/canonical') else row)
     def complete(request, raw):
         prompts.append(json.loads(raw))
-        if mutate[0]: mutate[0]()
+        if mutate[0]:
+            override=mutate[0]()
+            if isinstance(override,str):return override
+        if prompts[-1].get('mode')=='voice_plan':
+            return json.dumps({'tool_calls':[{'name':'search_shared_documents','query':'budget'}]})
         return json.dumps({'claims': [{'text': 'The budget is 100.', 'source_ids': ['s0']}]})
     monkeypatch.setenv('TINA_INTERNAL_API_SECRET', 'test-internal')
     monkeypatch.setattr(api, 'meeting_get', meeting_get)
@@ -100,7 +104,11 @@ def test_clarification_is_spoken_but_rechecks_all_context_sources(voice, monkeyp
     client, row, root, prompts, mutate = voice
     def complete(request, raw):
         prompts.append(json.loads(raw))
-        if mutate[0]: mutate[0]()
+        if mutate[0]:
+            override=mutate[0]()
+            if isinstance(override,str):return override
+        if prompts[-1].get('mode')=='voice_plan':
+            return json.dumps({'tool_calls':[{'name':'search_shared_documents','query':'budget'}]})
         return json.dumps({'claims': [], 'clarification': 'Bạn hỏi ngân sách demo hay ngân sách triển khai?'})
     # Re-register with the same owner/source fixture and a clarification-only completion.
     app = FastAPI()
@@ -195,3 +203,112 @@ def test_diagnostics_distinguish_missing_sources_retrieval_and_model_failure(voi
     assert client.post(URL, headers=HEADERS, json={'question': 'Spend?', 'revision': 1}).json()['reason'] == 'llm_unavailable'
     row['data']['voice_assistant']['documents'] = []
     assert client.post(URL, headers=HEADERS, json={'question': 'Spend?', 'revision': 1}).json()['reason'] == 'no_shared_sources'
+
+
+def test_agents_plan_and_lookup_use_only_approved_sources_and_no_nested_tool_loop(voice):
+    client,row,root,prompts,mutate=voice
+    row['data']['voice_assistant']['engine']='livekit'
+    path='/api/internal/meeting-voice/1/agent'
+    base={'question':'Compare the budget against the shared document','revision':1}
+    plan=client.post(path,headers=HEADERS,json=base|{'operation':'plan'})
+    assert plan.status_code==200,plan.text
+    assert plan.json()['tool_calls']==[{'name':'search_shared_documents','query':'budget'}]
+    assert prompts[0]['mode']=='voice_plan' and prompts[0]['available_tools']==['search_shared_documents']
+    assert 'PRIVATE TRANSCRIPT' not in json.dumps(prompts) and 'PRIVATE WORKSPACE SECRET' not in json.dumps(prompts)
+    lookup=client.post(path,headers=HEADERS,json=base|{'operation':'lookup','lookup':plan.json()['tool_calls'][0]})
+    assert lookup.status_code==200 and lookup.json()['source_count']==1
+    assert {s['path'] for s in lookup.json()['sources']}=={'wiki/shared.md'}
+    result=client.post(URL,headers=HEADERS,json=base|{'lookups':plan.json()['tool_calls']})
+    assert result.status_code==200 and result.json()['lookups']==[{'tool':'search_shared_documents','source_count':1}]
+    assert prompts[-1]['tools_remaining']==0
+    assert client.post(path,headers=HEADERS,json=base|{'operation':'lookup','lookup':{'name':'search_meeting','query':'private'}}).status_code==403
+    row['data']['voice_assistant']['revision']=2
+    assert client.post(path,headers=HEADERS,json=base|{'operation':'plan'}).status_code==409
+
+
+def test_agents_web_query_is_explicit_opt_in_and_cannot_contain_room_context(voice):
+    client,row,root,prompts,mutate=voice
+    policy=row['data']['voice_assistant'];policy['engine']='livekit'
+    path='/api/internal/meeting-voice/1/agent'
+    base={'question':'Tìm trên web về LiveKit Agents','revision':1}
+    assert client.post(path,headers=HEADERS,json=base|{'operation':'plan'}).json()=={'tool_calls':[]}
+    policy['allow_web_search']=True
+    plan=client.post(path,headers=HEADERS,json=base|{'operation':'plan'}).json()
+    assert plan=={'tool_calls':[{'name':'search_web','query':'LiveKit Agents'}]}
+    assert not prompts  # Never ask an LLM to generate a web query using private sources.
+    assert client.post(path,headers=HEADERS,json=base|{'operation':'lookup','lookup':{'name':'search_web','query':'PRIVATE TRANSCRIPT'}}).status_code==403
+    mutate[0]=lambda:json.dumps({'text':'LiveKit has Agents.','links':[{'url':'https://docs.livekit.io/agents/','title':'Agents'}]})
+    lookup=client.post(path,headers=HEADERS,json=base|{'operation':'lookup','lookup':plan['tool_calls'][0]})
+    assert lookup.status_code==200,lookup.text
+    assert prompts[-1]=={'mode':'voice_web','question':'LiveKit Agents'}
+    before=len(prompts)
+    answer=client.post(URL,headers=HEADERS,json=base|{'lookups':plan['tool_calls'],'web_result':lookup.json()['web_result']})
+    assert answer.status_code==200 and len(prompts)==before
+    assert answer.json()['lookups']==[{'tool':'search_web','source_count':1}]
+
+
+def test_agents_context_removes_history_after_document_revocation(voice):
+    import time
+    from shared.meeting_knowledge import sources_for
+    client,row,root,prompts,mutate=voice
+    row['data']['voice_assistant']['engine']='livekit'
+    source=sources_for({'segments':[]},{'wiki/shared.md':'The approved budget is 100.'})[0]
+    turn={'question':'Budget?','answer':'100','created_at_ms':int(time.time()*1000)-1000,
+          'sources':[{k:source[k] for k in ('key','fingerprint')}]}
+    body={'question':'And the deadline?','revision':1,'operation':'context','history':[turn]}
+    path='/api/internal/meeting-voice/1/agent'
+    assert len(client.post(path,headers=HEADERS,json=body).json()['history'])==1
+    (root/'wiki/shared.md').write_text('Changed source')
+    assert client.post(path,headers=HEADERS,json=body).json()['history']==[]
+
+
+@pytest.mark.parametrize('livekit',[False,True])
+def test_social_and_capability_questions_use_server_metadata_without_room_fact_generation(voice,livekit):
+    client,row,root,prompts,mutate=voice
+    policy=row['data']['voice_assistant'];policy.update(include_transcript=False,documents=[],engine='livekit' if livekit else 'tina')
+    for question in ('Bạn là ai?', 'Bạn làm được gì?', 'Cảm ơn!', 'Gửi email cho nhóm'):
+        base={'question':question,'revision':1}
+        if livekit:
+            plan=client.post('/api/internal/meeting-voice/1/agent',headers=HEADERS,json=base|{'operation':'plan'})
+            assert plan.json()=={'tool_calls':[]}
+        answer=client.post(URL,headers=HEADERS,json=base)
+        assert answer.status_code==200,answer.text
+        assert answer.json()['answer_kind']=='assistant' and answer.json()['sources']==[]
+    assert not prompts
+    assert client.post(URL,headers=HEADERS,json={'question':'Budget?','revision':1}).json()['reason']=='no_shared_sources'
+
+
+def test_repair_metadata_and_partial_answer_survive_source_checked_api(voice):
+    client,row,root,prompts,mutate=voice
+    mutate[0]=lambda:json.dumps({'claims':[{'text':'The budget is 100.','source_ids':['s0']}],
+        'follow_up':'Can you confirm the deadline?', 'verification':['unsupported_claim','approved']})
+    response=client.post(URL,headers=HEADERS,json={'question':'Budget and deadline?','revision':1})
+    assert response.status_code==200,response.text
+    assert response.json()['text']=='The budget is 100. Can you confirm the deadline?'
+    assert response.json()['verification']==['unsupported_claim','approved'] and response.json()['sources']
+    mutate[0]=lambda:json.dumps({'claims':[],'reason':'verification_rejected','verification':['contradiction','contradiction']})
+    response=client.post(URL,headers=HEADERS,json={'question':'Budget?','revision':1})
+    assert response.json()['verification']==['contradiction','contradiction'] and response.json()['text'].endswith('?')
+
+
+def test_worker_repairs_one_rejected_draft_with_a_shared_deadline_and_rechecks(monkeypatch):
+    from types import SimpleNamespace
+    from shared.meeting_knowledge import PREFIX
+    from shared.voice_knowledge import VOICE_SYSTEM,VERIFY_SYSTEM,VOICE_REPAIR_SYSTEM
+    from worker import engine
+    calls=[];timeouts=[];events=[];reviews=[False,True]
+    def complete(prompt,**kwargs):
+        calls.append(kwargs['system'])
+        if kwargs['system']==VERIFY_SYSTEM:
+            return SimpleNamespace(text=json.dumps({'approved':reviews.pop(0),'reason':'contradiction','claim_indexes':[0]}))
+        return SimpleNamespace(text=json.dumps({'claims':[{'text':'Lan làm demo.' if kwargs['system']==VOICE_REPAIR_SYSTEM else 'Minh làm demo.','source_ids':['s0']}]}))
+    def factory(**kwargs):timeouts.append(kwargs['timeout']);return SimpleNamespace(complete=complete)
+    monkeypatch.setattr(engine,'completion_from_env',factory)
+    monkeypatch.setenv('TINA_CHAT_SESSION','meeting-knowledge-repair')
+    payload={'request_id':'repair','text':json.dumps({'mode':'voice','question':'Ai?','sources':[{'id':'s0','quote':'Lan làm demo.'}],'tools_remaining':0})}
+    stream=SimpleNamespace(xadd=lambda _,entry:events.append(json.loads(entry['event'])),expire=lambda *_:None)
+    engine._run_meeting_knowledge(stream,'synthetic',{'entrypoint':{'inline':PREFIX+json.dumps(payload)}})
+    assert calls==[VOICE_SYSTEM,VERIFY_SYSTEM,VOICE_REPAIR_SYSTEM,VERIFY_SYSTEM]
+    assert timeouts[0]==25 and all(t<=10 for t in timeouts[1:])
+    result=json.loads(events[0]['text'])
+    assert result['verification']==['contradiction','approved'] and result['claims'][0]['text']=='Lan làm demo.'

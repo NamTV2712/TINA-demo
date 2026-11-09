@@ -221,3 +221,14 @@ it('web replies are labeled and show provider source links without adding transc
   const link=screen.getByRole('link',{name:'Redis documentation'});
   expect(link.getAttribute('href')).toBe('https://redis.io/docs/');expect(link.getAttribute('rel')).toContain('noopener');
 });
+
+it('assistant replies are labeled without claiming meeting evidence',async()=>{
+  vi.stubGlobal('fetch',vi.fn(async()=>Response.json({available:true,
+    policy:{enabled:true,include_transcript:false,documents:[],revision:1,wake_variants:[],noise_suppression:true},runtime:{state:'QUIET'},
+    replies:[{request_id:'00000000-0000-4000-8000-000000000001',text:'Tôi là TINA.',
+      state:'completed',created_at_ms:1,answer_kind:'assistant'}]})));
+  render(<MeetingVoice meetingId="42"/>);
+  expect(await screen.findByText('Trợ lý')).toBeTruthy();
+  expect(screen.getByText('Tôi là TINA.')).toBeTruthy();
+  expect(screen.queryByText('Nguồn meeting')).toBeNull();
+});

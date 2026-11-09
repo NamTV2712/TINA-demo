@@ -349,6 +349,7 @@ services:
         required: false
     environment:
       - TINA_AGENT_API_PORT=8100
+      - TINA_VOICE_EMBED_DIR=${TINA_VOICE_EMBED_DIR:-/opt/tina/voice-retrieval}
       - TINA_RUNTIME_API_URL=http://runtime:8090
       # P0 SSE ownership: agent-api verifies meeting-row ownership before opening /api/meeting/stream (owner-scoped like /ws).
       - TINA_MEETING_API_URL=http://meeting-api:8080
@@ -637,6 +638,8 @@ services:
       - TINA_VIEGEM_PORT=8000
       - TINA_VIEGEM_DEVICE=cpu
       - TINA_VIEGEM_NAME_BIAS=${TINA_VIEGEM_NAME_BIAS:-0}
+      - TINA_VIEGEM_CUSTOM_WEIGHT=${TINA_VIEGEM_CUSTOM_WEIGHT:-1.0}
+      - TINA_VIEGEM_CUSTOM_WORDS_FILE=${TINA_VIEGEM_CUSTOM_WORDS_FILE:-}
       - TINA_VIEGEM_DRAIN_KEY=${TINA_VIEGEM_DRAIN_KEY:-}
       - TINA_VIEGEM_MODEL_DIR=/app/models/viegem-fsmn
       - TINA_VIEGEM_TOKEN=${TINA_VIEGEM_TOKEN:-}

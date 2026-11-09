@@ -16,12 +16,13 @@ function setTtsMute(muted: boolean): void {
 export type PlaybackOutcome = 'completed' | 'failed' | 'stopped';
 export interface PreparedSpeech {
   ready: Promise<boolean>;
+  readonly failedBeforePlayback?: boolean;
   play(onStarted?: () => void): Promise<PlaybackOutcome>;
   cancel(): void;
 }
 export interface TtsPlayback {
-  speak(text: string, voice?: string, onStarted?: () => void): Promise<PlaybackOutcome | void>;
-  prepare?(text: string, voice?: string): PreparedSpeech;
+  speak(text: string, voice?: string, onStarted?: () => void, timeoutMs?: number): Promise<PlaybackOutcome | void>;
+  prepare?(text: string, voice?: string, timeoutMs?: number): PreparedSpeech;
   stop(): void;
 }
 export interface TtsPlaybackOptions {
@@ -40,15 +41,17 @@ export function createTtsPlayback(log: (m: string) => void = () => {}, options: 
   const spawnProcess = options.spawnProcess ?? (() => spawn('paplay', PAPLAY_ARGS, { stdio: ['pipe', 'pipe', 'pipe'] }));
   const handles = new Set<PreparedSpeech>();
   let active: PreparedSpeech | undefined;
-  function prepare(text: string, voice = 'auto'): PreparedSpeech {
+  function prepare(text: string, voice = 'auto', timeoutMs?: number): PreparedSpeech {
     const buffer = new PassThrough({ highWaterMark: 24000 });
     let request: ClientRequest | undefined, response: IncomingMessage | undefined, proc: ChildProcess | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined, settled = false, ended = false, bytes = 0, playing = false;
+    let failedBeforePlayback = false;
     let readyResolve!: (ready: boolean) => void, doneResolve!: (outcome: PlaybackOutcome) => void;
     const ready = new Promise<boolean>(resolve => { readyResolve = resolve; });
     const done = new Promise<PlaybackOutcome>(resolve => { doneResolve = resolve; });
     const finish = (outcome: PlaybackOutcome) => {
       if (settled) return;
+      failedBeforePlayback = outcome === 'failed' && !playing;
       settled = true; clearTimeout(timer); handles.delete(handle); readyResolve(false);
       request?.destroy(); response?.destroy(); buffer.destroy();
       try { proc?.stdin?.destroy(); proc?.kill('SIGKILL'); } catch { /* Cleanup must settle cancellation. */ }
@@ -57,6 +60,7 @@ export function createTtsPlayback(log: (m: string) => void = () => {}, options: 
     };
     const handle: PreparedSpeech = {
       ready,
+      get failedBeforePlayback() { return failedBeforePlayback; },
       cancel: () => finish('stopped'),
       async play(onStarted) {
         await ready;
@@ -120,11 +124,11 @@ export function createTtsPlayback(log: (m: string) => void = () => {}, options: 
         res.pipe(buffer);
       });
       request.on('error', () => finish('failed'));
-      timer = setTimeout(() => finish('failed'), options.requestTimeoutMs ?? 150000);
+      timer = setTimeout(() => finish('failed'), Math.min(options.requestTimeoutMs ?? 150000, timeoutMs ?? 150000));
       request.end(data);
     } catch { finish('failed'); }
     return handle;
   }
   const stop = () => { for (const handle of [...handles]) handle.cancel(); mute(true); };
-  return { prepare, stop, async speak(text, voice, onStarted) { if (handles.size) stop(); return prepare(text, voice).play(onStarted); } };
+  return { prepare, stop, async speak(text, voice, onStarted, timeoutMs) { if (handles.size) stop(); return prepare(text, voice, timeoutMs).play(onStarted); } };
 }

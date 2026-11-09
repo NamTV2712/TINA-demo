@@ -15,7 +15,7 @@ import { createTranscriptFeed } from './transcript-feed';
 import type { VoiceReply } from './voice-replies';
 import { type CaptureStatus, isActive } from './capture-liveness';
 import { resolveEndpoints, resolveDashboardUrl, dashboardOverride, normalizeDeployment, DEFAULT_DEPLOYMENT } from './endpoints';
-import { botBase, listBotMeetings, watchBotTranscript, type BotMeeting } from './bot-transcript';
+import { botBase, listBotMeetings, watchBotTranscript, readBotVoiceSources, type BotMeeting } from './bot-transcript';
 
 interface PanelState {
   status: CaptureStatus;
@@ -218,7 +218,10 @@ function gatewayBase(): string {
 
 let displaySessionId: string | null = null;
 let displayMeetingId: number | null = null;
-const transcriptFeed = createTranscriptFeed($('feed'), $('transcriptTurns'), $('latestBtn') as HTMLButtonElement);
+const transcriptFeed = createTranscriptFeed($('feed'), $('transcriptTurns'), $('latestBtn') as HTMLButtonElement, {
+  load: (id, signal) => { if (!botMeeting) throw new Error('No Bot meeting'); return readBotVoiceSources({ botGatewayUrl: cfg.botGatewayUrl, apiKey: cfg.apiKey }, botMeeting.id, id, signal); },
+  url: (id, index) => botBase(cfg.terminalUrl) + `/meetings/${botMeeting!.id}?voiceSource=${encodeURIComponent(id)}#voice-source-${id}-${index}`,
+});
 let feedKey = '';
 let feedScope = '';
 let transcriptFault: string | null = null;

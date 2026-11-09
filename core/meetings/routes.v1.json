@@ -3,7 +3,7 @@
   "domain": "meetings",
   "owner": "core/meetings",
   "edge": "gateway",
-  "note": "Bots, meeting records, transcripts, recordings — and the two calendar SYNC verbs, which run against the feed meeting-api owns even though the connection itself is identity's.",
+  "note": "Bots, meeting records, transcripts, recordings \u2014 and the two calendar SYNC verbs, which run against the feed meeting-api owns even though the connection itself is identity's.",
   "presence_env": "MEETING_API_URL",
   "routes": [
     {
@@ -401,6 +401,14 @@
       "method": "PUT",
       "path": "/transcripts/by-id/{meeting_id}/replicas/{meeting_uid}",
       "scopes": [
+        "tx"
+      ]
+    },
+    {
+      "method": "GET",
+      "path": "/meetings/{meeting_id}/voice-assistant/sources/{request_id}",
+      "scopes": [
+        "bot",
         "tx"
       ]
     },

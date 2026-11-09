@@ -44,3 +44,30 @@ def test_stream_only_citations_and_search_receipt_work_with_an_empty_completed_e
         return httpx.Response(200, text=''.join('data: '+json.dumps(e)+'\n\n' for e in events))
     adapter = OpenAIResponsesCompletion(api_key='test', model='configured-model', transport=httpx.MockTransport(handler))
     assert adapter.search('Redis?').sources == ({'url': 'https://redis.io/docs/', 'title': 'Redis'},)
+
+
+@pytest.mark.parametrize('text', ['{"claims":[{"text":"Lan phụ trách demo.","source_ids":["s0"]}]}',
+                                  '{"approved":true}'])
+@pytest.mark.parametrize('terminal', [None, '[DONE]', 'response.incomplete', 'response.failed', 'bad_completed_status'])
+def test_generation_and_verifier_reject_valid_json_from_an_unfinished_response(text, terminal):
+    events = [{'type': 'response.output_text.delta', 'delta': text}]
+    if terminal == 'bad_completed_status':
+        events.append({'type': 'response.completed', 'response': {'status': 'incomplete'}})
+    elif terminal and terminal != '[DONE]':
+        events.append({'type': terminal, 'response': {'incomplete_details': {'reason': 'max_output_tokens'}}})
+    wire = ''.join('data: ' + json.dumps(event) + '\n\n' for event in events)
+    if terminal == '[DONE]': wire += 'data: [DONE]\n\n'
+    adapter = OpenAIResponsesCompletion(api_key='test', model='configured-model',
+        transport=httpx.MockTransport(lambda _: httpx.Response(200, text=wire)))
+    with pytest.raises(LLMError): adapter.complete('Synthetic generation or verification')
+
+
+@pytest.mark.parametrize('delta', [False, True])
+def test_regular_completion_accepts_successful_terminal_envelope_with_or_without_deltas(delta):
+    text = '{"approved":true}'
+    events = [{'type': 'response.output_text.delta', 'delta': text}] if delta else []
+    events.append({'type': 'response.completed', 'response': {'status': 'completed', 'output_text': text}})
+    wire = ''.join('data: ' + json.dumps(event) + '\n\n' for event in events)
+    adapter = OpenAIResponsesCompletion(api_key='test', model='configured-model',
+        transport=httpx.MockTransport(lambda _: httpx.Response(200, text=wire)))
+    assert adapter.complete('Synthetic verification').text == text

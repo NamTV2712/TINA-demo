@@ -289,7 +289,8 @@ Voice audio uses separate PulseAudio sinks: meeting_rx receives browser playback
 feeds virtual_mic. The source stays unmuted so Meet sees a usable device; TTS sink mute plus the
 verified meeting UI gate speech. This does not change captured PCM or either ASR backend.
 
-After a successful reply, an identified caller can ask again for 15 seconds without a wake word.
+After a successful reply, an identified caller can ask again for 5 seconds without a wake word.
+The same five-second window applies after the fixed acknowledgment and a resumable interruption.
 Both channel and known transport participant must match. Unknown identity requires another call.
 Stop/policy change/failure clear this window. Quick answers skip the acknowledgment; a slow new
 request gets it after 900 ms, while follow-ups do not repeat it. Short answers to clarifications
@@ -340,3 +341,17 @@ AgentSession, and generated PCM returns to the same microphone player. Raw audio
 through LiveKit rooms. TINA still owns model settings, authorized RAG/tool retrieval and heard-prefix
 history. Agents handles the custom LLM/TTS nodes and task cancellation. Native Agents automatic voice
 endpointing/barge-in and a replacement tool planner are outside this pilot.
+
+A compact voice activity label sits in the Terminal transcript toolbar and Extension
+footer beside Open Terminal for Google Meet. Its primary labels are “Chờ gọi tên”, “Đang nghe câu hỏi”, “Đang xử lý”,
+and “Đang trả lời”. Quiet rearm, startup, disabled voice, no active bot, ended sessions and outages
+have separate labels. Listening requires fresh session-bound heartbeat and ready KWS evidence;
+missing data is never inferred from ASR text or bot mic state. Client readiness expires within
+15 seconds without a successful status read and immediately on an observed request failure.
+The Extension reuses its existing voice snapshot read and grants no capture/control permissions.
+
+Voice retrieval covers long segments/paragraphs using overlapping 1200-character chunks rather than truncating their tails. Original source text, segment identity and parent timestamps are preserved; exact character offsets locate each quote. Adjacent evidence and existing prompt/call budgets still apply. No embedding model or vector database is added.
+
+Semantic voice RAG runs in Agent API on local CPU: multilingual-E5-small INT8 (384 dimensions), BM25 + reciprocal rank fusion, then existing adjacent-source and prompt budgets. This is separate from ASR/KWS/LLM/TTS. Cold indexing is bounded to three seconds plus the in-flight batch; partially indexed long meetings continue using BM25 and complete cache on later turns. Model failures retain lexical retrieval with a content-free warning. Deployments can prepare the pinned assets with `python -m control_plane.voice_retrieval --download`; Docker builds include them automatically.
+
+To recap the full transcript, say “TINA ơi, tóm tắt cuộc họp” or “Từ đầu đến giờ đã chốt gì?”. Requests for a recent time range retain regular retrieval. Whole recaps process chronological parts, preserve original citations and verify the final short spoken answer. If preparation cannot finish within the voice deadline, TINA reports progress and asks you to repeat. Completed part work is cached for 15 minutes; every part must be processed before a factual whole-meeting recap is released. A recap is a concise selection of salient facts, not every detail or a replacement for canonical notes.

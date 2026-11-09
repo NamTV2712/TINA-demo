@@ -210,3 +210,5 @@ fixture responses do not establish live search availability, provider quota, or 
 citations; it returns at most six validated source links in `CompletionResult.sources`. Room voice
 never passes its sources/history to this method. Other completion adapters have no implicit search
 fallback. API/model/account support must be verified on the target deployment.
+
+OpenAI Responses completions require a response.completed terminal event for ordinary generation and verification as well as web search. Early EOF, a bare [DONE], response.incomplete, and explicit non-completed envelope status fail closed without returning accumulated deltas. Successful terminal envelopes may omit status for existing compatible gateways; explicit status must be completed.

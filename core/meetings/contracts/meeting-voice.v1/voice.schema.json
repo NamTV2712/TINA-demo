@@ -83,6 +83,22 @@
           "minimum": 0,
           "title": "Revision",
           "type": "integer"
+        },
+        "agent_context": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/HeardTurn"
+              },
+              "maxItems": 3,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent Context"
         }
       },
       "required": [
@@ -298,7 +314,8 @@
           "enum": [
             "meeting",
             "general",
-            "web"
+            "web",
+            "assistant"
           ],
           "title": "Answer Kind",
           "type": "string"
@@ -317,7 +334,8 @@
             "general_disabled",
             "web_disabled",
             "web_unavailable",
-            "web_no_sources"
+            "web_no_sources",
+            "summary_pending"
           ],
           "title": "Reason",
           "type": "string"
@@ -330,12 +348,44 @@
           "title": "Links",
           "type": "array"
         },
+        "source_refs": {
+          "items": {
+            "$ref": "#/$defs/VoiceSourceRef"
+          },
+          "maxItems": 32,
+          "title": "Source Refs",
+          "type": "array"
+        },
+        "source_count": {
+          "default": 0,
+          "maximum": 32,
+          "minimum": 0,
+          "title": "Source Count",
+          "type": "integer"
+        },
         "lookups": {
           "items": {
             "$ref": "#/$defs/VoiceLookup"
           },
-          "maxItems": 2,
+          "maxItems": 4,
           "title": "Lookups",
+          "type": "array"
+        },
+        "verification": {
+          "items": {
+            "enum": [
+              "approved",
+              "numeric_mismatch",
+              "unsupported_claim",
+              "contradiction",
+              "ambiguous",
+              "unavailable",
+              "repair_failed"
+            ],
+            "type": "string"
+          },
+          "maxItems": 2,
+          "title": "Verification",
           "type": "array"
         },
         "state": {
@@ -685,7 +735,9 @@
           "enum": [
             "get_recent_transcript",
             "search_meeting",
-            "search_shared_documents"
+            "search_shared_documents",
+            "search_web",
+            "read_source_context"
           ],
           "title": "Tool",
           "type": "string"
@@ -702,6 +754,283 @@
         "source_count"
       ],
       "title": "VoiceLookup",
+      "type": "object"
+    },
+    "HeardTurn": {
+      "additionalProperties": false,
+      "properties": {
+        "question": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Question",
+          "type": "string"
+        },
+        "answer": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Answer",
+          "type": "string"
+        },
+        "created_at_ms": {
+          "minimum": 0,
+          "title": "Created At Ms",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "question",
+        "answer",
+        "created_at_ms"
+      ],
+      "title": "HeardTurn",
+      "type": "object"
+    },
+    "VoiceLookupQuery": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "enum": [
+            "get_recent_transcript",
+            "search_meeting",
+            "search_shared_documents",
+            "search_web",
+            "read_source_context"
+          ],
+          "title": "Name",
+          "type": "string"
+        },
+        "query": {
+          "default": "",
+          "maxLength": 200,
+          "title": "Query",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "VoiceLookupQuery",
+      "type": "object"
+    },
+    "VoiceAgentQuestion": {
+      "additionalProperties": false,
+      "properties": {
+        "request_id": {
+          "format": "uuid",
+          "title": "Request Id",
+          "type": "string"
+        },
+        "question": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Question",
+          "type": "string"
+        },
+        "revision": {
+          "minimum": 0,
+          "title": "Revision",
+          "type": "integer"
+        },
+        "agent_context": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/HeardTurn"
+              },
+              "maxItems": 3,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent Context"
+        },
+        "operation": {
+          "enum": [
+            "context",
+            "plan",
+            "lookup"
+          ],
+          "title": "Operation",
+          "type": "string"
+        },
+        "lookup": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/VoiceLookupQuery"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "request_id",
+        "question",
+        "revision",
+        "operation"
+      ],
+      "title": "VoiceAgentQuestion",
+      "type": "object"
+    },
+    "VoiceSourceRef": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "maxLength": 1024,
+          "minLength": 1,
+          "title": "Key",
+          "type": "string"
+        },
+        "fingerprint": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Fingerprint",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "fingerprint"
+      ],
+      "title": "VoiceSourceRef",
+      "type": "object"
+    },
+    "VoiceSource": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^ctx-[0-9a-f]{64}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "transcript",
+            "document"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "quote": {
+          "maxLength": 1200,
+          "minLength": 1,
+          "title": "Quote",
+          "type": "string"
+        },
+        "segment_id": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Segment Id"
+        },
+        "speaker_name": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Speaker Name"
+        },
+        "start_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Start Ms"
+        },
+        "end_ms": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "End Ms"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "maxLength": 512,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
+        },
+        "paragraph": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Paragraph"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "quote"
+      ],
+      "title": "VoiceSource",
+      "type": "object"
+    },
+    "VoiceSources": {
+      "additionalProperties": false,
+      "properties": {
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/VoiceSource"
+          },
+          "maxItems": 32,
+          "title": "Sources",
+          "type": "array"
+        },
+        "unavailable": {
+          "maximum": 32,
+          "minimum": 0,
+          "title": "Unavailable",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "sources",
+        "unavailable"
+      ],
+      "title": "VoiceSources",
       "type": "object"
     }
   }

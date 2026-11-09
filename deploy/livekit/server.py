@@ -1,6 +1,6 @@
 """One-room Agents pilot with capability-authenticated TINA text/PCM custom I/O."""
 import asyncio
-from collections import deque
+from collections import deque, OrderedDict
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
 from datetime import timedelta
@@ -44,6 +44,27 @@ class Question(BaseModel):
     request_id: UUID
     question: str = Field(min_length=1, max_length=2000)
     revision: int = Field(ge=0)
+
+
+class HeardTurn(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    question: str = Field(min_length=1, max_length=2000)
+    answer: str = Field(min_length=1, max_length=4000)
+    created_at_ms: int = Field(ge=0)
+
+
+def heard_context(turns):
+    context = llm.ChatContext.empty()
+    for turn in turns:
+        context.add_message(role='user', content=turn.question, created_at=turn.created_at_ms/1000)
+        context.add_message(role='assistant', content=turn.answer, created_at=turn.created_at_ms/1000)
+    return context
+
+
+def context_turns(context):
+    messages = [m for m in context.items if m.type == 'message' and m.role in ('user','assistant')]
+    return [{'question':a.text_content,'answer':b.text_content,'created_at_ms':round(a.created_at*1000)}
+            for a,b in zip(messages[::2],messages[1::2])]
 
 
 class Speech(BaseModel):
@@ -93,6 +114,7 @@ class Runtime:
     touched: float = field(default_factory=time.monotonic)
     pending_audio: int = 0
     failed: bool = False
+    contexts: OrderedDict = field(default_factory=OrderedDict)
 
     async def close(self):
         with suppress(Exception):
@@ -154,6 +176,15 @@ def create_app(client=None, room_connector=connect_room):
                 r = await http.post(f'{core}/bots/voice/{mid}/{session}/answer', json=request['body'], headers=headers)
                 if r.status_code != 200 or len(r.content) > 200000: raise RuntimeError('TINA answer rejected')
                 return r.json()
+            async def agent(request, operation, lookup=None):
+                headers = {'Authorization': token}
+                if request['speaker']: headers['X-Voice-Speaker-Key'] = request['speaker']
+                body = request['body'] | {'operation':operation}
+                if operation == 'context': body.pop('agent_context', None)
+                if lookup is not None: body['lookup'] = lookup
+                r = await http.post(f'{core}/bots/voice/{mid}/{session}/agent', json=body, headers=headers)
+                if r.status_code != 200 or len(r.content) > 200000: raise RuntimeError('TINA agent operation rejected')
+                return r.json()
             async def speech(text):
                 async with http.stream('POST', tts_url+'/v1/audio/speech', headers={'X-API-Key': tts_token},
                     json={'model':'tts-1','input':text,'voice':'auto','response_format':'pcm','meeting_id':mid}, timeout=145) as r:
@@ -164,15 +195,15 @@ def create_app(client=None, room_connector=connect_room):
             # A late server-side deletion must never target a replacement generation's room.
             name = f'tina-meeting-{mid}-{session}-{uuid4().hex}'
             room = await room_connector(name)
-            model = TinaLLM(answer)
+            model = TinaLLM(answer, agent)
             tts = VieNeuTTS(speech)
-            session_io = AgentSession(llm=model, tts=tts, vad=None, turn_handling={'turn_detection':'manual','interruption':{'resume_false_interruption':False}},
+            session_io = AgentSession(llm=model, tts=tts, vad=None, max_tool_steps=3, turn_handling={'turn_detection':'manual','interruption':{'resume_false_interruption':False}},
                 user_away_timeout=None, conn_options=SessionConnectOptions(
                     llm_conn_options=APIConnectOptions(max_retry=0,timeout=95),
                     tts_conn_options=APIConnectOptions(max_retry=0,timeout=145)))
             try:
                 from livekit.agents.voice import room_io
-                await session_io.start(Agent(instructions='Use only the authorized TINA backend.'),room=room,
+                await session_io.start(Agent(instructions='Use only the authorized TINA backend.', tools=model.tools()),room=room,
                     session_host=False,record=False,room_options=room_io.RoomOptions(
                         audio_input=False,video_input=False,text_input=False,audio_output=False,text_output=False,
                         close_on_disconnect=False))
@@ -239,6 +270,12 @@ def create_app(client=None, room_connector=connect_room):
             if not task.done(): handle.interrupt(); task.cancel()
             with suppress(asyncio.CancelledError): await task
 
+    async def cancel_turn(mid, session, rid, token):
+        # Release TINA's room reservation even if planning or the SDK failed before finalization.
+        with suppress(httpx.HTTPError):
+            await http.post(f'{core}/bots/voice/{mid}/{session}/state', headers={'Authorization':token},
+                            json={'state':'QUIET','request_id':rid}, timeout=5)
+
     @app.post('/bots/{mid}/{session}/answer')
     async def answer(mid:int,session:str,body:Question,request:Request,authorization:str=Header(default=''),
                      x_voice_speaker_key:str|None=Header(default=None,pattern=r'^[0-9a-f]{64}$')):
@@ -247,18 +284,37 @@ def create_app(client=None, room_connector=connect_room):
         async with row.lock:
             rid=str(body.request_id)
             if (mid,session,rid) in stopped: raise HTTPException(409,'Voice turn stopped')
-            row.current_id=rid; row.model.result=None
+            row.current_id=rid; row.model.result=None; row.model.plan_rounds=0; row.model.tool_requests.clear()
             row.model.request={'body':body.model_dump(mode='json'),'speaker':x_voice_speaker_key}
             row.session.output.audio=None
-            handle=row.session.generate_reply(user_input=body.question,chat_ctx=llm.ChatContext.empty())
+            context = llm.ChatContext.empty()
             try:
+                snapshot = await row.model.agent(row.model.request, 'context')
+                if len(snapshot['history']) > 3: raise RuntimeError('Heard context exceeds bound')
+                context = heard_context([HeardTurn.model_validate(t) for t in snapshot['history']])
+                now = time.monotonic()
+                row.contexts = OrderedDict((k,v) for k,v in row.contexts.items() if now-v[0] < 900)
+                if x_voice_speaker_key:
+                    row.contexts.pop(x_voice_speaker_key, None)
+                    row.contexts[x_voice_speaker_key] = (now, context.copy())
+                    while len(row.contexts) > 32: row.contexts.popitem(last=False)
+                    context = row.contexts[x_voice_speaker_key][1].copy()
+                row.model.request['body']['agent_context'] = context_turns(context)
+                await row.session.current_agent.update_chat_ctx(context.copy())
+                if (mid,session,rid) in stopped: raise HTTPException(409,'Voice turn stopped')
+                handle=row.session.generate_reply(user_input=body.question,chat_ctx=context.copy())
                 await asyncio.wait_for(wait_handle(handle,request),98)
                 if (mid,session,rid) in stopped: raise HTTPException(409,'Voice turn stopped')
                 if not row.model.result: raise HTTPException(503,'TINA answer failed')
                 return row.model.result | {'voice_runtime':'livekit'}
+            except (RuntimeError, ValueError, httpx.HTTPError):
+                raise HTTPException(503,'TINA agent operation failed') from None
             finally:
-                row.model.request=None; row.model.result=None; row.touched=time.monotonic()
-                with suppress(RuntimeError): await row.session.current_agent.update_chat_ctx(llm.ChatContext.empty())
+                if row.model.result is None:
+                    if (mid,session,rid) not in stopped: row.failed=True
+                    await cancel_turn(mid,session,rid,authorization)
+                row.model.request=None; row.model.result=None; row.model.tool_requests.clear(); row.touched=time.monotonic()
+                with suppress(RuntimeError): await row.session.current_agent.update_chat_ctx(context.copy())
 
     @app.post('/bots/{mid}/{session}/v1/audio/speech')
     async def speech(mid:int,session:str,body:Speech,request:Request,authorization:str=Header(default=''),
@@ -304,6 +360,7 @@ def create_app(client=None, room_connector=connect_room):
         await config(mid,session,authorization)
         row=rows.get((mid,session));rid=str(body.request_id)
         stopped.append((mid,session,rid))
+        await cancel_turn(mid,session,rid,authorization)
         if row:
             if row.current_id==rid: await row.session.interrupt()
         return {'stopped':True}

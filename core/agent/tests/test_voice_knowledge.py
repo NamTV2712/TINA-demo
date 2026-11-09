@@ -130,3 +130,83 @@ def test_verification_failures_are_distinguished_without_exposing_provider_outpu
     def fail(_): raise TimeoutError('secret provider response')
     result = verify_voice_reply(raw, 'Ai?', sources, fail, diagnostics=True)
     assert json.loads(result)['reason'] == 'verification_unavailable' and 'secret' not in result
+
+
+def test_worker_dispatches_voice_plan_to_selected_completion_without_treating_it_as_claims(monkeypatch):
+    from types import SimpleNamespace
+    from worker import engine
+    from shared.meeting_knowledge import PREFIX
+    from shared.voice_knowledge import VOICE_PLAN_SYSTEM
+    identifier='synthetic-plan';events=[];seen=[]
+    monkeypatch.setenv('TINA_CHAT_SESSION','meeting-knowledge-'+identifier)
+    prompt=json.dumps({'mode':'voice_plan','question':'Demo?','available_tools':['search_meeting'],'sources':[]})
+    monkeypatch.setattr(engine,'start_prompt',lambda _:PREFIX+json.dumps({'request_id':identifier,'text':prompt}))
+    def complete(text,**kwargs):
+        seen.append((text,kwargs))
+        return SimpleNamespace(text=json.dumps({'tool_calls':[{'name':'search_meeting','query':'demo'}]}))
+    monkeypatch.setattr(engine,'completion_from_env',lambda **_:SimpleNamespace(complete=complete))
+    stream=SimpleNamespace(xadd=lambda _,entry:events.append(json.loads(entry['event'])),expire=lambda *_:None)
+    engine._run_meeting_knowledge(stream,'synthetic-out',{})
+    assert seen[0][1]['system']==VOICE_PLAN_SYSTEM
+    assert json.loads(events[0]['text'])=={'tool_calls':[{'name':'search_meeting','query':'demo'}]}
+    assert events[-1]['type']=='turn-complete'
+
+
+@pytest.mark.parametrize('question,intent',[
+    ('TINA ơi, bạn là ai?','identity'),('Bạn làm được gì?','capabilities'),('Cảm ơn bạn!','thanks'),
+    ('Hello!','greeting'),('Gửi email cho nhóm','action'),('Create a ticket for this bug','action')])
+def test_assistant_intent_is_bounded_and_never_claims_actions_were_performed(question,intent):
+    from shared.voice_knowledge import assistant_intent,assistant_reply,voice_route
+    assert assistant_intent(question)==intent
+    assert voice_route(question)[0]=='assistant'
+    text=assistant_reply(question,{'include_transcript':True,'documents':[],'allow_web_search':False})
+    assert 'Wiki' not in text and 'tìm web' not in text
+    if intent=='action':assert 'chưa hỗ trợ' in text or 'cannot' in text
+
+
+def test_intent_router_does_not_turn_compound_meeting_questions_into_social_replies():
+    from shared.voice_knowledge import voice_route
+    for q in ('Cảm ơn, deadline của chúng ta là gì?', 'Bạn là ai và ai phụ trách demo?',
+              'Kế hoạch triển khai của nhóm là gì?', 'Tài liệu dự án mới là gì?'):
+        assert voice_route(q)[0]=='meeting'
+    assert voice_route('Retrieval augmented generation là gì?')[0]=='general'
+    assert voice_route('Tìm trên web về lịch sử TINA')[0]=='web'
+
+
+def test_repair_keeps_supported_part_and_asks_for_missing_detail_after_reverification():
+    from shared.voice_knowledge import verify_voice_reply
+    raw=json.dumps({'claims':[{'text':'Lan làm demo, hạn 10/11.','source_ids':['s0']}]})
+    sources=[{'id':'s0','quote':'Lan làm demo.'}];repairs=[];reviews=[]
+    fixed=json.dumps({'claims':[{'text':'Lan làm demo.','source_ids':['s0']}],
+                      'follow_up':'Bạn có thể xác nhận hạn bàn giao không?'})
+    def repair(prompt):repairs.append(json.loads(prompt));return fixed
+    def review(prompt):reviews.append(json.loads(prompt));return '{"approved":true}'
+    result=json.loads(verify_voice_reply(raw,'Ai làm và hạn khi nào?',sources,review,repair=repair,diagnostics=True))
+    assert result['verification']==['numeric_mismatch','approved']
+    assert result['follow_up'].endswith('?') and result['claims'][0]['text']=='Lan làm demo.'
+    assert repairs[0]['rejection']=={'reason':'numeric_mismatch','claim_indexes':[0]}
+    assert len(repairs)==1 and len(reviews)==1 and reviews[0]['reply']['follow_up']==result['follow_up']
+
+
+def test_semantic_repair_is_once_and_cannot_publish_a_second_rejected_reply():
+    from shared.voice_knowledge import verify_voice_reply
+    raw=json.dumps({'claims':[{'text':'Minh đã chốt.','source_ids':['s0']}]})
+    sources=[{'id':'s0','quote':'Minh chưa chốt.'}];calls=[]
+    def repair(prompt):calls.append(json.loads(prompt));return raw
+    result=json.loads(verify_voice_reply(raw,'Đã chốt chưa?',sources,
+        lambda _:'{"approved":false,"reason":"contradiction","claim_indexes":[0]}',repair=repair,diagnostics=True))
+    assert result=={'claims':[],'reason':'verification_rejected','verification':['contradiction','contradiction']}
+    assert len(calls)==1
+
+
+def test_failed_review_skips_repair_and_forged_repair_sources_are_rejected():
+    from shared.voice_knowledge import verify_voice_reply
+    raw=json.dumps({'claims':[{'text':'Lan làm demo.','source_ids':['s0']}]})
+    sources=[{'id':'s0','quote':'Lan làm demo.'}];calls=[]
+    def repair(prompt):calls.append(prompt);return raw.replace('s0','forged')
+    result=json.loads(verify_voice_reply(raw,'Ai?',sources,lambda _:'not json',repair=repair,diagnostics=True))
+    assert result['reason']=='verification_unavailable' and not calls
+    result=json.loads(verify_voice_reply(raw,'Ai?',sources,lambda _:'{"approved":false}',repair=repair,diagnostics=True))
+    assert result['claims']==[] and result['verification']==['unsupported_claim','repair_failed']
+    for body in ({'claims':[],'follow_up':'Bạn nói rõ?'}, {'claims':json.loads(raw)['claims'],'follow_up':'Chắc chắn.'}):
+        with pytest.raises(ValueError):validate_voice_answer(json.dumps(body),sources)

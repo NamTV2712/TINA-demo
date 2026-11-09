@@ -634,8 +634,9 @@ def start_prompt(start: dict) -> str | None:
 
 def _run_meeting_knowledge(stream, out_topic: str, start: dict) -> None:
     from shared.meeting_knowledge import PREFIX, SYSTEM, validate_answer
-    from shared.voice_knowledge import (VOICE_SYSTEM, VOICE_TOOLS, GENERAL_SYSTEM, VERIFY_SYSTEM,
+    from shared.voice_knowledge import (VOICE_SYSTEM, VOICE_TOOLS, VOICE_PLAN_SYSTEM, VOICE_REPAIR_SYSTEM, GENERAL_SYSTEM, VERIFY_SYSTEM,
         validate_voice_answer, verify_voice_reply, voice_tool_calls)
+    from shared.voice_summary import MAP_SYSTEM, SELECT_SYSTEM
     try:
         inline = start_prompt(start) or ''
         if not inline.startswith(PREFIX):
@@ -645,9 +646,24 @@ def _run_meeting_knowledge(stream, out_topic: str, start: dict) -> None:
             raise ValueError('Knowledge request mismatch')
         source = json.loads(payload['text'])
         mode = source.get('mode')
-        voice = mode == 'voice'
-        provider = completion_from_env(timeout=25 if voice or mode == 'voice_general' else 45)
-        if mode == 'voice_web':
+        voice = mode in ('voice', 'voice_summary_map', 'voice_summary_verify')
+        voice_deadline = time.monotonic() + 50
+        def checked_completion(prompt, system):
+            remaining = voice_deadline - time.monotonic()
+            if remaining < 1: raise TimeoutError('Voice completion budget exhausted')
+            return completion_from_env(timeout=min(10, remaining)).complete(prompt, system=system).text
+        provider = completion_from_env(timeout=10 if mode=='voice_plan' else 25 if voice or mode=='voice_general' else 45)
+        if mode == 'voice_summary_select':
+            text = completion_from_env(timeout=15).complete(payload['text'],system=SELECT_SYSTEM).text
+            ids = {i for fact in source['summary_facts'] for i in fact['source_ids']}
+            validate_voice_answer(text,[{'id':i} for i in ids])
+        elif mode == 'voice_summary_verify':
+            text = verify_voice_reply(json.dumps(source['proposed_reply'],ensure_ascii=False),source['question'],source['sources'],
+                lambda prompt: checked_completion(prompt,VERIFY_SYSTEM),
+                repair=lambda prompt: checked_completion(prompt,VOICE_REPAIR_SYSTEM),diagnostics=True)
+        elif mode == 'voice_plan':
+            text = provider.complete(payload['text'],system=VOICE_PLAN_SYSTEM).text
+        elif mode == 'voice_web':
             search = getattr(provider, 'search', None)
             if search is None:
                 text = json.dumps({'reason': 'web_unavailable'})
@@ -658,7 +674,7 @@ def _run_meeting_knowledge(stream, out_topic: str, start: dict) -> None:
                 except Exception:
                     text = json.dumps({'reason': 'web_unavailable'})
         else:
-            system = (VOICE_SYSTEM + ('\n' + VOICE_TOOLS if source.get('tools_remaining', 0) else '')) if voice else GENERAL_SYSTEM if mode == 'voice_general' else SYSTEM
+            system = MAP_SYSTEM if mode == 'voice_summary_map' else (VOICE_SYSTEM + ('\n' + VOICE_TOOLS if source.get('tools_remaining', 0) else '')) if voice else GENERAL_SYSTEM if mode == 'voice_general' else SYSTEM
             result = provider.complete(payload['text'], system=system)
             if len(result.text) > 50000:
                 raise ValueError('Knowledge answer too large')
@@ -669,8 +685,11 @@ def _run_meeting_knowledge(stream, out_topic: str, start: dict) -> None:
             else:
                 (validate_voice_answer if voice else validate_answer)(result.text, source['sources'])
                 text = verify_voice_reply(result.text, source['question'], source['sources'],
-                    lambda prompt: completion_from_env(timeout=15).complete(prompt, system=VERIFY_SYSTEM).text,
+                    lambda prompt: checked_completion(prompt, VERIFY_SYSTEM),
+                    repair=lambda prompt: checked_completion(prompt, VOICE_REPAIR_SYSTEM),
                     diagnostics=True) if voice else result.text
+                if voice:
+                    log.info('voice verification checks=%s', ','.join(json.loads(text).get('verification', [])))
         stream.xadd(out_topic, {'event': json.dumps({'type': 'message-delta', 'text': text})})
     except Exception as exc:  # Never log questions, sources or provider responses.
         log.warning('meeting knowledge failed error=%s', type(exc).__name__)

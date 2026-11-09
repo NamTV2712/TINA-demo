@@ -26,8 +26,42 @@ class VoiceLink(BaseModel):
 
 class VoiceLookup(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    tool: Literal['get_recent_transcript', 'search_meeting', 'search_shared_documents']
+    tool: Literal['get_recent_transcript', 'search_meeting', 'search_shared_documents', 'search_web', 'read_source_context']
     source_count: int = Field(ge=0, le=32, strict=True)
+
+
+class VoiceSourceRef(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    key: str = Field(min_length=1, max_length=1024)
+    fingerprint: str = Field(pattern=r'^[0-9a-f]{64}$')
+
+
+class VoiceSource(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    id: str = Field(pattern=r'^ctx-[0-9a-f]{64}$')
+    kind: Literal['transcript', 'document']
+    quote: str = Field(min_length=1, max_length=1200)
+    segment_id: str | None = Field(default=None, max_length=512)
+    speaker_name: str | None = Field(default=None, max_length=512)
+    start_ms: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    end_ms: float | None = Field(default=None, ge=0, allow_inf_nan=False)
+    path: str | None = Field(default=None, max_length=512)
+    paragraph: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode='after')
+    def source_identity(self):
+        if self.kind == 'document':
+            if not self.path or not self.path.endswith('.md') or self.path.startswith('/') or '..' in self.path.split('/'):
+                raise ValueError('Invalid document source')
+        elif not self.segment_id:
+            raise ValueError('Missing transcript segment')
+        return self
+
+
+class VoiceSources(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    sources: list[VoiceSource] = Field(max_length=32)
+    unavailable: int = Field(ge=0, le=32)
 
 
 class VoiceReply(BaseModel):
@@ -35,12 +69,16 @@ class VoiceReply(BaseModel):
     request_id: UUID
     text: str = Field(min_length=1, max_length=4000)
     played_text: str | None = Field(default=None, max_length=4000)
-    answer_kind: Literal['meeting', 'general', 'web'] = 'meeting'
+    answer_kind: Literal['meeting', 'general', 'web', 'assistant'] = 'meeting'
     reason: Literal['answered', 'clarification', 'no_shared_sources', 'retrieval_empty', 'insufficient_evidence',
                     'verification_rejected', 'verification_unavailable', 'llm_unavailable',
-                    'general_disabled', 'web_disabled', 'web_unavailable', 'web_no_sources'] = 'answered'
+                    'general_disabled', 'web_disabled', 'web_unavailable', 'web_no_sources', 'summary_pending'] = 'answered'
     links: list[VoiceLink] = Field(default_factory=list, max_length=6)
-    lookups: list[VoiceLookup] = Field(default_factory=list, max_length=2)
+    source_refs: list[VoiceSourceRef] = Field(default_factory=list, max_length=32)
+    source_count: int = Field(default=0, ge=0, le=32)
+    lookups: list[VoiceLookup] = Field(default_factory=list, max_length=4)
+    verification: list[Literal['approved','numeric_mismatch','unsupported_claim','contradiction',
+                               'ambiguous','unavailable','repair_failed']] = Field(default_factory=list,max_length=2)
     state: Literal['queued', 'started', 'completed', 'failed', 'stopped', 'unconfirmed']
     created_at_ms: int = Field(ge=0, strict=True)
     updated_at_ms: int = Field(ge=0, strict=True)
@@ -78,5 +116,7 @@ def public_replies(row, active_session, heartbeat_fresh=True):
         if value['state'] not in FINAL and (record.get('session_uid') != active_session
                 or (not heartbeat_fresh and int(time.time() * 1000) - value['updated_at_ms'] > 15000)):
             value['state'] = 'unconfirmed'
-        replies.append(VoiceReply.model_validate(value).model_dump(mode='json'))
+        reply = VoiceReply.model_validate(value).model_dump(mode='json')
+        reply['source_count'] = len(reply.pop('source_refs'))
+        replies.append(reply)
     return sorted(replies, key=lambda item: (item['created_at_ms'], item['request_id']))

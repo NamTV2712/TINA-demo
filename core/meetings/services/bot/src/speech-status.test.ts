@@ -267,3 +267,45 @@ test('pilot PCM uses only the scoped voice capability and binds revision/turn',a
     assert.equal(received?.['x-api-key'],undefined);assert.equal(received?.['x-voice-request-id'],'00000000-0000-4000-8000-000000000001');
   }finally{tts.stop();await new Promise<void>(resolve=>server.close(()=>resolve()));}
 });
+
+test('a short per-call TTS deadline ends stalled acknowledgment without shortening later speech', async () => {
+  const server = createServer((req, res) => {
+    let body = ''; req.on('data', c => { body += c; });
+    req.on('end', () => { if (JSON.parse(body).input === 'main') setTimeout(() => res.end(Buffer.alloc(20)), 80); });
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const playback = createTtsPlayback(() => {}, {setMute() {}, requestTimeoutMs: 3000,
+    service: () => ({baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, token: 'synthetic', revision: 1, requestId: id})});
+  try {
+    const ack = playback.prepare!('ack', 'auto', 40);
+    assert.equal(await ack.ready, false); assert.equal(ack.failedBeforePlayback, true);
+    const main = playback.prepare!('main'); assert.equal(await main.ready, true); main.cancel();
+  } finally { playback.stop(); await new Promise<void>(resolve => server.close(() => resolve())); }
+});
+
+test('the speech controller forwards the per-call deadline to the owned TTS preparation', async () => {
+  const deadlines: Array<number | undefined> = [];
+  const controller = createSpeakController({async evaluate(_fn: unknown, args: {desiredOn: boolean}) { return args.desiredOn; }} as never,
+    {platform: 'google_meet', voiceAgentEnabled: true} as Invocation, () => ({
+      async speak() { throw Error('prepared path required'); }, stop() {},
+      prepare(_text, _voice, deadline) { deadlines.push(deadline); return {ready: Promise.resolve(false), cancel() {}, async play() { return 'failed'; }}; },
+    }));
+  assert.equal(await controller.speak('ack', 'auto', undefined, 3000), 'failed');
+  assert.deepEqual(deadlines, [3000]);
+});
+
+test('buffered stream failure is observable before playback even though ready remains true', async () => {
+  let response: import('node:http').ServerResponse | undefined, spawned = 0;
+  const server = createServer((req, res) => { req.resume(); req.on('end', () => { response = res; res.write(Buffer.alloc(8000)); }); });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const playback = createTtsPlayback(() => {}, {setMute() {}, spawnProcess() { spawned++; throw Error('must not spawn'); },
+    service: () => ({baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, token: 'synthetic', revision: 1, requestId: id})});
+  try {
+    const pending = playback.prepare!('next'); assert.equal(await pending.ready, true);
+    response!.destroy();
+    const deadline = Date.now() + 1000;
+    while (!pending.failedBeforePlayback && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 5));
+    assert.equal(pending.failedBeforePlayback, true); assert.equal(await pending.ready, true);
+    assert.equal(await pending.play(), 'failed'); assert.equal(spawned, 0);
+  } finally { playback.stop(); await new Promise<void>(resolve => server.close(() => resolve())); }
+});

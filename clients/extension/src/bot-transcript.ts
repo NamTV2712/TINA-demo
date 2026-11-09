@@ -1,5 +1,5 @@
 import type { TranscriptSegment } from './transcript-rendering';
-import { voiceReplies, type VoiceReply } from './voice-replies';
+import { voiceReplies, voiceSources, type VoiceReply } from './voice-replies';
 
 export interface BotConnection { botGatewayUrl: string; apiKey: string }
 export interface DesktopConnection { gatewayUrl: string; apiKey: string }
@@ -34,6 +34,10 @@ async function readGateway(gatewayUrl: string, apiKey: string, path: string, sig
 
 async function read(config: BotConnection, path: string, signal?: AbortSignal): Promise<any> {
   return readGateway(config.botGatewayUrl, config.apiKey, path, signal);
+}
+
+export async function readBotVoiceSources(config: BotConnection, meetingId: number, requestId: string, signal?: AbortSignal) {
+  return voiceSources(await read(config, `/meetings/${meetingId}/voice-assistant/sources/${encodeURIComponent(requestId)}`, signal));
 }
 
 function epoch(value: unknown): number {
@@ -100,20 +104,22 @@ export function botSegments(body: any, meeting: BotMeeting): TranscriptSegment[]
 // shortcut: poll full snapshots; use an exact-row delta feed when transcript size or concurrent viewers justify it.
 /** Exact-row snapshots include Redis drafts and canonical edits, independently of Agent availability. */
 export function watchBotTranscript(config: BotConnection, meeting: BotMeeting,
-  update: (rows: TranscriptSegment[], status: string, replies?: VoiceReply[]) => void, error: (message: string, denied: boolean) => void): () => void {
+  update: (rows: TranscriptSegment[], status: string, replies?: VoiceReply[], voiceStatus?: unknown) => void, error: (message: string, denied: boolean) => void): () => void {
   const request = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   let replies: VoiceReply[] = [], voiceInFlight = false;
+  let voiceStatus: unknown;
   let snapshot: { rows: TranscriptSegment[]; status: string } | undefined;
   const refreshVoice = async () => {
     voiceInFlight = true;
     try {
       const voice = await read(config, `/meetings/${meeting.id}/voice-assistant`, request.signal);
       replies = voiceReplies(voice.replies);
-    } catch { replies = []; /* Voice permissions/outages never block the transcript feed. */ }
+      voiceStatus = voice;
+    } catch { replies = []; voiceStatus = null; /* Voice permissions/outages never block the transcript feed. */ }
     finally {
       voiceInFlight = false;
-      if (!request.signal.aborted && snapshot) update(snapshot.rows, snapshot.status, replies);
+      if (!request.signal.aborted && snapshot) update(snapshot.rows, snapshot.status, replies, voiceStatus);
     }
   };
   const poll = async () => {
@@ -123,7 +129,7 @@ export function watchBotTranscript(config: BotConnection, meeting: BotMeeting,
       const rows = botSegments(body, meeting);
       snapshot = { rows, status: typeof body.status === 'string' ? body.status : meeting.status };
       if (!request.signal.aborted) {
-        update(rows, snapshot.status, replies);
+        update(rows, snapshot.status, replies, voiceStatus);
         if (meeting.platform === 'google_meet' && !voiceInFlight) void refreshVoice();
       }
     } catch (failure) {

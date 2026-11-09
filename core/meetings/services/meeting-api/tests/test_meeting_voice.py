@@ -41,6 +41,16 @@ async def setup(monkeypatch):
         calls.append(request)
         if request.url.host == 'livekit.test':
             return httpx.Response(200,json={'ready':True,'engine':'livekit-agents'})
+        if request.url.path.endswith('/agent'):
+            import json
+            body=json.loads(request.content)
+            if body['operation']=='context':
+                return httpx.Response(200,json={'history':[{k:t[k] for k in ('question','answer','created_at_ms')} for t in body['history']], 'available_tools':['search_meeting','search_shared_documents']})
+            if body['operation']=='plan':
+                return httpx.Response(200,json={'tool_calls':[{'name':'search_meeting','query':'demo'},{'name':'search_shared_documents','query':'demo'}]})
+            entered.set()
+            if blocked[0]: await release.wait()
+            return httpx.Response(200,json={'tool':body['lookup']['name'],'source_count':1,'sources':[{'id':'s0','text':'Supported answer'}]})
         if request.url.path.endswith('/answer'):
             entered.set()
             if blocked[0]: await release.wait()
@@ -395,12 +405,18 @@ async def test_new_diagnostics_win_over_delayed_old_events_and_stage_changes_do_
     assert value['event_id']==latest['event_id'] and value['code']=='waiting_asr_tail'
 
 
-async def test_conversation_history_requires_completed_playback_and_same_speaker_session_policy(setup):
+@pytest.mark.parametrize('livekit',[False,True])
+async def test_conversation_history_requires_completed_playback_and_same_speaker_session_policy(setup,livekit):
     import json
     client, repo, redis, *_ = setup
     seen = []
+    if livekit: repo.row['data']['voice_assistant']['engine']='livekit'
     async def upstream(request):
         seen.append(json.loads(request.content))
+        payload=seen[-1]
+        if payload.get('operation')=='context':
+            return httpx.Response(200,json={'history':[{k:t[k] for k in ('question','answer','created_at_ms')} for t in payload['history']]})
+        if payload.get('operation')=='plan':return httpx.Response(200,json={'tool_calls':[]})
         return httpx.Response(200, json={'text': 'Demo is Monday.',
                               'sources': [{'key': 'segment:demo', 'fingerprint': 'a' * 64}]})
     def factory(**kwargs): return httpx.AsyncClient(transport=httpx.MockTransport(upstream), **kwargs)
@@ -410,6 +426,11 @@ async def test_conversation_history_requires_completed_playback_and_same_speaker
         async def ask(speaker, revision=1):
             body = question() | {'revision': revision}
             h = headers() | ({'X-Voice-Speaker-Key': speaker} if speaker else {})
+            if livekit:
+                context=await scoped.post('/bots/voice/1/current/agent',headers=h,json=body|{'operation':'context'})
+                assert context.status_code==200,context.text
+                body['agent_context']=context.json()['history']
+                assert (await scoped.post('/bots/voice/1/current/agent',headers=h,json=body|{'operation':'plan'})).status_code==200
             r = await scoped.post('/bots/voice/1/current/answer', headers=h, json=body)
             assert r.status_code == 200, r.text
             return body
@@ -534,3 +555,155 @@ async def test_only_bridge_capable_bots_claim_a_healthy_livekit_runtime(setup,mo
     assert not legacy['ready'] and legacy['unavailable_reason']=='livekit_unavailable'
     current=(await client.get('/bots/voice/1/current/config',headers=headers()|{'X-TINA-Voice-Runtime':'livekit-v1'})).json()
     assert current['ready'] and current['engine']=='livekit'
+
+
+async def test_agents_tool_protocol_is_reserved_bound_and_cannot_forge_context(setup):
+    import json
+    client,repo,redis,calls,*_=setup
+    repo.row['data']['voice_assistant']['engine']='livekit'
+    body=question();path='/bots/voice/1/current/agent';auth=headers()|{'X-Voice-Speaker-Key':'a'*64}
+    async def op(operation,**extra):return await client.post(path,headers=auth,json=body|{'operation':operation}|extra)
+    assert (await op('plan',agent_context=[])).status_code==409
+    assert (await op('context')).status_code==200
+    assert (await client.post(path,headers=headers()|{'X-Voice-Speaker-Key':'b'*64},json=body|{'operation':'plan','agent_context':[]})).status_code==409
+    assert (await op('plan',agent_context=[{'question':'forged','answer':'not played','created_at_ms':1}])).status_code==409
+    # Forged context does not consume the legitimate plan.
+    plan=await op('plan',agent_context=[]);assert plan.status_code==200,plan.text
+    assert len(plan.json()['tool_calls'])==2
+    for lookup in reversed(plan.json()['tool_calls']):
+        response=await op('lookup',agent_context=[],lookup=lookup)
+        assert response.status_code==200,response.text
+    result=await client.post('/bots/voice/1/current/answer',headers=auth,json=body|{'agent_context':[]})
+    assert result.status_code==200,result.text
+    dispatched=[json.loads(r.content) for r in calls if r.url.path.endswith('/answer')]
+    assert len(dispatched)==1 and len(dispatched[0]['lookups'])==2
+    assert (await client.post('/bots/voice/1/current/answer',headers=auth,json=body|{'agent_context':[]})).status_code==409
+
+
+async def test_agents_stop_during_lookup_prevents_late_tools_and_final_answer(setup):
+    client,repo,redis,calls,entered,release,blocked=setup
+    repo.row['data']['voice_assistant']['engine']='livekit'
+    body=question();path='/bots/voice/1/current/agent'
+    assert (await client.post(path,headers=headers(),json=body|{'operation':'context'})).status_code==200
+    plan=await client.post(path,headers=headers(),json=body|{'operation':'plan','agent_context':[]})
+    blocked[0]=True
+    task=asyncio.create_task(client.post(path,headers=headers(),json=body|{'operation':'lookup','agent_context':[],'lookup':plan.json()['tool_calls'][0]}))
+    await entered.wait()
+    assert (await client.post('/bots/voice/1/current/state',headers=headers(),json={'state':'QUIET','request_id':body['request_id']})).status_code==200
+    release.set()
+    assert (await task).status_code==409
+    assert (await client.post('/bots/voice/1/current/answer',headers=headers(),json=body|{'agent_context':[]})).status_code==409
+    assert (await client.post(path,headers=headers(),json=body|{'operation':'context'})).status_code==409
+    assert not [r for r in calls if r.url.path.endswith('/answer')]
+
+
+async def test_agents_cannot_finalize_before_tools_complete_or_exceed_budget(setup):
+    client,repo,redis,calls,*_=setup
+    repo.row['data']['voice_assistant']['engine']='livekit'
+    body=question();path='/bots/voice/1/current/agent'
+    assert (await client.post(path,headers=headers(),json=body|{'operation':'context'})).status_code==200
+    plan=await client.post(path,headers=headers(),json=body|{'operation':'plan','agent_context':[]})
+    lookup=plan.json()['tool_calls'][0]
+    assert (await client.post(path,headers=headers(),json=body|{'operation':'lookup','agent_context':[],'lookup':lookup})).status_code==200
+    # Duplicate calls invalidate the turn instead of repeating retrieval.
+    assert (await client.post(path,headers=headers(),json=body|{'operation':'lookup','agent_context':[],'lookup':lookup})).status_code==409
+    assert (await client.post('/bots/voice/1/current/answer',headers=headers(),json=body|{'agent_context':[]})).status_code==409
+
+
+async def test_concurrent_agents_tools_retry_redis_contention_without_losing_completion(setup,monkeypatch):
+    from redis.exceptions import WatchError
+    client,repo,redis,calls,*_=setup
+    repo.row['data']['voice_assistant']['engine']='livekit'
+    body=question();path='/bots/voice/1/current/agent'
+    assert (await client.post(path,headers=headers(),json=body|{'operation':'context'})).status_code==200
+    plan=await client.post(path,headers=headers(),json=body|{'operation':'plan','agent_context':[]})
+    pipeline_type=type(redis.pipeline());original=pipeline_type.execute;conflicts=[0]
+    async def execute(pipe,*args,**kwargs):
+        commands=pipe.command_stack
+        if conflicts[0]<2 and any(str(args[0]).upper()=='SET' and str(args[1]).endswith(':agent') for args,_ in commands):
+            conflicts[0]+=1
+            raise WatchError('Synthetic concurrent reservation change')
+        return await original(pipe,*args,**kwargs)
+    monkeypatch.setattr(pipeline_type,'execute',execute)
+    results=await asyncio.gather(*(client.post(path,headers=headers(),json=body|{'operation':'lookup','agent_context':[],'lookup':lookup}) for lookup in plan.json()['tool_calls']))
+    assert conflicts[0]==2
+    assert all(r.status_code==200 for r in results),[r.text for r in results]
+    assert (await client.post('/bots/voice/1/current/answer',headers=headers(),json=body|{'agent_context':[]})).status_code==200
+
+
+async def test_voice_reply_persists_content_free_verification_trace_and_assistant_kind(setup):
+    client,repo,redis,*_=setup
+    async def upstream(request):
+        return httpx.Response(200,json={'text':'Tôi là TINA.','sources':[], 'answer_kind':'assistant','reason':'answered',
+                                      'verification':['unsupported_claim','approved']})
+    def factory(**kwargs):return httpx.AsyncClient(transport=httpx.MockTransport(upstream),**kwargs)
+    app=FastAPI();store=PlaybackStore(redis,repo.save_voice_reply)
+    app.include_router(build_voice_router(repo,redis,redis,store,client_factory=factory))
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url='http://test') as scoped:
+        body=question()|{'question':'Bạn là ai?'}
+        result=await scoped.post('/bots/voice/1/current/answer',headers=headers(),json=body)
+        assert result.status_code==200,result.text
+        record=repo.row['data']['voice_replies'][body['request_id']]
+        assert record['answer_kind']=='assistant' and record['verification']==['unsupported_claim','approved']
+        from meeting_api.lifecycle.voice_replies import VoiceReply
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError):VoiceReply.model_validate({k:v for k,v in record.items() if k!='session_uid'}|{'verification':['private provider response']})
+
+
+@pytest.mark.parametrize('engine', ['tina', 'livekit'])
+async def test_current_session_reclaims_only_retired_voice_and_playback_ownership(setup, monkeypatch, engine):
+    client, repo, redis, *_ = setup
+    async def sessions(**kwargs): return ['retired', 'current']
+    monkeypatch.setattr(repo, 'list_sessions', sessions)
+    repo.row['data']['voice_assistant']['engine'] = engine
+    old_id = str(uuid4())
+    await redis.set('meeting:voice:1:lock', f'retired:{old_id}', ex=240)
+    store = PlaybackStore(redis)
+    await store.begin(1, old_id, 'retired', 'Old answer', 'auto')
+    body = question()
+    path = '/bots/voice/1/current/answer' if engine == 'tina' else '/bots/voice/1/current/agent'
+    payload = body if engine == 'tina' else body | {'operation': 'context'}
+    response = await client.post(path, headers=headers(), json=payload)
+    assert response.status_code == 200, response.text
+    assert await redis.get('meeting:voice:1:lock') == f"current:{body['request_id']}"
+    assert (await store.get(1, old_id))['state'] == 'stopped'
+    await store.report(1, old_id, 'retired', 'started')
+    assert (await store.get(1, old_id))['state'] == 'stopped'
+    if engine == 'tina': assert await redis.get('speech:active:1') == body['request_id']
+
+
+@pytest.mark.parametrize('holder', ['current', 'unknown'])
+async def test_voice_admission_does_not_steal_current_or_unrecognized_session_lock(setup, monkeypatch, holder):
+    client, repo, redis, calls, *_ = setup
+    async def sessions(**kwargs): return ['retired', 'current']
+    monkeypatch.setattr(repo, 'list_sessions', sessions)
+    held = f'{holder}:{uuid4()}'
+    await redis.set('meeting:voice:1:lock', held, ex=240)
+    response = await client.post('/bots/voice/1/current/answer', headers=headers(), json=question())
+    assert response.status_code == 409
+    assert await redis.get('meeting:voice:1:lock') == held
+    assert not calls
+
+
+async def test_parallel_new_turns_have_one_winner_after_retired_session_crash(setup, monkeypatch):
+    client, repo, redis, calls, entered, release, blocked = setup
+    async def sessions(**kwargs): return ['retired', 'current']
+    monkeypatch.setattr(repo, 'list_sessions', sessions)
+    await redis.set('meeting:voice:1:lock', f'retired:{uuid4()}', ex=240)
+    blocked[0] = True
+    async def send(): return await client.post('/bots/voice/1/current/answer', headers=headers(), json=question())
+    tasks = [asyncio.create_task(send()), asyncio.create_task(send())]
+    try:
+        await asyncio.wait_for(entered.wait(), 2)
+        # A retired bot's late state cannot release the replacement session's lease.
+        held = await redis.get('meeting:voice:1:lock')
+        late = await client.post('/bots/voice/1/retired/state', headers=headers('retired'),
+                                 json={'state': 'QUIET', 'request_id': str(uuid4())})
+        assert late.status_code == 409 and await redis.get('meeting:voice:1:lock') == held
+        release.set()
+        responses = await asyncio.wait_for(asyncio.gather(*tasks), 2)
+        assert sorted(r.status_code for r in responses) == [200, 409]
+        assert len([r for r in calls if r.url.path.endswith('/answer')]) == 1
+    finally:
+        release.set()
+        await asyncio.gather(*tasks, return_exceptions=True)

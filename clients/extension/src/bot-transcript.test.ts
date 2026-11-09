@@ -45,12 +45,26 @@ try {
   const old = watchBotTranscript(config, meeting, () => updates.push('stale'), () => {});
   old(); release(Response.json(doc())); await turn();
   assert.notEqual(updates.at(-1), 'stale');
+  const activityUpdates:unknown[]=[];let voiceDenied=false;
+  globalThis.fetch=(async(url:any,options:any)=>{
+    calls.push({url:String(url),options});
+    if(String(url).endsWith('/voice-assistant'))return voiceDenied?new Response('',{status:403}):Response.json({replies:[],policy:{enabled:true},runtime:{state:'CAPTURING',session_active:true,heartbeat_fresh:true}});
+    return Response.json({...doc(),platform:'google_meet'});
+  }) as typeof fetch;
+  const stopActivity=watchBotTranscript(config,{...meeting,platform:'google_meet'},(_rows,_status,_replies,activity)=>activityUpdates.push(activity),()=>{});
+  await turn();await turn();
+  assert.equal((activityUpdates.at(-1) as any)?.runtime.state,'CAPTURING');
+  voiceDenied=true;timers.pop()!();await turn();await turn();
+  assert.equal(activityUpdates.at(-1),null,'voice denial clears readiness without blocking transcript');
+  stopActivity();timers.length=0;
+  globalThis.fetch=(async(url:any,options:any)=>{calls.push({url:String(url),options});return respond();}) as typeof fetch;
   respond = async () => new Response('', { status: 403 });
   watchBotTranscript(config, meeting, () => {}, (_message, denied) => errors.push(denied));
   await turn(); assert.equal(errors.at(-1), true); assert.equal(timers.length, 0);
   assert.ok(calls.every(call => !call.options.method || call.options.method === 'GET'), 'viewer never mutates or starts/stops bots');
   const reply = { request_id: '00000000-0000-4000-8000-000000000001', text: '<script>plain text</script>', state: 'stopped', created_at_ms: 1800000000000 };
   assert.equal(voiceReplies([reply])[0].text, reply.text);
+  assert.equal(voiceReplies([{...reply,answer_kind:'assistant'}])[0].answer_kind,'assistant');
   assert.equal(voiceReplies([{...reply,played_text:'<script>'}])[0].played_text,'<script>');
   assert.throws(()=>voiceReplies([{...reply,played_text:'invented'}]));
   assert.throws(()=>voiceReplies([{...reply,played_text:[]} ]));
@@ -82,4 +96,15 @@ console.log('Bot transcript: scoped history/drafts/edits, reconnect, denied acce
   assert.deepEqual(voiceReplies([item])[0].links,item.links);
   for(const url of ['javascript:alert(1)','file:///tmp/secret','https://user:password@example.com'])
     assert.throws(()=>voiceReplies([{...item,links:[{url,title:'bad'}]}]));
+}
+
+// Voice evidence rejects unsafe source identities and preserves literal quotations.
+{
+  const { voiceSources } = await import('./voice-replies');
+  const source = { id: 'ctx-' + 'b'.repeat(64), kind: 'document', path: 'wiki/demo.md', paragraph: 0, quote: '<script>not executable</script>' };
+  assert.equal(voiceSources({ sources: [source], unavailable: 0 }).sources[0].quote, source.quote);
+  assert.throws(() => voiceSources({ sources: [{ ...source, path: '../private.md' }], unavailable: 0 }));
+  assert.throws(() => voiceSources({ sources: [{ ...source, quote: 'x'.repeat(1201) }], unavailable: 0 }));
+  assert.throws(() => voiceSources({ sources: [{ id: 'ctx-' + 'a'.repeat(64), kind: 'transcript', quote: 'Missing segment' }], unavailable: 0 }));
+  assert.throws(() => voiceReplies([{ request_id: '00000000-0000-4000-8000-000000000001', text: 'Answer', state: 'completed', created_at_ms: 1, source_count: 33 }]));
 }

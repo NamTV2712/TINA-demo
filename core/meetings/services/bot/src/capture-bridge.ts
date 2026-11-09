@@ -44,6 +44,7 @@ import type { TelemetrySink } from './ports.js';
 import type { RemoteAudioActivityTap } from './aloneness.js';
 import { createTtsPlayback, type TtsPlayback, type PlaybackOutcome, type PreparedSpeech } from './tts-playback.js';
 import type {NoiseFrame} from './noise-suppression.js';
+import {setMeetingMicrophone} from './meeting-microphone.js';
 
 /** Float32 PCM → base64 of its little-endian bytes — the EXACT codec wire payload, so a stored
  *  captured-signal.v1 frame round-trips through @tina/capture-codec (encode→decode→same PCM). */
@@ -1492,7 +1493,7 @@ export async function startRecording(page: Page, inv: Invocation, recording: Bot
 export interface SpeakController {
   prepare?(text: string, voice?: string): PreparedSpeech;
   /** Begin speaking `text` (TTS synthesized + injected via the VM's PulseAudio chain). */
-  speak(text: string, voice?: string, onStarted?: () => void): Promise<PlaybackOutcome | void>;
+  speak(text: string, voice?: string, onStarted?: () => void, timeoutMs?: number): Promise<PlaybackOutcome | void>;
   /** Stop any in-flight speech (barge-in). */
   stop(): Promise<void>;
 }
@@ -1511,41 +1512,7 @@ export function createSpeakController(
   const setMic = async (on: boolean): Promise<boolean> => {
     let verified = false;
     const operation = micQueue.then(async () => {
-      const nextState = await page.evaluate(async ({ desiredOn, platform }) => {
-        const doc = (globalThis as any).document;
-        const findButton = (): any => {
-          if (platform === 'teams') return doc?.querySelector('#microphone-button');
-          if (platform === 'zoom') return doc?.querySelector('.join-audio-container__btn');
-          return Array.from(doc?.querySelectorAll('[role="button"],button') ?? [])
-            .find((candidate: any) => /microphone|mute audio/i.test(candidate.getAttribute('aria-label') ?? '')
-              && readState(candidate) !== undefined);
-        };
-        const readState = (button: any): boolean | undefined => {
-          if (!button) return undefined;
-          const label = `${button.getAttribute('aria-label') ?? ''} ${button.getAttribute('title') ?? ''}`.toLowerCase();
-          if (/problem|show more info|settings/.test(label)) return undefined;
-          if (/unmute|turn on.*microphone|enable microphone/.test(label)) return false;
-          if (!/toggle/.test(label) && /mute|turn off.*microphone|disable microphone/.test(label)) return true;
-          return undefined;
-        };
-        // Chromium's system-mute notification can lag after PulseAudio recovers.
-        let button = findButton();
-        for (let attempt = 0; !button && attempt < 20; attempt++) {
-          await new Promise(resolve => setTimeout(resolve, 50)); button = findButton();
-        }
-        if (!button) return undefined;
-        const currentOn = readState(button);
-        if (currentOn === desiredOn) return currentOn;
-        if (currentOn === undefined || button.disabled || button.getAttribute('aria-disabled') === 'true') return undefined;
-        button.click();
-        // The meeting UI can refuse or delay a click; never synthesize against an assumed state.
-        for (let attempt = 0; attempt < 20; attempt++) {
-          const actual = readState(findButton());
-          if (actual === desiredOn) return actual;
-          await new Promise(resolve => setTimeout(resolve, 50));
-        }
-        return undefined;
-      }, { desiredOn: on, platform }).catch(() => undefined);
+      const nextState = await page.evaluate(setMeetingMicrophone, { desiredOn: on, platform }).catch(() => undefined);
 
       if (typeof nextState === 'boolean') verified = nextState === on;
       else console.error(`[bot] speak: microphone state could not be changed (${platform})`);
@@ -1583,16 +1550,17 @@ export function createSpeakController(
     ...(enabled && tts.prepare ? { prepare(text: string, voice?: string): PreparedSpeech {
       const pending = tts.prepare!(text, voice);
       return { ready: pending.ready, cancel: () => pending.cancel(),
+        get failedBeforePlayback() { return pending.failedBeforePlayback; },
         play: onStarted => play(() => pending.play(onStarted), pending.ready).finally(() => pending.cancel()) };
     } } : {}),
-    async speak(text: string, voice?: string, onStarted?: () => void): Promise<PlaybackOutcome> {
+    async speak(text: string, voice?: string, onStarted?: () => void, timeoutMs?: number): Promise<PlaybackOutcome> {
       console.log(`[bot] speak request: ${text.length} characters`);
       if (tts.prepare && enabled) {
         tts.stop();
-        const pending = tts.prepare(text, voice);
+        const pending = tts.prepare(text, voice, timeoutMs);
         return play(() => pending.play(onStarted), pending.ready).finally(() => pending.cancel());
       }
-      return play(() => tts.speak(text, voice, onStarted));
+      return play(() => tts.speak(text, voice, onStarted, timeoutMs));
     },
     async stop(): Promise<void> {
       if (!enabled) return;

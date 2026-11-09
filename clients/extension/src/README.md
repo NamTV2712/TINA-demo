@@ -13,3 +13,9 @@
 Run `pnpm --dir clients/extension typecheck` and `pnpm --dir clients/extension test` from
 the repository root. Build with `pnpm --dir clients/extension build`, then reload the installed
 extension in `chrome://extensions`. See the [installation guide](../README.md).
+
+Voice replies accept the additive assistant kind for fixed server-owned conversation and capability responses.
+
+The footer beside Open Terminal shows a compact read-only voice indicator for Google Meet bots. It reuses the existing owner-scoped voice snapshot read, clears across source/meeting changes, and expires readiness after 15 seconds. It adds no capture permission or bot mutation.
+
+Voice reply cards expose collapsed source evidence through the owner-only source endpoint. Only the expanded card polls fresh quotes; reset/meeting changes abort and clear evidence. Source links open the matching reply in Terminal. Source text is inserted as text, never markup.

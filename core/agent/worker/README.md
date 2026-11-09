@@ -42,3 +42,9 @@ only the tool-less translation and leaves original/canonical transcripts unchang
 It calls the existing tool-less meeting CompletionPort using canonical text and resolved speaker
 names, then emits a candidate result. It does not publish live notes, edit canonical text or
 overwrite workspace documents. Meeting API owns source/lease validation and final publication.
+
+Meeting voice planning uses a bounded read-only CompletionPort prompt (`voice_plan`). LiveKit executes the selected tools; the existing final voice completion still verifies every room claim.
+
+Voice review and one optional repair share the remaining completion deadline. No repair runs after verifier outages; every corrected claim and follow-up is checked again.
+
+Recap map jobs use the normal numeric/semantic review and repair; reduction jobs select/compress cited map facts but never authorize evidence. A separate final verify job reviews original transcript chunks. All jobs keep the selected CompletionPort model and existing bounded completion deadlines.

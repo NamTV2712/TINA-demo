@@ -126,3 +126,22 @@ async def test_concurrent_identical_claim_has_one_publisher_and_terminal_release
     await store.report(42, identifier, 'session', 'failed')
     assert not await redis.exists('speech:active:42')
     assert await store.get(42, identifier)
+
+
+async def test_retiring_old_playback_cannot_clear_a_replacement_command(monkeypatch):
+    redis = FakeRedis(decode_responses=True)
+    store = PlaybackStore(redis)
+    old, new = str(uuid4()), str(uuid4())
+    await store.begin(42, old, 'retired', 'old', 'auto')
+    await store.report(42, old, 'retired', 'started')
+    get = store.get
+    async def replaced(mid, command):
+        snapshot = await get(mid, command)
+        await store.report(42, old, 'retired', 'completed')
+        await store.begin(42, new, 'current', 'new', 'auto')
+        return snapshot
+    monkeypatch.setattr(store, 'get', replaced)
+    await store.retire_previous_sessions(42, ['retired'])
+    assert await redis.get('speech:active:42') == new
+    assert (await get(42, new))['state'] == 'queued'
+    await redis.aclose()

@@ -146,6 +146,8 @@ class Stack:
         self.viegem_device = select_viegem_device(bool(values.get("TINA_VIEGEM_TOKEN")),
                                                   values.get("TINA_VIEGEM_DEVICE") or "auto")
         self.env.setdefault('TINA_VIEGEM_NAME_BIAS', values.get('TINA_VIEGEM_NAME_BIAS') or '0')
+        self.env.setdefault('TINA_VIEGEM_CUSTOM_WEIGHT', values.get('TINA_VIEGEM_CUSTOM_WEIGHT') or '1.0')
+        self.env.setdefault('TINA_VIEGEM_CUSTOM_WORDS_FILE', values.get('TINA_VIEGEM_CUSTOM_WORDS_FILE') or '')
         self._cuda_verified = False
         profiles = [p.strip() for p in values.get("COMPOSE_PROFILES", "").split(",") if p.strip()]
         if values.get('LIVEKIT_AGENT_URL'):
