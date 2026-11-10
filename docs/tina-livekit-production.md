@@ -10,8 +10,8 @@ Native TINA remains available as the per-room owner-selected alternative.
 `make all` builds the source checkout, prepares native MPS or Docker CUDA ASR, installs model assets,
 checks images and activates Compose only after build/setup succeeds. New templates enable meeting
 voice; existing configs must set `TINA_MEETING_VOICE=1`. If the selected main env has no TTS token,
-Stack reads the dedicated encrypted local/shared TTS env with its own matching key. The decryption
-key is not forwarded to containers. No wrapper or plaintext token entry is needed. `make plan`
+Stack reads `deploy/tts/.env` with the same root `.env.keys` used for the main env. An optional local
+TTS pair can override it. No decryption key is forwarded to containers or plaintext token entry needed. `make plan`
 reports missing credentials without creating files; deployment fails closed when credentials are absent.
 
 Supply the two pinned `hey_tina.onnx`/`tina_oi.onnx` files in `TINA_KWS_MODELS_DIR`, or keep an already

@@ -33,11 +33,10 @@ participants receive neither the service token nor its decryption key.
 
 ## Setup on another machine (Ubuntu/WSL or Linux)
 
-`deploy/tts/.env` contains an encrypted TTS token and its public key. Obtain the matching
-`tts.env.keys` through your private password manager or another secure channel and put it at
-`~/.config/tina/tts.env.keys`. Never commit or paste this key. Generating a new key will not
-decrypt the shared file. The main stack still needs its own matching root `.env.keys` for
-`deploy/compose/.env`; the TTS key does not replace that key.
+`deploy/tts/.env` encrypts its TTS token with the same root `.env.keys` used for
+`deploy/compose/.env`. Provision that private root key once through a secure channel; never commit
+or paste it. No separate `tts.env.keys` is needed. An optional `~/.config/tina/tts-local/` pair
+can override the shared file on a machine that needs a private token.
 
 Install Dotenvx in the OS where Compose runs (inside Ubuntu for WSL):
 
@@ -46,15 +45,16 @@ Install Dotenvx in the OS where Compose runs (inside Ubuntu for WSL):
 npm install --global @dotenvx/dotenvx@2.38.2
 dotenvx --version
 mkdir -p "$HOME/.config/tina" "$HOME/.cache/tina/tts"
-chmod 600 "$HOME/.config/tina/tts.env.keys"
+chmod 600 .env.keys
 ```
 
 Node.js is not required for the standalone CLI; see the
 [official installation options](https://dotenvx.com/docs/install/). This workstation has
 Dotenvx 2.38.2 at `/usr/local/bin/dotenvx` inside Ubuntu WSL.
 
-`run.py` strictly reads only `TTS_API_TOKEN` through Dotenvx into memory. Missing/wrong keys
-fail before the requested command launches, without printing decrypted output. The TTS key
+`run.py` strictly reads only `TTS_API_TOKEN` through Dotenvx into memory. With no local override,
+it uses `deploy/tts/.env` and the root `.env.keys`. Missing/wrong keys fail before the requested
+command launches, without printing decrypted output. The TTS key
 and unrelated encrypted values are not injected into child processes. Existing main-stack
 keys supplied by the caller remain available to that stack's loader. The selected TTS file
 overrides an ambient stale `TTS_API_TOKEN`.
@@ -63,7 +63,7 @@ Optional caller environment overrides:
 
 | Variable | Default |
 | --- | --- |
-| `TINA_TTS_KEYS_FILE` | `~/.config/tina/tts.env.keys` |
+| `TINA_TTS_KEYS_FILE` | root `.env.keys` (or local override key) |
 | `TINA_TTS_ENV_FILE` | this checkout's `deploy/tts/.env` |
 | `DOTENVX_BIN` | `dotenvx` found in PATH |
 | `TINA_TTS_MODELS` | this user's `~/.cache/tina/tts` |

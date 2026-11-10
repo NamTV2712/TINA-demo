@@ -25,7 +25,7 @@ def runtime_env(source=None):
     env_file = Path(env.get('TINA_TTS_ENV_FILE') or (local / '.env' if local_default else HERE / '.env')).expanduser()
     if not env_file.is_absolute():
         env_file = ROOT / env_file
-    key_file = Path(env.get('TINA_TTS_KEYS_FILE') or (local / '.env.keys' if local_default else Path.home() / '.config/tina/tts.env.keys')).expanduser()
+    key_file = Path(env.get('TINA_TTS_KEYS_FILE') or (local / '.env.keys' if local_default else ROOT / '.env.keys')).expanduser()
     if not key_file.is_absolute():
         key_file = ROOT / key_file
     if not env_file.is_file():

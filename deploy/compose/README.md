@@ -96,9 +96,9 @@ Enabled account preferences decide which workers remain running; no account can 
 
 New configurations prepare meeting voice by default (`TINA_MEETING_VOICE=1`); set it to `0` for
 a deliberate transcript-only deployment and clear `LIVEKIT_AGENT_URL` when disabling Agents.
-When the main environment has no TTS token, Stack reuses the dedicated encrypted TTS loader,
-including `~/.config/tina/tts-local`, without requiring a wrapper command or forwarding its key.
-Provision the matching TTS key/env pair privately before first startup. `make plan` reports
+When the main environment has no TTS token, Stack loads `deploy/tts/.env` with the shared root
+`.env.keys`. An optional local TTS pair can override it; its key is never forwarded to containers.
+Provision the root private key privately before first startup. `make plan` reports
 `meeting_voice`, `tts_credentials_ready` and `kws_models_source` without writing configuration.
 
 `make all` verifies the two retained KWS ONNX files in the model volume. If absent, it imports
