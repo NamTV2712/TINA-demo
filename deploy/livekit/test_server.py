@@ -18,6 +18,7 @@ URL=f'/bots/1/{SESSION}'
 @pytest.fixture
 async def service(monkeypatch):
     monkeypatch.delenv('MEETING_API_URL',raising=False)
+    monkeypatch.setenv('TTS_API_TOKEN', 'synthetic-tts-' + 'x' * 40)
     calls=[];blocked=[None];entered=asyncio.Event();connect_gate=[None];connect_entered=asyncio.Event()
     broken_tts=[False];config_hook=[None];config_status=[200]
     class PartialTTS(httpx.AsyncByteStream):
@@ -29,6 +30,8 @@ async def service(monkeypatch):
     heard={};planned=set()
     async def upstream(request):
         calls.append(request)
+        if '/turn/' in request.url.path:
+            return httpx.Response(200,json={'current':state.get('turn_current',True)})
         if request.url.path.endswith('/config'):
             assert request.url.host=='meeting-api' and request.url.port==8080
             if config_hook[0]: await config_hook[0]()
@@ -39,7 +42,9 @@ async def service(monkeypatch):
             body=json.loads(request.content)
             if body['operation']=='plan' and state.get('planning_unavailable'):
                 return httpx.Response(503,json={'detail':'Synthetic planner outage'})
-            if body['operation']=='context': return httpx.Response(200,json={'history':heard.get(request.headers.get('X-Voice-Speaker-Key'),[]),'available_tools':['search_meeting']})
+            if body['operation']=='context':
+                mid=int(request.url.path.split('/')[3]);speaker=request.headers.get('X-Voice-Speaker-Key')
+                return httpx.Response(200,json={'history':heard.get((mid,speaker),heard.get(speaker,[])),'available_tools':['search_meeting']})
             if body['operation']=='plan':
                 if body['request_id'] in planned:return httpx.Response(200,json={'tool_calls':[]})
                 planned.add(body['request_id'])
@@ -50,7 +55,8 @@ async def service(monkeypatch):
         if request.url.path.endswith('/answer'):
             entered.set()
             if blocked[0]: await blocked[0].wait()
-            return httpx.Response(200,json={'text':'Lan phụ trách demo.','reason':'answered','sources':[{'id':'s0'}]})
+            mid=int(request.url.path.split('/')[3])
+            return httpx.Response(200,json={'text':state.get('answers_by_mid',{}).get(mid,'Lan phụ trách demo.'),'reason':'answered','sources':[{'id':'s0'}]})
         if broken_tts[0]: return httpx.Response(200,stream=PartialTTS())
         return httpx.Response(200,content=b'\0\0'*2400,headers={'x-audio-sample-rate':'24000','x-audio-channels':'1'})
     original_start=AgentSession.start
@@ -107,7 +113,111 @@ async def test_real_agents_answer_preserves_citations_and_speaker_scope(service)
     assert operations==['context','plan','lookup','plan']
     assert json.loads(answers[0].content)['agent_context']==[]
     assert len(app.state.rows)==1
-    assert (await client.post(f'/bots/2/{uuid4()}/answer',headers=HEADERS,json=question())).status_code==503
+    assert (await client.post(f'/bots/2/{uuid4()}/answer',headers=HEADERS,json=question())).status_code==200
+
+
+async def test_three_meetings_have_independent_sessions_answers_context_and_stop(service):
+    import json
+    client,calls,state,app=service
+    speaker='a'*64
+    state['answers_by_mid']={1:'Lan phụ trách demo.',2:'Minh phụ trách demo.',3:'Huy phụ trách demo.'}
+    turns={mid:{'question':f'Meeting {mid}?','answer':text,'created_at_ms':1000} for mid,text in state['answers_by_mid'].items()}
+    for mid,turn in turns.items():app.state.heard[(mid,speaker)]=[turn]
+    bases={mid:f'/bots/{mid}/{uuid4()}' for mid in range(1,4)}
+    bodies={mid:question() for mid in bases}
+    responses=await asyncio.gather(*(client.post(base+'/answer',headers=HEADERS|{'X-Voice-Speaker-Key':speaker},json=bodies[mid]) for mid,base in bases.items()))
+    assert [r.status_code for r in responses]==[200,200,200]
+    assert [r.json()['text'] for r in responses]==list(state['answers_by_mid'].values())
+    assert len(app.state.rows)==3
+    assert len({id(row.session) for row in app.state.rows.values()})==3
+    for request in [r for r in calls if r.url.path.endswith('/answer')]:
+        mid=int(request.url.path.split('/')[3])
+        assert json.loads(request.content)['agent_context']==[turns[mid]]
+    assert (await client.post(f'/bots/4/{uuid4()}/answer',headers=HEADERS,json=question())).status_code==503
+    assert (await client.request('DELETE',bases[1]+'/turn',headers=HEADERS,json={'request_id':bodies[1]['request_id']})).status_code==200
+    assert (await client.post(bases[1]+'/answer',headers=HEADERS,json=bodies[1])).status_code==409
+    assert (await client.post(bases[2]+'/answer',headers=HEADERS,json=question())).status_code==200
+
+
+async def test_speech_revalidates_core_reservation_after_agents_runtime_is_recreated(service):
+    client,calls,state,app=service
+    body=question()
+    assert (await client.post(URL+'/answer',headers=HEADERS,json=body)).status_code==200
+    key=next(iter(app.state.rows));row=app.state.rows.pop(key);await row.close()
+    # Emulate a restart: SDK registry/Stop deque are empty; core remains the authority.
+    state['turn_current']=False
+    headers=HEADERS|{'X-Voice-Revision':'1','X-Voice-Request-Id':body['request_id']}
+    response=await client.post(URL+'/v1/audio/speech',headers=headers,json={'input':'Old answer.','meeting_id':1})
+    assert response.status_code==409
+    assert not any(r.url.path.endswith('/v1/audio/speech') for r in calls)
+    state['turn_current']=True
+    assert (await client.post(URL+'/answer',headers=HEADERS,json=question())).status_code==200
+
+
+async def test_disconnect_before_pcm_headers_releases_reserved_audio_slot(service,monkeypatch):
+    client,calls,state,app=service
+    body=question()
+    assert (await client.post(URL+'/answer',headers=HEADERS,json=body)).status_code==200
+    original=server.StreamingResponse.__call__
+    async def disconnect_headers(response,scope,receive,send):
+        async def failed_send(message):
+            if message['type']=='http.response.start':raise OSError('synthetic client disconnected before headers')
+            await send(message)
+        await original(response,scope,receive,failed_send)
+    monkeypatch.setattr(server.StreamingResponse,'__call__',disconnect_headers)
+    with pytest.raises(Exception):
+        await client.post(URL+'/v1/audio/speech',headers=HEADERS|{
+            'X-Voice-Revision':'1','X-Voice-Request-Id':body['request_id']},
+            json={'input':'Synthetic reply.','meeting_id':1})
+    row=next(iter(app.state.rows.values()))
+    assert row.pending_audio==0
+    assert not row.lock.locked()
+
+
+@pytest.mark.parametrize('tts_status',[200,401,503,'unreachable'])
+async def test_readiness_requires_authenticated_tts_without_synthesizing(monkeypatch,tts_status):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    token='synthetic-tts-'+'x'*40
+    monkeypatch.setenv('TTS_API_TOKEN',token)
+    class LiveKit:
+        room=SimpleNamespace(list_rooms=AsyncMock(return_value=None))
+        async def __aenter__(self):return self
+        async def __aexit__(self,*args):pass
+    monkeypatch.setattr(server.api,'LiveKitAPI',LiveKit)
+    calls=[]
+    async def upstream(request):
+        calls.append(request)
+        if request.url.path=='/health':return httpx.Response(200)
+        assert request.url.path=='/ready' and request.headers['X-API-Key']==token
+        if tts_status=='unreachable':raise httpx.ConnectError('synthetic outage')
+        return httpx.Response(tts_status,json={'status':'ok','sample_rate':24000,'channels':1,'format':'pcm_s16le'})
+    async with httpx.AsyncClient(transport=httpx.MockTransport(upstream)) as upstream_client:
+        app=server.create_app(client=upstream_client)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url='http://fixture') as client:
+            response=await client.get('/ready')
+            assert response.status_code==(200 if tts_status==200 else 503)
+            assert all(r.method=='GET' for r in calls)
+            if response.status_code==200:assert response.json()['capacity']==3 and response.json()['tts_ready'] is True
+
+
+@pytest.mark.parametrize('token',['','short','encrypted:'+'x'*40,'x '*40,'ầ'*40])
+async def test_readiness_refuses_invalid_tts_credentials_without_forwarding_them(monkeypatch,token):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+    monkeypatch.setenv('TTS_API_TOKEN',token)
+    class LiveKit:
+        room=SimpleNamespace(list_rooms=AsyncMock(return_value=None))
+        async def __aenter__(self):return self
+        async def __aexit__(self,*args):pass
+    monkeypatch.setattr(server.api,'LiveKitAPI',LiveKit)
+    async def upstream(request):
+        assert request.url.path=='/health'
+        return httpx.Response(200)
+    async with httpx.AsyncClient(transport=httpx.MockTransport(upstream)) as upstream_client:
+        app=server.create_app(client=upstream_client)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url='http://fixture') as client:
+            assert (await client.get('/ready')).status_code==503
 
 
 async def test_real_agents_pcm_uses_existing_tts_and_stop_fences_only_its_turn(service):

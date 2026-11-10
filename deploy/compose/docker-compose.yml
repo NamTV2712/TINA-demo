@@ -52,11 +52,11 @@ services:
     init: true
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health',timeout=5)"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/ready',timeout=12)"]
       interval: 10s
-      timeout: 6s
-      retries: 8
-      start_period: 30s
+      timeout: 15s
+      retries: 12
+      start_period: 120s
   # Optional room voice inference. Models persist once and are never downloaded by a bot.
   meeting-voice-models:
     profiles: ["speech"]

@@ -23,6 +23,7 @@ TOKEN = "test-only-" + "x" * 40
 class TestEngine:
     def __init__(self, synthesize): self.synthesize = synthesize
     def stream(self, text, **kwargs): yield self.synthesize(text, **kwargs)
+    def cached_public(self, text): return None
 
 
 class ServerTests(unittest.TestCase):
@@ -132,6 +133,47 @@ class ServerTests(unittest.TestCase):
         first.join(3); second.join(3)
         self.assertEqual(result, [200, 200])
         self.assertEqual(calls, ['room one', 'room two'])
+
+    def test_three_rooms_and_their_lookahead_fit_the_bounded_fifo(self):
+        entered, release = threading.Event(), threading.Event()
+        calls, result = [], []
+        def blocked(text):
+            calls.append(text)
+            if len(calls) == 1: entered.set(); release.wait(4)
+            return b'\x01\x00' * 10
+        self.engine.synthesize = blocked
+        threads = [threading.Thread(target=lambda i=i: result.append(self.call({'input': f'room sentence {i}'})[0])) for i in range(6)]
+        try:
+            threads[0].start(); self.assertTrue(entered.wait(1))
+            for thread in threads[1:]: thread.start()
+            deadline = time.monotonic() + 2
+            while len(self.server.queue) < 5 and time.monotonic() < deadline: time.sleep(.01)
+            self.assertEqual(len(self.server.queue), 5)
+            self.assertEqual(len(calls), 1)
+        finally:
+            release.set()
+            for thread in threads:
+                if thread.ident is not None: thread.join(3)
+        self.assertEqual(result, [200] * 6)
+        self.assertEqual(len(calls), 6)
+
+    def test_cached_public_notice_is_immediate_while_private_inference_is_busy(self):
+        from engine import ACK_TEXT
+        entered, release = threading.Event(), threading.Event()
+        def blocked(text):
+            entered.set(); release.wait(3)
+            return b'\x01\x00' * 10
+        self.engine.synthesize = blocked
+        self.engine.cached_public = lambda text: b'\x01\x00' * 10 if text == ACK_TEXT else None
+        first = threading.Thread(target=self.call)
+        try:
+            first.start(); self.assertTrue(entered.wait(1))
+            self.assertEqual(self.call({'input': ACK_TEXT})[0], 200)
+            self.assertTrue(self.server.busy.locked())
+            self.assertEqual(len(self.server.queue), 0)
+            self.assertEqual(self.call({'input': ACK_TEXT},token='wrong')[0], 401)
+        finally:
+            release.set(); first.join(3)
 
     def test_cancelled_queued_request_never_enters_inference(self):
         entered, release = threading.Event(), threading.Event()
@@ -251,17 +293,23 @@ class AudioTests(unittest.TestCase):
         self.assertEqual(spoken_text(unchanged), unchanged)
         self.assertEqual(spoken_text("(TINA), tina!"), "(ti na), ti na!")
 
-    def test_only_fixed_acknowledgment_is_cached(self):
+    def test_only_fixed_public_notices_are_cached(self):
         import numpy as np
-        from engine import Engine, ACK_TEXT
+        from engine import Engine, FIXED_TEXTS
         from unittest.mock import Mock
         engine = Engine.__new__(Engine)
         engine.tts = SimpleNamespace(sample_rate=24000, infer=Mock(return_value=np.ones(240)))
-        self.assertEqual(engine.synthesize(ACK_TEXT), engine.synthesize(ACK_TEXT))
-        self.assertEqual(engine.tts.infer.call_count, 1)
+        self.assertEqual(len(FIXED_TEXTS), len(set(FIXED_TEXTS)))
+        for text in FIXED_TEXTS:
+            notice = engine.synthesize(text)
+            self.assertEqual(engine.synthesize(text), notice)
+            self.assertEqual(list(engine.stream(text)), [notice])
+        self.assertEqual(engine.tts.infer.call_count, len(FIXED_TEXTS))
         engine.synthesize('Private meeting response')
         engine.synthesize('Private meeting response')
-        self.assertEqual(engine.tts.infer.call_count, 3)
+        self.assertEqual(engine.tts.infer.call_count, len(FIXED_TEXTS) + 2)
+        engine._fixed_pcm['Private meeting response'] = b'not public'
+        self.assertIsNone(engine.cached_public('Private meeting response'))
 
     def test_real_resampler_outputs_24k_little_endian_mono(self):
         import numpy as np

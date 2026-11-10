@@ -237,7 +237,7 @@ The CI TTS job installs pinned Dotenvx and runs these alongside the audio/protoc
 
 `GET /ready` requires the same `X-API-Key` as synthesis, and performs no inference. The bot voice preflight uses it to check that shared credentials match. `/health` and `/status` remain content-free unauthenticated probes.
 
-Bot ASR-addressed voice now accepts its built-in TINA name variants at the beginning of a turn. The local service prewarms/caches only the fixed acknowledgment `Dạ, em nghe.`; bot answers are validated before sentence-by-sentence playback and never cached.
+Bot ASR-addressed voice accepts its built-in TINA name variants at the beginning of a turn. Before readiness, the service prewarms/caches twelve public phrases in `WAKE_TEXTS`, `WAIT_TEXTS` and `SUMMARY_TEXTS`: four for name-only calls, four for question waiting and four for recap waiting. They match the bot's `VOICE_NOTICES` catalog, bypass project pronunciation overrides and the busy Agents LLM session. The bot rotates within each group without an extra LLM request. Bot answers are validated before sentence-by-sentence playback and never cached.
 
 ### Verified replies and the spoken copy
 
@@ -257,8 +257,9 @@ preprocessing; VieNeu still performs its own phonemization. The original answer 
 ### Project pronunciation dictionary
 
 Edit `deploy/tts/pronunciations.json` and rebuild/recreate TTS with your normal deployment command.
-The file is packaged into the image; running processes do not reload edits. Defaults include TINA
-and API. To add a project and explicitly select it for two meeting IDs (the IDs in Terminal URLs):
+The file is packaged into the image; running processes do not reload edits. Defaults include TINA,
+API and common voice/runtime abbreviations (LLM, ASR, STT, TTS, VAD, KWS, CPU, GPU, MPS, CUDA, SDK
+and SQL). Letter spellings are intended for Vietnamese speech; project overrides may replace them. To add a project and explicitly select it for two meeting IDs (the IDs in Terminal URLs):
 
 ```json
 {
@@ -272,7 +273,7 @@ Bots send their validated invocation `meeting_id`; previews/unknown meetings use
 This is operator-approved pronunciation configuration, not content read from private workspaces.
 Clients cannot submit dictionaries. Review every pair before deployment: the service enforces word,
 size and numeric/markup restrictions but cannot prove two spellings sound like the same name.
-The fixed acknowledgment is exempt from project overrides. Speech text is bounded to 12,000
+The fixed public messages are exempt from project overrides. Speech text is bounded to 12,000
 characters and is never included in logs or saved over display text. Numbers in glossary entries
 are rejected so date/amount normalization stays in the controlled numeric rules.
 
@@ -308,3 +309,15 @@ The LLM answer remains fully validated before speech preparation. No unverified 
 new ASR backend, voice model or inference precision is introduced. `test_streaming.py` checks early
 HTTP audio, truncated streams and resampling continuity; bot voice/playback tests cover lookahead,
 Stop and policy revocation. Measure HTTP audio latency separately from meeting delivery latency.
+
+
+Technical pronunciation changes should be reviewed with listening samples before adding many
+terms. They rewrite only whole words in the spoken copy, case-insensitively; code, URLs, email,
+identifiers and stored answer/transcript text retain their original notation. A dictionary entry
+cannot establish the preferred pronunciation of a person's name. Keep personal/project names in
+an explicitly selected project dictionary after the owner supplies the desired reading.
+
+Three-meeting operation keeps one native synthesis at a time, with six FIFO waiters, a 30-second
+queue timeout and sixteen bounded connections so readiness remains available during lookahead.
+Authenticated fixed public clips already in the prewarmed whitelist bypass the synthesis queue;
+private replies always use serialized native inference and are never cached.

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import hmac
+import importlib.util
 import ipaddress
 import os
 import platform
@@ -24,6 +25,18 @@ SOURCE_ACTIONS = {"all", "build", "bot", "plan"}
 
 class StackError(RuntimeError):
     pass
+
+
+def tts_environment(env):
+    """Reuse the dedicated encrypted TTS loader; never guess its key from the main env."""
+    spec = importlib.util.spec_from_file_location('tina_tts_env', ROOT / 'deploy/tts/run.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    try:
+        loaded = module.runtime_env(env)
+    except module.EnvError as exc:
+        raise StackError(str(exc)) from None
+    return {key: loaded[key] for key in ('TTS_API_TOKEN', 'TTS_SERVICE_URL', 'TINA_TTS_MODELS') if key in loaded}
 
 
 def run(args, *, env=None, capture=False, check=True):
@@ -151,16 +164,37 @@ class Stack:
         self._cuda_verified = False
         profiles = [p.strip() for p in values.get("COMPOSE_PROFILES", "").split(",") if p.strip()]
         if values.get('LIVEKIT_AGENT_URL'):
-            self.env.update(livekit_credentials(values))
+            try:
+                self.env.update(livekit_credentials(values))
+            except StackError:
+                if action != 'plan': raise
             if 'livekit' not in profiles:
                 profiles.append('livekit')
         if self.viegem_device == "mps":
             profiles = [p for p in profiles if p != "viegem"]
         elif self.viegem_device in {"cuda", "cpu"} and "viegem" not in profiles:
             profiles.append("viegem")
-        if values.get('TINA_MEETING_VOICE', '').lower() in {'1', 'true', 'yes'}:
+        self.voice_enabled = values.get('TINA_MEETING_VOICE', '').lower() in {'1', 'true', 'yes'}
+        if (values.get('LIVEKIT_AGENT_URL') and not self.voice_enabled
+                and action in ('all', 'build', 'doctor')):
+            raise StackError('LIVEKIT_AGENT_URL requires TINA_MEETING_VOICE=1. Unset LIVEKIT_AGENT_URL to disable the Agents runtime.')
+        self.kws_models_dir = Path(values.get('TINA_KWS_MODELS_DIR') or self.env.get('TINA_KWS_MODELS_DIR')
+                                   or ROOT / 'output/wakeword-training/tina-v1/models').expanduser()
+        if not self.kws_models_dir.is_absolute(): self.kws_models_dir = ROOT / self.kws_models_dir
+        self.kws_models_dir = self.kws_models_dir.resolve()
+        self.voice_credentials_ready = False
+        if self.voice_enabled:
             token = values.get('TTS_API_TOKEN', '')
-            if action != 'runtime-control' and (len(token) < 32 or token.startswith('encrypted:') or not token.isascii() or any(ord(c) < 33 or ord(c) > 126 for c in token)):
+            if not token and action != 'runtime-control':
+                try:
+                    self.env.update(tts_environment(self.env))
+                    values.update({key: self.env[key] for key in ('TTS_API_TOKEN', 'TTS_SERVICE_URL') if key in self.env})
+                    token = values.get('TTS_API_TOKEN', '')
+                except StackError:
+                    if action != 'plan': raise
+            self.voice_credentials_ready = (len(token) >= 32 and not token.startswith('encrypted:')
+                                            and token.isascii() and all(33 <= ord(c) <= 126 for c in token))
+            if action not in ('runtime-control', 'plan') and not self.voice_credentials_ready:
                 raise StackError('Meeting voice requires TTS_API_TOKEN; load its encrypted env with deploy/tts/run.py.')
             if not values.get('TTS_SERVICE_URL'):
                 self.env['TTS_SERVICE_URL'] = 'http://tts:8000'
@@ -340,6 +374,25 @@ class Stack:
         for service in ("gipformer-models", "viegem-models", "meeting-voice-models", "tts-models"):
             if service in self.services:
                 self.compose("run", "--rm", "--no-deps", service)
+        self.prepare_wakeword()
+
+    def prepare_wakeword(self):
+        if not self.voice_enabled or 'meeting-voice-models' not in self.services:
+            return
+        verify = ('from pathlib import Path; from tina_meeting_voice.kws_shadow import verify; '
+                  'verify(Path("/models/meeting-voice/livekit-tina-v1"))')
+        command = ('run', '--rm', '--no-deps', '--entrypoint', '/opt/tina-voice/bin/python')
+        result = self.compose(*command, 'meeting-voice-models', '-c', verify, capture=True, check=False)
+        if result.returncode == 0:
+            return
+        source = self.kws_models_dir
+        if not all((source / (name + '.onnx')).is_file() for name in ('hey_tina', 'tina_oi')):
+            raise StackError('KWS models are missing or invalid. Provide hey_tina.onnx and tina_oi.onnx '
+                             'in TINA_KWS_MODELS_DIR, or restore the meeting-voice-models cache. No application containers were restarted.')
+        self.compose(*command, '--volume', str(source) + ':/source:ro',
+                     '--volume', str(ROOT / 'deploy/wakeword/install_local.py') + ':/installer.py:ro',
+                     'meeting-voice-models', '/installer.py', '/source', '/models/meeting-voice', capture=True)
+        self.compose(*command, 'meeting-voice-models', '-c', verify, capture=True)
 
     def verify_viegem_cuda(self):
         if self.viegem_device != "cuda" or self._cuda_verified:
@@ -416,6 +469,38 @@ with urllib.request.urlopen(req, timeout=20) as response:
                     failures.append(f"{name}: {state}/{row.get('Health') or row.get('ExitCode', '')}")
         if failures:
             raise StackError("Services not ready: " + ", ".join(failures))
+        if self.voice_enabled and 'tts' in self.services and (services is None or 'tts' in services):
+            code = ('import os,urllib.request; r=urllib.request.Request("http://127.0.0.1:8000/ready", '
+                    'headers={"X-API-Key":os.environ["TTS_API_TOKEN"]}); '
+                    'assert urllib.request.urlopen(r,timeout=5).status==200')
+            self.compose('exec', '-T', 'tts', 'python', '-c', code, capture=True)
+        if 'livekit-agent' in self.services and (services is None or 'livekit-agent' in services):
+            code = ('import urllib.request; '
+                    'assert urllib.request.urlopen("http://127.0.0.1:8080/ready",timeout=12).status==200')
+            self.compose('exec', '-T', 'livekit-agent', 'python', '-c', code, capture=True)
+
+    def doctor_readiness(self):
+        required = set(self.services)
+        paused = set()
+        if self.services['admin-api'].get('environment', {}).get('INTERNAL_API_SECRET'):
+            from asr_control import Identity, Workers, ControlError
+            try:
+                counts = Identity(self).read()['counts']
+                workers = Workers(self)
+                managed = ({'gipformer'} if 'gipformer' in self.services else set())
+                if self.viegem_device != 'disabled': managed.add('viegem')
+                for backend in managed:
+                    count = counts.get(backend)
+                    if type(count) is not int or count < 0:
+                        raise StackError('Invalid managed ASR demand metadata')
+                    if count == 0:
+                        required.discard(backend); paused.add(backend)
+                    elif not workers.status(backend).get('ready'):
+                        raise StackError('ASR backend required by enabled accounts is not ready: ' + backend)
+            except (ControlError, KeyError):
+                raise StackError('Could not verify managed ASR demand/readiness') from None
+        self.readiness(required)
+        return paused
 
     def endpoint(self, service, target):
         for port in self.services[service].get("ports", []):
@@ -477,6 +562,9 @@ with urllib.request.urlopen(req, timeout=20) as response:
                           "env_file": str(self.env_file),
                           "compose_files": self.files, "services": list(self.services),
                           "viegem_device": self.viegem_device,
+                          "meeting_voice": self.voice_enabled,
+                          "tts_credentials_ready": self.voice_credentials_ready,
+                          "kws_models_source": str(self.kws_models_dir),
                           "native_viegem": bool(self.services["admin-api"].get("environment", {}).get("TINA_VIEGEM_TOKEN")
                                                 and "viegem" not in self.services and platform.system() == "Darwin" and platform.machine() == "arm64"),
                           "container_viegem": "viegem" in self.services,
@@ -519,12 +607,12 @@ with urllib.request.urlopen(req, timeout=20) as response:
             shutdown(self)
 
     def access(self):
-        key = self.provision_key()
+        self.provision_key()
         print(f"Terminal UI: {self.endpoint('terminal', 3000)}")
         print(f"API gateway: {self.endpoint('gateway', 8000)}")
         if "dashboard" in self.services:
             print(f"Dashboard: {self.endpoint('dashboard', 3000)}")
-        print(f"API key: {key}")
+        print('API access provisioned. Use make -C deploy/compose provision-token only when a token is needed.')
 
     def probe(self):
         env = dict(self.env)
@@ -570,7 +658,8 @@ def main():
         stack.preflight()
         stack.guard_existing_config()
         stack.check_images()
-        stack.readiness()
+        paused = stack.doctor_readiness()
+        if paused: print('ASR without enabled account demand: ' + ', '.join(sorted(paused)))
         stack.capabilities()
         print(f"Compose services ready: {stack.project}; audio/AI acceptance not exercised.")
     elif action == "access":

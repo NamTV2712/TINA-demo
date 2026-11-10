@@ -20,6 +20,8 @@ from livekit.agents.voice import SessionConnectOptions
 
 from adapters import TinaLLM, VieNeuTTS, SynthesisStatus, HttpAudioOutput, SAMPLE_RATE
 
+MAX_ROOMS = 3
+
 # Framework/provider logs must not include source text, questions, PCM or bearer capabilities.
 logging.getLogger('livekit.agents').setLevel(logging.CRITICAL)
 logging.getLogger('httpx').setLevel(logging.WARNING)
@@ -124,11 +126,28 @@ class Runtime:
         await delete_room(self.room_name)
 
 
+class PCMResponse(StreamingResponse):
+    """Release admission even when the client disconnects before the iterator starts."""
+    def __init__(self, content, runtime):
+        super().__init__(content, media_type='audio/pcm', headers={
+            'X-Audio-Sample-Rate': str(SAMPLE_RATE), 'X-Audio-Channels': '1', 'Cache-Control': 'no-store'})
+        self.runtime = runtime
+
+    async def __call__(self, scope, receive, send):
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            try:
+                await self.body_iterator.aclose()
+            finally:
+                self.runtime.pending_audio -= 1
+
+
 def create_app(client=None, room_connector=connect_room):
     core = os.environ.get('MEETING_API_URL', 'http://meeting-api:8080').rstrip('/')
     tts_url = os.environ.get('TTS_SERVICE_URL', 'http://tts:8000').rstrip('/')
     tts_token = os.environ.get('TTS_API_TOKEN', '')
-    http = client or httpx.AsyncClient(timeout=95, follow_redirects=False)
+    http = client or httpx.AsyncClient(timeout=150, follow_redirects=False)
     rows, opening, stopped = {}, asyncio.Lock(), deque(maxlen=128)
 
     async def config(mid, session, token, revision=None):
@@ -169,7 +188,7 @@ def create_app(client=None, room_connector=connect_room):
             if row:
                 row.touched = time.monotonic()
                 return row
-            if rows: raise HTTPException(503, 'The one-meeting LiveKit pilot is busy')
+            if len(rows) >= MAX_ROOMS: raise HTTPException(503, 'LiveKit meeting capacity is full')
             async def answer(request):
                 headers = {'Authorization': token}
                 if request['speaker']: headers['X-Voice-Speaker-Key'] = request['speaker']
@@ -199,7 +218,7 @@ def create_app(client=None, room_connector=connect_room):
             tts = VieNeuTTS(speech)
             session_io = AgentSession(llm=model, tts=tts, vad=None, max_tool_steps=3, turn_handling={'turn_detection':'manual','interruption':{'resume_false_interruption':False}},
                 user_away_timeout=None, conn_options=SessionConnectOptions(
-                    llm_conn_options=APIConnectOptions(max_retry=0,timeout=95),
+                    llm_conn_options=APIConnectOptions(max_retry=0,timeout=160),
                     tts_conn_options=APIConnectOptions(max_retry=0,timeout=145)))
             try:
                 from livekit.agents.voice import room_io
@@ -255,7 +274,34 @@ def create_app(client=None, room_connector=connect_room):
             if response.status_code != 200: raise HTTPException(503,'TINA Meeting API is unavailable')
         except httpx.HTTPError:
             raise HTTPException(503,'TINA Meeting API is unavailable') from None
-        return {'ready':True,'engine':'livekit-agents','version':'1.8.11','capacity':1,'sessions':len(rows)}
+        return {'ready':True,'engine':'livekit-agents','version':'1.8.11','capacity':MAX_ROOMS,'sessions':len(rows)}
+
+    @app.get('/ready')
+    async def ready():
+        status = await health()
+        if (len(tts_token) < 32 or tts_token.startswith('encrypted:') or not tts_token.isascii()
+                or any(ord(c) < 33 or ord(c) > 126 for c in tts_token)):
+            raise HTTPException(503, 'TTS credential is not configured')
+        try:
+            response = await http.get(tts_url + '/ready', headers={'X-API-Key': tts_token}, timeout=5)
+            if response.status_code != 200:
+                raise HTTPException(503, 'TTS authentication or readiness failed')
+            body = response.json()
+            if (body.get('status') != 'ok' or body.get('sample_rate') != SAMPLE_RATE
+                    or body.get('channels') != 1 or body.get('format') != 'pcm_s16le'):
+                raise HTTPException(503, 'Unexpected TTS audio format')
+        except (httpx.HTTPError, ValueError, AttributeError):
+            raise HTTPException(503, 'TTS is unavailable') from None
+        return status | {'tts_ready': True}
+
+    async def turn_permit(mid, session, rid, token, revision):
+        try:
+            response = await http.get(f'{core}/bots/voice/{mid}/{session}/turn/{rid}',
+                params={'revision': revision}, headers={'Authorization': token}, timeout=5)
+            if response.status_code == 200 and response.json().get('current') is True: return
+        except (httpx.HTTPError, ValueError, AttributeError):
+            raise HTTPException(503, 'Voice turn validation is unavailable') from None
+        raise HTTPException(409, 'Voice turn is no longer current')
 
     async def wait_handle(handle, request):
         task=asyncio.create_task(handle.wait_for_playout())
@@ -303,7 +349,7 @@ def create_app(client=None, room_connector=connect_room):
                 await row.session.current_agent.update_chat_ctx(context.copy())
                 if (mid,session,rid) in stopped: raise HTTPException(409,'Voice turn stopped')
                 handle=row.session.generate_reply(user_input=body.question,chat_ctx=context.copy())
-                await asyncio.wait_for(wait_handle(handle,request),98)
+                await asyncio.wait_for(wait_handle(handle,request),165)
                 if (mid,session,rid) in stopped: raise HTTPException(409,'Voice turn stopped')
                 if not row.model.result: raise HTTPException(503,'TINA answer failed')
                 return row.model.result | {'voice_runtime':'livekit'}
@@ -322,38 +368,41 @@ def create_app(client=None, room_connector=connect_room):
         if body.meeting_id!=mid or body.voice!='auto': raise HTTPException(422,'Only the selected room voice is supported')
         row=await get_runtime(mid,session,authorization,x_voice_revision)
         rid=str(x_voice_request_id)
+        await turn_permit(mid,session,rid,authorization,x_voice_revision)
         if row.pending_audio >= 2: raise HTTPException(429,'Current speech and lookahead are already reserved')
         row.pending_audio += 1
         async def stream():
-            try:
-                async with row.lock:
-                    if (mid,session,rid) in stopped: return
-                    if row.failed: raise RuntimeError('Agent speech failed')
-                    row.current_id=rid
-                    synthesis = SynthesisStatus()
-                    row.tts.synthesis = synthesis
-                    output=HttpAudioOutput(); row.session.output.audio=output
-                    handle=row.session.say(body.input,add_to_chat_ctx=False)
-                    waiter=asyncio.create_task(handle.wait_for_playout())
-                    try:
-                        async with asyncio.timeout(150):
-                            while not waiter.done() or not output.queue.empty():
-                                if (mid,session,rid) in stopped: return
-                                if synthesis.failed: raise RuntimeError('Agent speech failed')
-                                try: yield await asyncio.wait_for(output.queue.get(),.1)
-                                except TimeoutError: pass
-                            if handle.exception() is not None or handle.interrupted or not synthesis.complete or not output.samples:
-                                raise RuntimeError('Agent speech failed')
-                    finally:
-                        if not waiter.done(): handle.interrupt(); waiter.cancel()
-                        with suppress(asyncio.CancelledError): await waiter
-                        # Recreate a failed SDK session before the next turn instead of retaining its error budget/state.
-                        row.failed = row.failed or synthesis.failed
-                        row.session.output.audio=None; row.touched=time.monotonic()
-            finally:
-                row.pending_audio -= 1
-        return StreamingResponse(stream(),media_type='audio/pcm',headers={
-            'X-Audio-Sample-Rate':str(SAMPLE_RATE),'X-Audio-Channels':'1','Cache-Control':'no-store'})
+            async with row.lock:
+                if (mid,session,rid) in stopped: return
+                await turn_permit(mid,session,rid,authorization,x_voice_revision)
+                if row.failed: raise RuntimeError('Agent speech failed')
+                row.current_id=rid
+                synthesis = SynthesisStatus()
+                row.tts.synthesis = synthesis
+                output=HttpAudioOutput(); row.session.output.audio=output
+                handle=row.session.say(body.input,add_to_chat_ctx=False)
+                waiter=asyncio.create_task(handle.wait_for_playout())
+                try:
+                    async with asyncio.timeout(150):
+                        checked_at = time.monotonic()
+                        while not waiter.done() or not output.queue.empty():
+                            if (mid,session,rid) in stopped: return
+                            if time.monotonic() - checked_at >= 1:
+                                await turn_permit(mid,session,rid,authorization,x_voice_revision)
+                                checked_at = time.monotonic()
+                            if synthesis.failed: raise RuntimeError('Agent speech failed')
+                            try: yield await asyncio.wait_for(output.queue.get(),.1)
+                            except TimeoutError: pass
+                        if handle.exception() is not None or handle.interrupted or not synthesis.complete or not output.samples:
+                            raise RuntimeError('Agent speech failed')
+                        await turn_permit(mid,session,rid,authorization,x_voice_revision)
+                finally:
+                    if not waiter.done(): handle.interrupt(); waiter.cancel()
+                    with suppress(asyncio.CancelledError): await waiter
+                    # Recreate a failed SDK session before the next turn instead of retaining its error budget/state.
+                    row.failed = row.failed or synthesis.failed
+                    row.session.output.audio=None; row.touched=time.monotonic()
+        return PCMResponse(stream(), row)
 
     @app.delete('/bots/{mid}/{session}/turn')
     async def stop(mid:int,session:str,body:Stop,authorization:str=Header(default='')):

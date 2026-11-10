@@ -19,6 +19,7 @@ async def main():
         async def handle_async_request(self,request):
             if request.url.host=='meeting-api':
                 calls.append(request.url.path)
+                if '/turn/' in request.url.path:return httpx.Response(200,json={'current':True})
                 if request.url.path.endswith('/config'):
                     return httpx.Response(200,json={'enabled':True,'engine':'livekit','revision':1})
                 if request.url.path.endswith('/agent'):

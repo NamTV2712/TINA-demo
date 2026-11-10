@@ -72,6 +72,85 @@ def headers(session='current'):
 def question(): return {'request_id': str(uuid4()), 'question': 'What is the plan?', 'revision': 1}
 
 
+async def test_answer_service_propagates_bot_request_uuid_and_logs_no_content(setup, caplog):
+    import json
+    import logging
+    client, _, _, calls, *_ = setup
+    body = question()
+    with caplog.at_level(logging.INFO, logger='meeting_api.lifecycle.voice'):
+        response = await client.post('/bots/voice/1/current/answer', json=body, headers=headers())
+    assert response.status_code == 200
+    request = next(r for r in calls if r.url.path.endswith('/answer'))
+    assert request.headers['X-Tina-Voice-Request-Id'] == body['request_id']
+    records = [json.loads(r.message) for r in caplog.records if r.name == 'meeting_api.lifecycle.voice']
+    assert records == [{'type': 'voice_stage', 'request_id': body['request_id'],
+                        'stage': 'answer_service', 'status': 'ok', 'elapsed_ms': records[0]['elapsed_ms']}]
+    assert body['question'] not in caplog.text and 'test-internal-secret' not in caplog.text
+
+
+async def test_summary_permit_requires_internal_owner_and_current_unstopped_reservation(setup):
+    client, repo, redis, _, entered, release, blocked = setup
+    body = question(); blocked[0] = True
+    task = asyncio.create_task(client.post('/bots/voice/1/current/answer', json=body, headers=headers()))
+    try:
+        await asyncio.wait_for(entered.wait(), 2)
+        path = '/internal/meeting-voice/1/turn/' + body['request_id']
+        internal = {'X-User-Id': '7', 'X-Internal-Secret': 'test-internal-secret'}
+        assert (await client.get(path, headers={'X-User-Id': '7'})).status_code == 401
+        assert (await client.get(path, headers={'X-Internal-Secret': 'test-internal-secret'})).status_code == 401
+        assert (await client.get(path, headers=internal | {'X-User-Id': '8'})).status_code == 404
+        assert (await client.get(path, headers=internal)).json() == {'current': True}
+        repo.row['data']['artifact_deletion'] = True
+        assert (await client.get(path, headers=internal)).json() == {'current': False}
+        repo.row['data'].pop('artifact_deletion')
+        original_sessions = repo.list_sessions
+        async def replacement(**kwargs): return ['current', 'replacement']
+        repo.list_sessions = replacement
+        assert (await client.get(path, headers=internal)).json() == {'current': False}
+        repo.list_sessions = original_sessions
+        assert await redis.ttl('meeting:voice:1:lock') > 330
+        assert (await client.get(path.replace(body['request_id'], str(uuid4())), headers=internal)).json() == {'current': False}
+        await client.post('/bots/voice/1/current/state', headers=headers(),
+                          json={'state': 'QUIET', 'request_id': body['request_id']})
+        assert (await client.get(path, headers=internal)).json() == {'current': False}
+        release.set()
+        assert (await task).status_code == 409
+    finally:
+        release.set()
+        await task
+
+
+async def test_agents_turn_permit_is_bound_to_capability_revision_and_live_redis_lease(setup):
+    client,repo,redis,*_=setup
+    repo.row['data']['voice_assistant']['engine']='livekit'
+    rid=str(uuid4());path=f'/bots/voice/1/current/turn/{rid}?revision=1'
+    await redis.set('meeting:voice:1:lock','current:'+rid,ex=360)
+    assert (await client.get(path)).status_code==401
+    assert (await client.get(path,headers=headers('different'))).status_code==401
+    assert (await client.get(path,headers=headers())).json()=={'current':True}
+    assert (await client.get(path.replace('revision=1','revision=2'),headers=headers())).json()=={'current':False}
+    await redis.set('meeting:voice:1:lock','current:'+str(uuid4()),ex=360)
+    assert (await client.get(path,headers=headers())).json()=={'current':False}
+    await redis.delete('meeting:voice:1:lock')
+    assert (await client.get(path,headers=headers())).json()=={'current':False}
+
+
+async def test_a_room_capability_cannot_validate_another_rooms_turn(setup):
+    client,repo,redis,*_=setup
+    second=deepcopy(repo.row);second['id']=2;second['user_id']=8
+    second['data']['voice_assistant']['engine']='livekit'
+    get=repo.get_meeting
+    async def get_meeting(mid):return deepcopy(second) if mid==2 else await get(mid)
+    repo.get_meeting=get_meeting
+    rid=str(uuid4());await redis.set('meeting:voice:2:lock','current:'+rid,ex=360)
+    path=f'/bots/voice/2/current/turn/{rid}?revision=1'
+    assert (await client.get(path,headers=headers())).status_code==401
+    correct={'Authorization':'Bearer '+voice_token('test-admin-secret',2,'current')}
+    assert (await client.get(path,headers=correct)).json()=={'current':True}
+    await redis.delete('meeting:voice:2:lock')
+    assert (await client.get(path,headers=correct)).json()=={'current':False}
+
+
 async def test_kws_runtime_is_capability_scoped_validated_and_readable_only_by_owner(setup):
     import time
     client, _, redis, *_ = setup

@@ -5,3 +5,4 @@
 !adapters.py
 !server.py
 !smoke.py
+!production_smoke.py

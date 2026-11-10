@@ -6,7 +6,7 @@ failed or unconfirmed answers may contain unspoken text. Terminal and Extension 
 history through `GET /meetings/{id}/voice-assistant`. Full answer text never enters diagnostics or
 generic transcript/share payloads. Artifact deletion also deletes reply history.
 
-Core-owned room voice policy, bounded question request, and bounded runtime diagnostics. Newly spawned capable Google Meet rooms with transcription enabled receive an explicit initial policy: Voice assistant on, NS Low on, own-meeting transcript allowed, no documents. Existing saved room choices survive continuation; a room with no saved policy gets the new defaults on its next capable spawn. Request-model defaults and legacy reads remain conservative rather than reinterpreting old missing fields. Policy updates compare revision and increment it. Capability-authenticated bot routes bind meeting and active session; public GET/PUT is owner-scoped. Question requests may not supply documents or an owner identity. Active room state is ephemeral; original audio/transcripts are not rewritten.
+Core-owned room voice policy, bounded question request, and bounded runtime diagnostics. Newly spawned capable Google Meet rooms with transcription enabled receive an explicit initial policy: LiveKit Agents selected, Voice assistant on, NS Low on, own-meeting transcript/general knowledge/explicit public web enabled, no documents. Existing saved room choices survive continuation; a room with no saved policy gets the new defaults on its next capable spawn. Request-model defaults and legacy reads remain conservative rather than reinterpreting old missing fields. Policy updates compare revision and increment it. Capability-authenticated bot routes bind meeting and active session; public GET/PUT is owner-scoped. Question requests may not supply documents or an owner identity. Active room state is ephemeral; original audio/transcripts are not rewritten.
 
 New KWS-capable bots accept acoustic TINA ơi / hey TINA through LiveKit WakeWord 2.1.1.
 `wake_variants` remains a revision-bound owner-approved list of at most eight exact ASR name aliases
@@ -19,6 +19,9 @@ checks and 15-second freshness apply. Settings services reports only active owne
 shared rooms, previous sessions and expired reports cannot establish readiness. Older bots may omit
 this field and are shown as requiring a new bot rather than ready. No token, participant ID or audio
 is accepted in this snapshot. `kws_unavailable` is an allowlisted failure diagnostic.
+
+Settings services also returns `new_meeting_policy` from the same factory used when spawning a room.
+Terminal displays these defaults without an active meeting; optional room overrides remain separate.
 
 Completed playback may open a 15-second local follow-up window on the same channel and known
 participant ID. It confers no extra source/account permissions. Missing identity, Stop, expiry,
@@ -122,10 +125,23 @@ policy/session/Stop fences and actual played-prefix history remain authoritative
 
 Voice retrieval may expose a bounded chunk of an authorized parent source, identified by a deterministic voice-chunk key. Source fingerprints include the parent fingerprint and the exact character range. Per-chunk timestamps retain the parent interval. Source references still use key/fingerprint; they grant no additional source authority.
 
-VoiceReply.reason adds summary_pending for incomplete recap preparation. Its text reports progress and asks the caller to repeat; sources are empty, so no partial result is represented as a whole-meeting factual answer. Completed recaps retain answer_kind meeting and existing original-source references/verification.
+VoiceReply.reason includes summary_pending for recap preparation that exceeded the bounded wait. The bot announces slow recap work once, then automatically plays the verified result in the same reserved turn. All background map/select/verify stages share a 120-second waiting budget; an expired run returns no partial facts or promise of later playback. Completed recaps retain answer_kind meeting and existing original-source references/verification. Transcript capture continues; another voice question requires stopping/correcting the active turn first.
+
+Internal `GET /internal/meeting-voice/{meeting}/turn/{request}` returns `VoiceTurnPermit` to Agent API
+only with the matching service secret and owner header. Its boolean confirms the current exclusive
+reservation and active bot session, never an account identity derived from a speaker. Every recap
+job checks it before and after inference. Source-policy revisions and fingerprints are checked
+separately; Stop, replacement sessions/requests, departure and artifact deletion fence late results.
+The room lease is 360 seconds; the bot's 330-second total budget leaves time for bounded playback.
 
 The LiveKit agent protocol now allows at most two plans, two tools per plan and four attempted lookups total. VoiceLookup/VoiceLookupQuery add read_source_context, whose query must match ctx-[0-9a-f]{64} and appear in the same turn allowlist. VoiceReply.lookups holds at most four traces. The 30-second retrieval deadline skips unfinished work without discarding successful earlier queries; finalization waits for attempted/skipped tools and uses executed queries only. Native tool planning remains one round; recap preparation uses its separate protocol.
 
 VoiceReply.source_refs is internal durable metadata (key/fingerprint only); public history strips it and derives source_count. VoiceSources returns up to 32 freshly authorized source quotes and an unavailable count. Source reads recheck current room sharing, linked documents, source fingerprints and artifact deletion; ended meetings remain owner-readable. Sources do not enter public transcript/share payloads.
 
 Turn ownership remains exclusive per meeting. Admission may atomically replace a reservation only when its known bot session has been superseded; current and unrecognized reservations remain fenced. Retired playback is stopped without rewriting canonical transcript or source policy. No request/response schema changed for this recovery.
+
+Agents also uses capability-authenticated `GET /bots/voice/{meeting}/{session}/turn/{request}?revision=...`
+returning the same VoiceTurnPermit. No internal service secret or owner/provider key is needed.
+It confirms the exact Redis reservation, active session and current LiveKit policy revision before
+PCM synthesis, periodically while streaming and at completion. SDK Stop-cache loss after restart
+cannot authorize an old or another meeting's request.

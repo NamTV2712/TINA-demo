@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
 import os
 import re
 import asyncio
@@ -22,6 +23,14 @@ from .voice_replies import VoiceReply, VoiceSourceRef, VoiceSources, public_repl
 from redis.exceptions import WatchError
 
 STATES = '^(LISTENING|CAPTURING|THINKING|SPEAKING|QUIET|ERROR|OFF)$'
+log = logging.getLogger(__name__)
+log.setLevel(logging.INFO)
+if not log.hasHandlers(): log.addHandler(logging.StreamHandler())
+
+
+class VoiceTurnPermit(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    current: StrictBool
 
 
 def voice_token(secret, meeting, session):
@@ -195,8 +204,9 @@ class VoiceState(BaseModel):
 
 
 def new_meeting_voice_policy():
-    """New capable Google Meet rooms use their own transcript; linked documents remain opt-in."""
-    return VoicePolicy(enabled=True,include_transcript=True,noise_suppression=True).model_dump()
+    """Seed new capable rooms; saved policies and document grants remain owner-controlled."""
+    return VoicePolicy(enabled=True,include_transcript=True,noise_suppression=True,
+                       allow_general_knowledge=True,allow_web_search=True,engine='livekit').model_dump()
 
 
 def policy_of(row):
@@ -221,21 +231,32 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
                 raise HTTPException(409, 'Voice session is no longer active')
         return row
 
-    async def agent(row, suffix, body=None):
+    async def agent(row, suffix, body=None, *, request_id=None):
         base = os.environ.get('AGENT_API_URL', '').rstrip('/')
         secret = os.environ.get('INTERNAL_API_SECRET', '')
         if not base or not secret:
             raise HTTPException(503, 'Meeting voice service is not configured')
-        async with client_factory(timeout=95, follow_redirects=False) as client:
-            try:
+        started, status = time.monotonic(), 'error'
+        headers = {'X-User-Id': str(row['user_id']), 'X-Internal-Secret': secret}
+        if request_id is not None: headers['X-Tina-Voice-Request-Id'] = str(request_id)
+        try:
+            async with client_factory(timeout=150 if suffix == 'answer' else 95, follow_redirects=False) as client:
                 response = await client.request('POST' if body is not None else 'GET',
                     f'{base}/api/internal/meeting-voice/{row["id"]}/{suffix}', json=body,
-                    headers={'X-User-Id': str(row['user_id']), 'X-Internal-Secret': secret})
+                    headers=headers)
                 if response.status_code >= 400 or len(response.content) > 200000:
                     raise HTTPException(503, 'Approved meeting sources are unavailable')
-                return response.json()
-            except (httpx.HTTPError, ValueError) as exc:
-                raise HTTPException(503, 'Meeting voice service is unavailable') from exc
+                result = response.json()
+                status = 'ok'
+                return result
+        except (httpx.HTTPError, ValueError) as exc:
+            raise HTTPException(503, 'Meeting voice service is unavailable') from exc
+        finally:
+            if request_id is not None:
+                stage = 'tool_' + body['operation'] if suffix == 'agent' else 'answer_service'
+                log.info('%s', json.dumps({'type': 'voice_stage',
+                    'request_id': str(request_id), 'stage': stage, 'status': status,
+                    'elapsed_ms': round((time.monotonic() - started) * 1000)}))
 
     def keys(mid, session, request):
         return f'meeting:voice:{mid}:lock', f'meeting:voice:{mid}:{session}:{request}'
@@ -261,7 +282,7 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
                     if playback is not None and retired:
                         await playback.retire_previous_sessions(mid, retired)
                     pipe.multi()
-                    pipe.set(lock, f'{session}:{request}', ex=240)
+                    pipe.set(lock, f'{session}:{request}', ex=360)
                     await pipe.execute()
                     return
             except WatchError:
@@ -284,6 +305,34 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
                 except WatchError:
                     continue
 
+
+    @router.get('/internal/meeting-voice/{mid}/turn/{request_id}', response_model=VoiceTurnPermit, include_in_schema=False)
+    async def current_summary_turn(mid: int, request_id: UUID,
+                                   x_user_id: str | None = Header(default=None),
+                                   x_internal_secret: str | None = Header(default=None)):
+        secret = os.environ.get('INTERNAL_API_SECRET', '')
+        if not secret or not x_user_id or not x_internal_secret or not hmac.compare_digest(secret.encode(), x_internal_secret.encode()):
+            raise HTTPException(401, 'Internal voice credential required')
+        row = await meeting(mid, _resolve_user_id(x_user_id))
+        sessions = await repo.list_sessions(meeting_id=mid)
+        if (row.get('status') != 'active' or not sessions or not policy_of(row).enabled
+                or (row.get('data') or {}).get('artifact_deletion')):
+            return {'current': False}
+        held = await redis.get(f'meeting:voice:{mid}:lock')
+        if isinstance(held, bytes): held = held.decode()
+        return {'current': held == f'{sessions[-1]}:{request_id}'}
+
+    @router.get('/bots/voice/{mid}/{session}/turn/{request_id}', response_model=VoiceTurnPermit, include_in_schema=False)
+    async def current_agent_turn(mid: int, session: str, request_id: UUID, revision: int,
+                                 authorization: str | None = Header(default=None)):
+        row = await meeting(mid, session=session, authorization=authorization)
+        policy = policy_of(row)
+        if (not policy.enabled or policy.engine != 'livekit' or policy.revision != revision
+                or (row.get('data') or {}).get('artifact_deletion')):
+            return {'current': False}
+        held = await redis.get(f'meeting:voice:{mid}:lock')
+        if isinstance(held, bytes): held = held.decode()
+        return {'current': held == f'{session}:{request_id}'}
 
     @router.get('/meetings/{meeting_id}/voice-assistant')
     async def get_policy(meeting_id: int, x_user_id: str | None = Header(default=None)):
@@ -395,7 +444,7 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
                     base = os.environ.get('LIVEKIT_AGENT_URL', '').rstrip('/')
                     try:
                         async with client_factory(timeout=4, follow_redirects=False) as client:
-                            response = await client.get(base + '/health') if base else None
+                            response = await client.get(base + '/ready') if base else None
                             ready = bool(response is not None and response.status_code == 200
                                          and response.json().get('engine') == 'livekit-agents')
                     except (httpx.HTTPError, ValueError):
@@ -551,13 +600,13 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
                             if attempt == 3: raise HTTPException(409, 'Agent tool reservation changed') from None
                 payload['lookup'] = lookup
             if body.operation=='context':
-                result=await agent(row,'agent',payload)
+                result=await agent(row,'agent',payload,request_id=body.request_id)
             else:
                 remaining=(saved['retrieval_deadline_ms']-int(time.time()*1000))/1000
                 try:
                     if remaining<=0: raise TimeoutError()
                     async with asyncio.timeout(remaining):
-                        result=await agent(row,'agent',payload)
+                        result=await agent(row,'agent',payload,request_id=body.request_id)
                 except TimeoutError:
                     result={'tool_calls':[]} if body.operation=='plan' else {
                         'tool':body.lookup.name,'source_count':0,'sources':[],'budget_exhausted':True}
@@ -641,7 +690,7 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
                 if 'web_result' in saved: payload['web_result'] = saved['web_result']
                 if not await redis.set(key + ':final', '1', nx=True, ex=240):
                     raise HTTPException(409, 'Agent answer already dispatched')
-            result = await agent(row, 'answer', payload)
+            result = await agent(row, 'answer', payload, request_id=body.request_id)
             source_refs = [VoiceSourceRef(key=s['key'], fingerprint=s['fingerprint']).model_dump()
                            for s in result.get('sources', [])[:32]]
             fresh = await meeting(mid, session=session, authorization=authorization)

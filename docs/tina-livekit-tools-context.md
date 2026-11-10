@@ -1,7 +1,7 @@
 # LiveKit tools and heard context
 
 LiveKit owns up to two bounded SDK function-tool batches and the per-caller ChatContext in its existing
-one-meeting worker. TINA owns source permission, model credentials, retrieval, verification,
+three-meeting worker (one process/replica). TINA owns source permission, model credentials, retrieval, verification,
 reservations and actual microphone receipts. ASR, KWS, VAD and VieNeu-TTS are unchanged.
 
 Internal capability-authenticated `POST /bots/voice/{meeting}/{session}/agent` has context, plan and

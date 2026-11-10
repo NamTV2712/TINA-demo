@@ -4,6 +4,6 @@ ENV UV_PROJECT_ENVIRONMENT=/opt/venv UV_LINK_MODE=copy PYTHONDONTWRITEBYTECODE=1
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv uv sync --frozen --no-install-project --no-default-groups
-COPY adapters.py server.py smoke.py ./
+COPY adapters.py server.py smoke.py production_smoke.py ./
 USER 65532:65532
 CMD ["python", "server.py"]

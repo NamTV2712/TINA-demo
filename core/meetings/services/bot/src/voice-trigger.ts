@@ -7,6 +7,21 @@ export interface VoiceHypothesis {
   speechStartMs?: number;
 }
 export const VOICE_NAMES = ['TINA', 'Tina', 'TINA ơi', 'tin ơi', 'ti na ơi', 'tiên na ơi', 'tinh anh ơi','tin anh ơi'] as const;
+export const VOICE_NOTICES = {
+  wake: ['Dạ, em nghe.', 'Em đây, bạn nói đi.', 'Dạ, bạn cứ nói nhé.', 'Dạ, em đây.'],
+  wait: ['Đợi em chút nhé.', 'Để em kiểm tra nhé.', 'Em đang kiểm tra thông tin nhé.', 'Chờ em một lát nhé.'],
+  summary: ['Em đang tổng hợp, bạn chờ một chút nhé.', 'Em đang tổng hợp thông tin nhé.', 'Em tổng hợp lại một chút nhé.', 'Em gom lại các ý chính nhé.'],
+} as const;
+export const SUMMARY_NOTICE = VOICE_NOTICES.summary[0];
+const fixedNotices = new Set<string>(Object.values(VOICE_NOTICES).flat());
+export function isFixedVoiceNotice(text?: string): boolean { return text !== undefined && fixedNotices.has(text); }
+const echoKey = (text: string) => text.normalize('NFKC').toLocaleLowerCase('vi').replace(/[^\p{L}]/gu, '');
+const noticeEchoes = new Set([...fixedNotices].map(echoKey));
+export function summaryWaitNotice(question: string): string | undefined {
+  // Notice only; the source-authorized server still decides whether this is a whole-meeting recap.
+  if (/(?:cách|phương pháp|làm sao để|how to)\s+(?:tóm tắt|tổng kết|summari[sz]e)|(?:\d+|vài|mấy)\s*(?:phút|giờ)|gần đây|vừa rồi|vừa nói|recent|last\s+\d+/iu.test(question)) return;
+  if (/(?:tóm tắt|tổng kết|tổng hợp|điểm lại).*(?:cuộc họp|meeting)|(?:tóm tắt|tổng kết|tổng hợp).*từ đầu.*(?:đến giờ|đến nay)|\b(?:summari[sz]e|recap|summary of)\s+(?:(?:the|this|whole|entire|our)\s+)*meeting\b/iu.test(question)) return SUMMARY_NOTICE;
+}
 export function invocation(text: string, variants: string[] = []): string | null {
   const value = text.normalize('NFKC').trim();
   for (const name of [...VOICE_NAMES, ...variants].sort((a, b) => b.length - a.length)) {
@@ -123,7 +138,7 @@ export class VoiceTrigger {
         this.reason = 'name_not_matched'; return 'ignore';
       }
       const direct = acoustic || invocation(text, this.variants) === null;
-      if (direct && this.continuation && text.toLocaleLowerCase('vi').replace(/[^\p{L}]/gu, '') === 'dạemnghe') return 'ignore';
+      if (direct && this.continuation && noticeEchoes.has(echoKey(text))) return 'ignore';
       if (direct && !acoustic && (!this.continuation || this.now() >= this.continuation.expires
           || value.channel !== this.continuation.channel
           || (this.continuation.participant && value.participant !== this.continuation.participant))) {

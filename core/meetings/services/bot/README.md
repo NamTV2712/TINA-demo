@@ -1,5 +1,21 @@
 # bot — the meetings ephemeral join+capture worker (Node/TS)
 
+Fixed voice notices rotate independently within each bot/meeting: four name-only acknowledgments,
+four generic question-wait phrases and four recap-wait phrases in `VOICE_NOTICES`. A completed
+question never uses the name-only group. Fast answers skip filler, including a result arriving while
+the notice's policy check is pending. Slow new questions receive at most one notice after 900ms;
+ordinary follow-ups keep their existing no-extra-ack behavior. Every fixed phrase bypasses the busy
+Agents session and pure normalized notice echoes are ignored during caller continuation. The TTS
+`WAKE_TEXTS`/`WAIT_TEXTS`/`SUMMARY_TEXTS` catalog must match these phrases. No LLM chooses filler.
+
+Slow whole-meeting recap requests receive one fixed, prewarmed waiting notice instead of the
+ordinary acknowledgment. Transcript capture continues; the same voice turn waits for the verified
+result and plays it automatically. Stop/departure, caller correction, generation replacement and
+policy revision fence late results. The notice is not a factual answer or a heard-history turn.
+It uses direct shared TTS to avoid the busy Agents session, with a six-second notice deadline. Service wait is bounded to 170 seconds
+and the whole turn to 330 seconds, inside the 360-second server reservation. Only one voice turn
+runs per meeting; this does not enable simultaneous questions or unbounded background playback.
+
 ## Purpose
 
 The disposable meeting-joining browser bot (P7 worker). It boots from a single `invocation.v1`

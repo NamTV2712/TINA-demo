@@ -1032,6 +1032,20 @@
       ],
       "title": "VoiceSources",
       "type": "object"
+    },
+    "VoiceTurnPermit": {
+      "additionalProperties": false,
+      "properties": {
+        "current": {
+          "type": "boolean",
+          "title": "Current"
+        }
+      },
+      "required": [
+        "current"
+      ],
+      "title": "VoiceTurnPermit",
+      "type": "object"
     }
   }
 }

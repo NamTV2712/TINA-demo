@@ -11,6 +11,12 @@ SAMPLE_RATE = 24000
 MAX_AUDIO_SECONDS = 120
 PRESET_VOICE = "Trúc Ly"
 ACK_TEXT = "Dạ, em nghe."
+SUMMARY_NOTICE = "Em đang tổng hợp, bạn chờ một chút nhé."
+# Keep these public phrases aligned with the bot's VOICE_NOTICES catalog.
+WAKE_TEXTS = (ACK_TEXT, "Em đây, bạn nói đi.", "Dạ, bạn cứ nói nhé.", "Dạ, em đây.")
+WAIT_TEXTS = ("Đợi em chút nhé.", "Để em kiểm tra nhé.", "Em đang kiểm tra thông tin nhé.", "Chờ em một lát nhé.")
+SUMMARY_TEXTS = (SUMMARY_NOTICE, "Em đang tổng hợp thông tin nhé.", "Em tổng hợp lại một chút nhé.", "Em gom lại các ý chính nhé.")
+FIXED_TEXTS = WAKE_TEXTS + WAIT_TEXTS + SUMMARY_TEXTS
 
 
 def verify_assets(directory: Path) -> None:
@@ -65,25 +71,32 @@ class Engine:
         self.tts = Vieneu(mode="v3turbo", backend="onnx", device="cpu", threads=2,
                           backbone_repo="pnnbao-ump/VieNeu-TTS-v3-Turbo")
 
+    def cached_public(self, text: str) -> bytes | None:
+        return getattr(self, '_fixed_pcm', {}).get(text) if text in FIXED_TEXTS else None
+
     def synthesize(self, text: str, meeting_id: int | None = None) -> bytes:
         # Preset voice only: never accept an audio reference or user model path.
-        if text == ACK_TEXT and getattr(self, '_ack_pcm', None) is not None:
-            return self._ack_pcm
+        cache = getattr(self, '_fixed_pcm', {})
+        cached = self.cached_public(text)
+        if cached is not None:
+            return cached
         glossary = getattr(self, 'pronunciations', default_pronunciations()).for_meeting(meeting_id)
-        speech_text = text if text == ACK_TEXT else spoken_text(text, glossary)
+        speech_text = text if text in FIXED_TEXTS else spoken_text(text, glossary)
         audio = self.tts.infer(speech_text, voice=PRESET_VOICE, apply_watermark=False)
         pcm = pcm24(audio, self.tts.sample_rate)
-        if text == ACK_TEXT: self._ack_pcm = pcm
+        if text in FIXED_TEXTS:
+            cache[text] = pcm; self._fixed_pcm = cache
         return pcm
 
     def stream(self, text: str, meeting_id: int | None = None):
         import numpy as np
         import soxr
-        if text == ACK_TEXT and getattr(self, '_ack_pcm', None) is not None:
-            yield self._ack_pcm
+        cached = self.cached_public(text)
+        if cached is not None:
+            yield cached
             return
         glossary = self.pronunciations.for_meeting(meeting_id)
-        speech = text if text == ACK_TEXT else spoken_text(text, glossary)
+        speech = text if text in FIXED_TEXTS else spoken_text(text, glossary)
         rate = self.tts.sample_rate
         resampler = soxr.ResampleStream(rate, SAMPLE_RATE, 1, dtype='float32', quality='HQ') if rate != SAMPLE_RATE else None
         chunks = self.tts.infer_stream(speech, voice=PRESET_VOICE, apply_watermark=False)

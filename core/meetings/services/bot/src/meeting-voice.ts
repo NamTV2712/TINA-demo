@@ -4,7 +4,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { Invocation } from './config.js';
 import type { Act } from './contracts.js';
 import type { SpeakController } from './capture-bridge.js';
-import { VoiceTrigger, speechSentences, turnPauseMs, type VoiceHypothesis } from './voice-trigger.js';
+import { VoiceTrigger, speechSentences, turnPauseMs, summaryWaitNotice, VOICE_NOTICES, isFixedVoiceNotice, type VoiceHypothesis } from './voice-trigger.js';
 import {VoiceInterruption} from './voice-interruption.js';
 import type { SpeechReporter } from './speech-status.js';
 import { AudioDiagnostics, type AudioSnapshot } from './audio-diagnostics.js';
@@ -14,6 +14,7 @@ import type { PreparedSpeech } from './tts-playback.js';
 
 const FOLLOW_UP_MS = 5_000;
 const ACK_TIMEOUT_MS = 3_000;
+const WAIT_NOTICE_TIMEOUT_MS = 6_000;
 
 export type VoiceState = 'OFF' | 'LISTENING' | 'CAPTURING' | 'THINKING' | 'SPEAKING' | 'QUIET' | 'ERROR';
 export type VoiceDiagnosticCode = 'starting' | 'listening' | 'waiting_asr' | 'tts_unavailable' | 'sources_unavailable' | 'name_not_matched' | 'name_unconfirmed' | 'wake_confirmed'
@@ -106,7 +107,7 @@ export function voiceApi(url: string, token: string, fetchImpl = globalThis.fetc
       Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'X-TINA-Voice-Runtime':'livekit-v1',
       ...(speakerKey ? { 'X-Voice-Speaker-Key': speakerKey } : {}) },
       body: body ? JSON.stringify(body) : undefined, signal: signal
-        ? AbortSignal.any([signal, AbortSignal.timeout(100_000)]) : AbortSignal.timeout(3000) });
+        ? AbortSignal.any([signal, AbortSignal.timeout(170_000)]) : AbortSignal.timeout(3000) });
     if (!response.ok) throw new Error('Voice service unavailable');
     const text = await response.text();
     if (text.length > 200_000) throw new Error('Voice response exceeds bound');
@@ -145,7 +146,7 @@ export function voiceApi(url: string, token: string, fetchImpl = globalThis.fetc
         ...(diagnostic?{diagnostic}:{}),...(audio?{audio}:{}),...(kws?{kws}:{})});
     },
     // A fixed acknowledgment must not queue behind the Agents session's in-flight LLM task.
-    speechService: text => text !== 'Dạ, em nghe.' && agent && currentId ? {...agent,requestId:currentId} : undefined,
+    speechService: text => !isFixedVoiceNotice(text) && agent && currentId ? {...agent,requestId:currentId} : undefined,
     cancelTurn,
   };
 }
@@ -194,6 +195,12 @@ export class MeetingVoice {
   private activity = new Map<number, { speech: boolean; endMs?: number; stamp: number; receivedAtMs: number }>();
   private timing?: { request_id: string; channel: number; stages: Partial<Record<TimingStage, number>> };
   private turnTimer?: ReturnType<typeof setInterval>;
+  private noticeCursor = {wake: 0, wait: 0, summary: 0};
+
+  private nextNotice(kind: keyof typeof VOICE_NOTICES): string {
+    const choices = VOICE_NOTICES[kind];
+    return choices[this.noticeCursor[kind]++ % choices.length];
+  }
 
   constructor(private api: VoiceApi, private speak: SpeakController,
     private report: SpeechReporter, private factory: WorkerFactory = nativeVoiceWorker,
@@ -611,7 +618,7 @@ export class MeetingVoice {
       const config = await this.api.config(this.abort.signal);
       if (!live()) return;
       if (!config.enabled || !config.ready || config.revision !== this.revision) throw new Error('Voice policy changed');
-      const outcome = await this.speak.speak('Dạ, em nghe.', 'auto', () => { if (live()) this.markTiming('ack_playback_started'); }, ACK_TIMEOUT_MS);
+      const outcome = await this.speak.speak(this.nextNotice('wake'), 'auto', () => { if (live()) this.markTiming('ack_playback_started'); }, ACK_TIMEOUT_MS);
       if (!live()) return;
       if (outcome !== 'completed') throw new Error('Acknowledgment playback failed');
       completed = true;
@@ -661,19 +668,36 @@ export class MeetingVoice {
     let ack = Promise.resolve();
     let prepared: PreparedSpeech | undefined, pending: PreparedSpeech | undefined;
     let outcome = 'failed';
-    // Fast answers speak directly; only a new, slow turn needs a cached acknowledgment.
-    const ackTimer = acknowledged ? undefined : setTimeout(() => {
+    let answerReceived = false;
+    const noticeAbort = new AbortController();
+    const progressNotice = summaryWaitNotice(question);
+    // Fast answers speak directly; a new, slow question gets one cached waiting phrase.
+    const ackTimer = acknowledged && !progressNotice ? undefined : setTimeout(() => {
       if (!live()) return;
-      this.speakingText='Dạ, em nghe.';
-      ack = this.speak.speak('Dạ, em nghe.', 'auto', () => {
-        if (live()) this.markTiming('ack_playback_started');
-      }, ACK_TIMEOUT_MS).then(result => { if (result !== 'completed' && live()) this.log('ack_playback_failed'); },
+      ack = (async () => {
+        let config: VoiceConfig;
+        try {
+          config = await this.api.config(AbortSignal.any([this.abort.signal, noticeAbort.signal, AbortSignal.timeout(2500)]));
+        } catch {
+          if (live() && !answerReceived) this.log('ack_playback_failed');
+          return;
+        }
+        if (!live() || answerReceived || !config.enabled || !config.ready || config.revision !== this.revision) return;
+        const notice = this.nextNotice(progressNotice ? 'summary' : 'wait');
+        this.speakingText=notice;
+        return this.speak.speak(notice, 'auto', () => {
+          if (live()) this.markTiming('ack_playback_started');
+        }, WAIT_NOTICE_TIMEOUT_MS);
+      })().then(result => { if (result && result !== 'completed' && live()) this.log('ack_playback_failed'); },
         () => { if (live()) this.log('ack_playback_failed'); });
     }, 900);
-    const timeout = setTimeout(() => { if (live()) void this.cancel(false, 'answer_failed').then(current => { if (current) this.setState('ERROR'); }); }, 210_000);
+    // Include a two-minute recap and bounded TTS playback inside the 360-second room reservation.
+    const timeout = setTimeout(() => { if (live()) void this.cancel(false, 'answer_failed').then(current => { if (current) this.setState('ERROR'); }); }, 330_000);
     try {
       this.markTiming('answer_requested');
       const answer = await this.api.answer(question, id, this.revision, this.abort.signal, speakerKey);
+      answerReceived = true;
+      noticeAbort.abort();
       clearTimeout(ackTimer);
       if (live()) this.markTiming('answer_received');
       await ack;
@@ -735,6 +759,8 @@ export class MeetingVoice {
       if (answer.clarification || answer.evidence_available !== false) this.diagnose('completed');
     } catch { if (live()) { this.log('turn_failed'); this.diagnose('answer_failed'); } }
     finally {
+      answerReceived = true;
+      noticeAbort.abort();
       clearTimeout(ackTimer);
       prepared?.cancel(); pending?.cancel();
       await ack.catch(() => {});

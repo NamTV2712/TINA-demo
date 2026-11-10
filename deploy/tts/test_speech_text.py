@@ -35,6 +35,15 @@ class SpeechTextTests(unittest.TestCase):
         self.assertEqual(spoken_text(text, glossary),
                          'API `TINA 15:30` https://tina.test/API/03/04 tina@example.com đTINA ti na.')
 
+    def test_default_technical_terms_apply_only_to_spoken_words_and_preserve_source_notation(self):
+        original = 'TINA dùng ASR và LLM; TTS chạy CPU, GPU hoặc MPS.'
+        self.assertEqual(spoken_text(original),
+                         'ti na dùng ây ét a và eo eo em; ti ti ét chạy xi pi iu, gi pi iu hoặc em pi ét.')
+        protected = 'ASR_API `LLM TTS GPU` https://test.example/GPU user@GPU.test SQL123'
+        self.assertEqual(spoken_text(protected), protected)
+        self.assertEqual(spoken_text('llm, Asr và tts.'), 'eo eo em, ây ét a và ti ti ét.')
+        self.assertEqual(original, 'TINA dùng ASR và LLM; TTS chạy CPU, GPU hoặc MPS.')
+
     def test_untrusted_or_unbounded_pronunciation_settings_fail_before_synthesis(self):
         invalid = [ {'default': {'v2':'version two'}, 'projects':{},'meeting_projects':{}},
                     {'default': {'API':'100 dollars'}, 'projects':{},'meeting_projects':{}},

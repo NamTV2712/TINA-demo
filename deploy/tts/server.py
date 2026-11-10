@@ -13,7 +13,7 @@ from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from engine import Engine, MODEL, SAMPLE_RATE, ACK_TEXT, PRESET_VOICE
+from engine import Engine, MODEL, SAMPLE_RATE, FIXED_TEXTS, PRESET_VOICE
 
 MAX_BODY = 20000
 MAX_TEXT = 4000
@@ -23,7 +23,7 @@ log = logging.getLogger("tina.tts")
 class SpeechServer(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, address, engine, token, *, max_connections=8, request_timeout=145, max_waiters=3, queue_timeout=15):
+    def __init__(self, address, engine, token, *, max_connections=16, request_timeout=145, max_waiters=6, queue_timeout=30):
         if len(token) < 32 or not token.isascii() or any(ord(c) < 33 or ord(c) > 126 for c in token):
             raise ValueError("TTS_API_TOKEN must contain at least 32 printable ASCII characters")
         self.engine = engine
@@ -176,6 +176,11 @@ class Handler(BaseHTTPRequestHandler):
                 or body.get("voice", "auto") != "auto"
                 or body.get("response_format", "pcm") != "pcm"):
             return self.error(422, "Use model=tts-1, voice=auto and response_format=pcm")
+        cached = self.server.engine.cached_public(text.strip())
+        if cached is not None:
+            return self.send_bytes(200, cached, 'audio/pcm', {
+                'X-Audio-Sample-Rate': str(SAMPLE_RATE), 'X-Audio-Channels': '1',
+                'Server-Timing': 'synthesis;dur=0'})
         if not self.server.acquire_synthesis(self.connection):
             return self.error(503, "Speech queue is full, cancelled or timed out")
         started = time.monotonic()
@@ -234,7 +239,7 @@ def main():
         raise SystemExit("Set a private TTS_API_TOKEN of at least 32 characters")
     directory = Path(os.environ.get("HF_HOME", "/models"))
     engine = Engine(directory)
-    engine.synthesize(ACK_TEXT)  # Prewarm one fixed acknowledgment before readiness; no meeting text is cached.
+    for text in FIXED_TEXTS: engine.synthesize(text)  # No private meeting text is cached.
     host = os.environ.get("TINA_TTS_HOST", "127.0.0.1")
     port = int(os.environ.get("TINA_TTS_PORT", "8000"))
     server = SpeechServer((host, port), engine, token)

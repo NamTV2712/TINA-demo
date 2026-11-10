@@ -94,6 +94,24 @@ Enabled account preferences decide which workers remain running; no account can 
 
 ## Usage
 
+New configurations prepare meeting voice by default (`TINA_MEETING_VOICE=1`); set it to `0` for
+a deliberate transcript-only deployment and clear `LIVEKIT_AGENT_URL` when disabling Agents.
+When the main environment has no TTS token, Stack reuses the dedicated encrypted TTS loader,
+including `~/.config/tina/tts-local`, without requiring a wrapper command or forwarding its key.
+Provision the matching TTS key/env pair privately before first startup. `make plan` reports
+`meeting_voice`, `tts_credentials_ready` and `kws_models_source` without writing configuration.
+
+`make all` verifies the two retained KWS ONNX files in the model volume. If absent, it imports
+`hey_tina.onnx` and `tina_oi.onnx` using the existing checksum-validated atomic installer from
+`TINA_KWS_MODELS_DIR` (relative paths resolve from the repo root; the default is
+`output/wakeword-training/tina-v1/models`). Missing or invalid artifacts stop before application
+restart. A fresh clone still needs the trained artifact pack; setup does not train or download an
+unapproved wake model. Models remain read-only in inference bots.
+
+Application readiness authenticates to TTS and checks Agents `/ready`, including cross-service
+TTS credentials/audio format. `make all` does not print the provisioned API key into logs; the
+explicit `make -C deploy/compose provision-token` command remains available when needed.
+
 The same operations are available as `tina` CLI/TUI after `make cli-install` from the repo root.
 See [CLI commands, output and safety semantics](bin/README.md#local-tina-cli--tui).
 New local users can run `tina setup` for prerequisite/conflict checks, a private fresh configuration,
@@ -233,3 +251,7 @@ exposed to the browser. Private keys remain on the host and ASR tokens never rea
 Identity stores versioned account preferences; the controller serializes lifecycle changes and
 reconciles them every two seconds. `make down` stops the controller first. WSL2 restores its
 detached controller with `make all` after a reboot; Mac uses an owned per-deployment LaunchAgent.
+
+`make doctor` checks the ASR backends demanded by enabled accounts, including native MPS.
+A managed backend with zero current account demand may remain stopped without failing the
+deployment check. Per-session capture/ASR health remains a separate meeting diagnostic.
