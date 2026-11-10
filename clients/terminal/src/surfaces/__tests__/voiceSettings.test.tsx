@@ -59,12 +59,12 @@ it('preview is local WAV playback and its URL is revoked when settings closes',a
     if(path==='/api/user/voice')return Response.json({prepare_new_bots:null});
     if(path==='/api/user/transcription')return Response.json({});
     if(path==='/api/bots/voice/services')return Response.json(services);
-    if(path==='/api/bots/voice/preview')return new Response(new Blob(['synthetic'],{type:'audio/wav'}));
+    if(path==='/api/bots/voice/preview')return new Response(new Uint8Array([1,2,3]),{headers:{'Content-Type':'audio/wav'}});
     return new Response('',{status:404});
   });vi.stubGlobal('fetch',fetch);
   const view=render(<SettingsDialog onClose={()=>{}}/>);fireEvent.click(screen.getByRole('button',{name:'Voice assistant'}));
   await screen.findByText('Trúc Ly');fireEvent.click(screen.getByRole('button',{name:'Preview voice'}));
-  expect(await screen.findByLabelText('TINA voice preview', {}, {timeout:5000})).toBeTruthy();
+  expect(await screen.findByLabelText('TINA voice preview')).toBeTruthy();
   expect(fetch.mock.calls.find(([url])=>url==='/api/bots/voice/preview')?.[1]?.method).toBe('POST');
   view.unmount();expect(revoke).toHaveBeenCalledWith('blob:synthetic');
 });
