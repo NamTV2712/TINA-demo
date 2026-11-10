@@ -15,6 +15,8 @@ import { ContextMenu, copyText } from "../ui-kit/ContextMenu";
 import { MdxDoc } from "../ui-kit/MdxDoc";
 import { MeetingWikiSourceStatus } from './MeetingKnowledge';
 import { WorkspaceContentSearch } from './WorkspaceContentSearch';
+import { WorkspaceGraphTab } from "./workspaceGraph";
+import panelStyles from "./workspacePanel.module.css";
 // Data-access lives in its own SoC module (scoped to the authed user — no client subject, P20),
 // proven in isolation by workspaceApi.test.ts.
 import { readWorkspaceFile, listWorkspaceTree, readWorkspaceGit, readWorkspaceGitDiff, readAttachedWorkspaces, renameWorkspace, publishWorkspace, readActiveSet, activateWorkspace, deactivateWorkspace, createWorkspace, mintInvite, listSharedMemberships, setSharedActive, shareEnableWorkspace, unshareWorkspace, archiveWorkspace, deleteWorkspace, type GitState, type GitCommit, type AttachedWorkspaces, type PublishResult, type ActiveMount, type Membership } from "./workspaceApi";
@@ -100,7 +102,7 @@ function CommitRow({ c, wsLabel, onOpen }: { c: GitCommit; wsLabel?: string; onO
         </span>
         <span style={{ fontFamily: "var(--mono)", color: "var(--green)", flex: "none" }}>{c.sha}</span>
         <span style={{ flex: "none" }}>{c.when}</span>
-        {wsLabel && <span title={`in ${wsLabel}`} style={{ marginLeft: "auto", color: "var(--accent)", fontSize: 10, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "40%", textTransform: "uppercase", letterSpacing: ".03em" }}>{wsLabel}</span>}
+        {wsLabel && <span title={`in ${wsLabel}`} style={{ marginLeft: "auto", color: "var(--accent)", fontSize: 11, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "40%" }}>{wsLabel}</span>}
       </div>
       {/* the files this commit touched — clickable links that OPEN the file (its exact diff is one click
           away in the doc header's "Changes"). */}
@@ -143,35 +145,37 @@ function buildTree(paths: string[]): TreeNode[] {
 
 // ── recursive tree row (folders collapse, files open a doc tab) ──────────────────
 function TreeRow({ node, depth, expanded, toggle, openFile, pinFile, openMenu }: {
-  node: TreeNode; depth: number; expanded: Set<string>; toggle: (p: string) => void; openFile: (p: string) => void; pinFile: (p: string) => void; openMenu: (e: MouseEvent<HTMLDivElement>, p: string) => void;
+  node: TreeNode; depth: number; expanded: Set<string>; toggle: (p: string) => void; openFile: (p: string) => void; pinFile: (p: string) => void; openMenu: (e: MouseEvent<HTMLElement>, p: string) => void;
 }) {
-  const pad = 9 + depth * 13;
-  const hover = { onMouseEnter: (e: MouseEvent<HTMLDivElement>) => (e.currentTarget.style.background = "var(--panel2)"), onMouseLeave: (e: MouseEvent<HTMLDivElement>) => (e.currentTarget.style.background = "transparent") };
+  const pad = 8 + depth * 14;
   // single-click → preview (immediate — openPreview/openTab reconcile by id, so a
   // double-click harmlessly previews then pins); double-click → pinned tab.
   if (!node.isDir) {
     return (
-      <div
+      <button
+        type="button"
         data-tree-path={node.path}
+        className={panelStyles.treeFile}
+        aria-label={`Open ${node.path}`}
         onClick={() => openFile(node.path)}
         onDoubleClick={() => pinFile(node.path)}
         onContextMenu={(e) => openMenu(e, node.path)}
-        {...hover}
-        style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 9px", paddingLeft: pad + 14, borderRadius: 6, cursor: "pointer", fontSize: 12.5, color: "var(--t2)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-        <Icon name="file" size={13} style={{ color: "var(--t3)" }} />
-        <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{node.name}</span>
-      </div>
+        style={{ paddingLeft: pad + 14 }}>
+        <Icon name="file" size={14} aria-hidden="true" />
+        <span className={panelStyles.treeLabel}>{node.name}</span>
+      </button>
     );
   }
   const open = expanded.has(node.path);
   return (
     <>
-      <div data-tree-path={node.path} onClick={() => toggle(node.path)} {...hover}
-        style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 9px", paddingLeft: pad, borderRadius: 6, cursor: "pointer", fontSize: 12.5, color: "var(--t1)" }}>
-        <Icon name="chevR" size={13} style={{ color: "var(--t3)", transform: open ? "rotate(90deg)" : "none", transition: "transform .12s" }} />
-        <Icon name="folder" size={13} style={{ color: "var(--accent)" }} />
-        <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{node.name}</span>
-      </div>
+      <button type="button" data-tree-path={node.path} className={panelStyles.treeFolder}
+        aria-expanded={open} aria-label={`${open ? "Collapse" : "Expand"} ${node.name}`}
+        onClick={() => toggle(node.path)} style={{ paddingLeft: pad }}>
+        <span className={panelStyles.chevron} aria-hidden="true"><Icon name="chevR" size={13} /></span>
+        <span className={panelStyles.folderIcon} aria-hidden="true"><Icon name="folder" size={14} /></span>
+        <span className={panelStyles.treeLabel}>{node.name}</span>
+      </button>
       {open && node.children.map((c) => <TreeRow key={c.path} node={c} depth={depth + 1} expanded={expanded} toggle={toggle} openFile={openFile} pinFile={pinFile} openMenu={openMenu} />)}
     </>
   );
@@ -216,34 +220,34 @@ function MountSection({ mount }: { mount: ActiveMount }) {
   const openDoc = (p: string) => layout.openPreview(docTab(p, mount.slug));
   const pinDoc = (p: string) => layout.openTab(docTab(p, mount.slug));
   return (
-    <div style={{ marginTop: 2 }}>
-      <div onClick={() => setOpen((v) => !v)} title="Shared workspace — read-only"
-        style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 8px", cursor: "pointer",
-          fontSize: 11, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".04em" }}>
-        <Icon name="chevR" size={12} style={{ transform: open ? "rotate(90deg)" : "none", transition: "transform .12s" }} />
-        <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{mount.name || mount.slug}</span>
+    <section className={panelStyles.mountSection}>
+      <button type="button" className={panelStyles.sectionToggle} aria-expanded={open}
+        title={mount.role === "shared" ? "Shared workspace. Access depends on your role." : undefined}
+        onClick={() => setOpen((v) => !v)}>
+        <span className={panelStyles.chevron} aria-hidden="true"><Icon name="chevR" size={13} /></span>
+        <span className={panelStyles.sectionIcon} aria-hidden="true"><Icon name="folder" size={14} /></span>
+        <span className={panelStyles.treeLabel}>{mount.name || mount.slug}</span>
         {mount.role === "shared" && (
-          <span title={mount.write ? "Shared · read-write" : "Shared · read-only"}
-            style={{ marginLeft: "auto", display: "flex", alignItems: "center", color: mount.write ? "var(--accent)" : "var(--t3)" }}>
+          <span className={panelStyles.mountRole} title={mount.write ? "Shared, read-write" : "Shared, read-only"}>
             <Icon name={mount.write ? "user" : "eye"} size={12} />
           </span>
         )}
-      </div>
+      </button>
       {open && (<>
-        {error && <div role="alert" style={{ margin: "0 8px 6px", fontSize: 11.5, color: "var(--danger)" }}>⚠ {error}</div>}
+        {error && <p role="alert" className={panelStyles.workspaceError}>{error}</p>}
         {nodes.map((n) => <TreeRow key={n.path} node={n} depth={0} expanded={expanded} toggle={toggleDir}
           openFile={openDoc} pinFile={pinDoc} openMenu={() => {}} />)}
-        {!error && tree.length === 0 && <div style={{ padding: "3px 12px", color: "var(--t3)", fontSize: 12 }}>Empty.</div>}
+        {!error && tree.length === 0 && <p className={panelStyles.emptyState}>No files in this workspace.</p>}
         {/* No per-workspace activity strip — all members' pushes surface in the ONE aggregated RECENT
             ACTIVITY feed (GitSection) + the "new updates" badge on the Knowledge nav. */}
       </>)}
-    </div>
+    </section>
   );
 }
 
 // ── Files LIST (left) ───────────────────────────────────────────────────────────
 const SS_EXPANDED = "ws.tree.expanded", SS_HIDDEN = "ws.tree.hidden", SS_SYSTEM = "ws.system.show", SS_FILES_OPEN = "ws.files.open";
-export function FilesList() {  // exported for the surface test
+export function FilesList({ showSourceControl = true }: { showSourceControl?: boolean } = {}) {
   const layout = useService(LayoutServiceId);
   const [tree, setTree] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);  // fail-loud (P18): a tree-load failure is shown, not hidden as "empty"
@@ -359,7 +363,7 @@ export function FilesList() {  // exported for the surface test
     writeSS(SS_EXPANDED, JSON.stringify([...next])); return next;
   });
   const toggleKgOnly = () => setKgOnly((v) => { const n = !v; writeSS(SS_HIDDEN, n ? "1" : "0"); return n; });
-  const openMenu = (e: MouseEvent<HTMLDivElement>, path: string) => {
+  const openMenu = (e: MouseEvent<HTMLElement>, path: string) => {
     e.preventDefault();
     e.stopPropagation();
     setMenu({ x: e.clientX, y: e.clientY, path });
@@ -389,62 +393,92 @@ export function FilesList() {  // exported for the surface test
     : [];
   const homeLabel = homeMount ? (homeMount.name || (homeMount.slug === "seed" ? "Personal" : homeMount.slug)) : null;
   return (
-    <div style={{ padding: "6px 8px" }}>
-      {/* WORKSPACES FIRST — the top-level object of Knowledge; the file tree recedes below. */}
+    <div className={panelStyles.rail}>
       <WorkspaceSwitcher onSwapped={() => setReloadKey((k) => k + 1)} />
-      <div style={{ marginTop: 14, borderTop: "1px solid var(--line)", paddingTop: 8 }} />
-      <div style={{ fontSize: 11, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".04em", padding: "2px 8px 6px", display: "flex", alignItems: "center", gap: 6 }}>
-        <span onClick={toggleFiles} title={filesOpen ? "Collapse the file tree" : "Browse the workspace files"}
-          style={{ display: "flex", alignItems: "center", gap: 5, cursor: "pointer", minWidth: 0 }}>
-          <Icon name="chevR" size={12} style={{ transform: filesOpen ? "rotate(90deg)" : "none", transition: "transform .12s", flex: "none" }} />
-          <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>files{homeLabel ? ` · ${homeLabel}` : ""}</span>
-        </span>
-        <span onClick={() => setReloadKey((k) => k + 1)} title="Refresh the file list"
-          style={{ marginLeft: "auto", display: "flex", cursor: "pointer", color: "var(--t3)" }}>
-          <Icon name="refresh" size={13} />
-        </span>
-        <span onClick={toggleKgOnly} title={kgOnly ? "Show all workspace files" : "Show only the knowledge graph"}
-          style={{ display: "flex", cursor: "pointer", color: kgOnly ? "var(--accent)" : "var(--t3)" }}>
-          <Icon name={kgOnly ? "eye" : "eyeOff"} size={13} />
-        </span>
-        <span onClick={() => setShowSystem((v) => { const n = !v; writeSS(SS_SYSTEM, n ? "1" : "0"); return n; })}
-          title={showSystem ? "Hide the private system workspace" : "Show the private system workspace (_system)"}
-          style={{ display: "flex", cursor: "pointer", color: showSystem ? "var(--accent)" : "var(--t3)" }}>
-          <Icon name="key" size={13} />
-        </span>
-      </div>
-      <div style={{ padding: "0 4px 8px", position: "relative" }}>
-        <Icon name="search" size={12} style={{ position: "absolute", left: 13, top: 8, color: "var(--t3)", pointerEvents: "none" }} />
-        <input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Escape") { e.stopPropagation(); setQuery(""); e.currentTarget.blur(); }
-            if (e.key === "Enter" && matches[0]) layout.openPreview(docTab(matches[0].p, matches[0].slug));
-          }}
-          placeholder="Find file…"
-          spellCheck={false}
-          style={{ width: "100%", boxSizing: "border-box", fontSize: 12.5, padding: "5px 8px 5px 26px", background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 7, color: "var(--t1)", outline: "none" }}
-        />
-      </div>
-      <WorkspaceContentSearch mounts={[...(homeMount ? [homeMount] : []), ...extraMounts]} onOpen={(path, slug) => layout.openPreview(docTab(path, slug))} />
-      {error && <div role="alert" style={{ margin: "0 8px 8px", fontSize: 12, color: "var(--danger)", background: "var(--panel)", border: "1px solid var(--danger)", borderRadius: 8, padding: "8px 10px" }}>⚠ Couldn’t load the workspace — {error}</div>}
+      <section className={panelStyles.knowledge} aria-labelledby="workspace-knowledge-title">
+        <header className={panelStyles.knowledgeHeader}>
+          <div className={panelStyles.knowledgeHeading}>
+            <h2 id="workspace-knowledge-title" className={panelStyles.knowledgeTitle}>Knowledge</h2>
+            <p className={panelStyles.workspaceLabel}>{homeLabel ? `Workspace ${homeLabel}` : "Select a workspace to begin"}</p>
+          </div>
+          <button
+            type="button"
+            className={panelStyles.graphAction}
+            disabled={!homeMount}
+            title={!homeMount ? "Activate a workspace to view its graph" : undefined}
+            onClick={() => homeMount && layout.openTab({
+              id: `kgGraph:${homeMount.slug}`,
+              title: "Knowledge graph",
+              kind: "kgGraph",
+              params: { slug: homeMount.slug, name: homeLabel },
+            })}
+          >
+            <Icon name="link" size={15} />
+            <span>Graph</span>
+          </button>
+        </header>
+        {homeMount === null && <p className={panelStyles.graphHint}>Activate a workspace to open its graph.</p>}
+        <div className={panelStyles.fileControls}>
+          <button type="button" className={panelStyles.fileToggle} aria-expanded={filesOpen}
+            title={filesOpen ? "Collapse files" : "Browse workspace files"}
+            onClick={toggleFiles}>
+            <span className={panelStyles.chevron} aria-hidden="true"><Icon name="chevR" size={13} /></span>
+            <span className={panelStyles.fileName}>Files</span>
+          </button>
+          <div className={panelStyles.fileTools} role="group" aria-label="File display options">
+            <button type="button" className={panelStyles.actionButton} aria-label="Refresh files" title="Refresh files"
+              onClick={() => setReloadKey((k) => k + 1)}>
+              <Icon name="refresh" size={15} aria-hidden="true" />
+            </button>
+            <button type="button" className={panelStyles.actionButton} aria-label={kgOnly ? "Show all workspace files" : "Show only knowledge files"}
+              aria-pressed={kgOnly} title={kgOnly ? "Show all workspace files" : "Show only knowledge files"} onClick={toggleKgOnly}>
+              <Icon name={kgOnly ? "eye" : "eyeOff"} size={15} aria-hidden="true" />
+            </button>
+            <button type="button" className={panelStyles.actionButton} aria-label={showSystem ? "Hide private system workspace" : "Show private system workspace"}
+              aria-pressed={showSystem} title={showSystem ? "Hide private system workspace" : "Show private system workspace"}
+              onClick={() => setShowSystem((v) => { const n = !v; writeSS(SS_SYSTEM, n ? "1" : "0"); return n; })}>
+              <Icon name="key" size={15} aria-hidden="true" />
+            </button>
+          </div>
+        </div>
+        <label className={panelStyles.fileSearch}>
+          <Icon name="search" size={14} aria-hidden="true" />
+          <input
+            aria-label="Find a file"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") { e.stopPropagation(); setQuery(""); e.currentTarget.blur(); }
+              if (e.key === "Enter" && matches[0]) layout.openPreview(docTab(matches[0].p, matches[0].slug));
+            }}
+            placeholder="Find file…"
+            spellCheck={false}
+          />
+        </label>
+        <WorkspaceContentSearch mounts={[...(homeMount ? [homeMount] : []), ...extraMounts]} onOpen={(path, slug) => layout.openPreview(docTab(path, slug))} />
+        {error && <div role="alert" className={panelStyles.railError}>Couldn’t load the workspace. {error}</div>}
       {q ? (<>
         {matches.map((h) => (
-          <div key={(h.slug || "") + ":" + h.p} onClick={() => layout.openPreview(docTab(h.p, h.slug))} onDoubleClick={() => layout.openTab(docTab(h.p, h.slug))} onContextMenu={(e) => openMenu(e, h.p)}
-            onMouseEnter={(e) => (e.currentTarget.style.background = "var(--panel2)")} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-            style={{ padding: "4px 9px", borderRadius: 6, cursor: "pointer", fontSize: 12.5, display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
-            <Icon name="file" size={13} style={{ color: "var(--t3)", flex: "none" }} />
-            <span style={{ color: "var(--t1)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", flex: "none", maxWidth: h.ws ? "45%" : "60%" }}>{base(h.p)}</span>
-            <span style={{ color: "var(--t3)", fontSize: 11, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", direction: "rtl", flex: 1, minWidth: 0 }}>{h.p.slice(0, -base(h.p).length).replace(/\/$/, "")}</span>
-            {h.ws && <span title={`in shared workspace ${h.ws}`} style={{ flex: "none", color: "var(--accent)", fontSize: 10, whiteSpace: "nowrap", textTransform: "uppercase", letterSpacing: ".03em" }}>{h.ws}</span>}
-          </div>
+          <button key={(h.slug || "") + ":" + h.p} type="button" className={panelStyles.searchResult}
+            onClick={() => layout.openPreview(docTab(h.p, h.slug))} onDoubleClick={() => layout.openTab(docTab(h.p, h.slug))}
+            onContextMenu={(e) => openMenu(e, h.p)}>
+            <span className={panelStyles.searchFileHeading}>
+              <Icon name="file" size={14} aria-hidden="true" />
+              <span className={panelStyles.searchFileName}>{base(h.p)}</span>
+            </span>
+            <span className={panelStyles.searchFileMeta}>
+              <span className={panelStyles.searchPath}>{h.p.slice(0, -base(h.p).length).replace(/\/$/, "")}</span>
+              {h.ws && <span className={panelStyles.searchWorkspace}>{h.ws}</span>}
+            </span>
+          </button>
         ))}
-        {matches.length === 0 && <div style={{ padding: 8, color: "var(--t3)", fontSize: 12 }}>No files match “{query.trim()}”.</div>}
+        {matches.length === 0 && <p className={panelStyles.emptyState}>No files match “{query.trim()}”.</p>}
       </>) : filesOpen ? (<>
-        {nodes.map((n) => <TreeRow key={n.path} node={n} depth={0} expanded={expanded} toggle={toggle} openFile={(p) => layout.openPreview(docTab(p, homeMount?.slug))} pinFile={(p) => layout.openTab(docTab(p, homeMount?.slug))} openMenu={openMenu} />)}
-        {!error && homeMount === null && <div style={{ padding: 8, color: "var(--t3)", fontSize: 12 }}>No active workspace — turn one on in Workspaces above.</div>}
-        {!error && hasHome && tree.length === 0 && <div style={{ padding: 8, color: "var(--t3)", fontSize: 12 }}>Empty — ask the agent in Chat to record something.</div>}
+        <div id="workspace-file-tree" className={panelStyles.fileTree}>
+          {nodes.map((n) => <TreeRow key={n.path} node={n} depth={0} expanded={expanded} toggle={toggle} openFile={(p) => layout.openPreview(docTab(p, homeMount?.slug))} pinFile={(p) => layout.openTab(docTab(p, homeMount?.slug))} openMenu={openMenu} />)}
+          {!error && homeMount === null && <p className={panelStyles.emptyState}>No active workspace. Turn one on above.</p>}
+          {!error && hasHome && tree.length === 0 && <p className={panelStyles.emptyState}>No files yet. Ask the agent in Chat to add one.</p>}
+        </div>
       </>) : null}
       {menu && (
         <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)} items={[
@@ -456,8 +490,9 @@ export function FilesList() {  // exported for the surface test
           mount set. Part of the files area, so it follows the FILES collapse. */}
       {!q && filesOpen && extraMounts.map((mount) => <MountSection key={mount.slug} mount={mount} />)}
       {/* The private SYSTEM workspace (_system, RW) — hidden by default, surfaced via the key toggle. */}
-      {!q && filesOpen && showSystem && <MountSection key="_system" mount={{ slug: "_system", repo: null, ref: null, role: "system", path: "", write: true, primary: false, name: "System · private" }} />}
-      <GitSection />
+      {!q && filesOpen && showSystem && <MountSection key="_system" mount={{ slug: "_system", repo: null, ref: null, role: "system", path: "", write: true, primary: false, name: "System (private)" }} />}
+      </section>
+      {showSourceControl && <GitSection />}
     </div>
   );
 }
@@ -471,10 +506,12 @@ export function WorkspaceSwitcher({ onSwapped }: { onSwapped: () => void }) {  /
   const openManage = (slug: string, opts?: { shared?: boolean; name?: string }) => layout.openTab(manageTabDescriptor(slug, opts));
   const [open, setOpen] = useState<boolean>(() => readSS(SS_WS_OPEN) !== "0");  // default OPEN — workspaces lead the Knowledge rail
   const [view, setView] = useState<AttachedWorkspaces>({ active: null, slots: {} });
+  const [viewLoaded, setViewLoaded] = useState(false);
   // The ADDITIVE active set (WP-A2.1): the slugs currently MOUNTED into the agent turn. Distinct from
   // `view.active` (the single private-baseline primary) — a workspace can be MOUNTED (in the set) or just
   // AVAILABLE (parked). Drives the per-row toggle; the baseline is in the set by default but can be switched off.
   const [activeSet, setActiveSet] = useState<ActiveMount[]>([]);
+  const [mountStatus, setMountStatus] = useState<"loading" | "ready" | "unavailable">("loading");
   const [sharedMemberships, setSharedMemberships] = useState<Membership[]>([]);  // ALL shared (incl switched-off)
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -489,8 +526,10 @@ export function WorkspaceSwitcher({ onSwapped }: { onSwapped: () => void }) {  /
   const [rowMenu, setRowMenu] = useState<{ slug: string; display: string; x: number; y: number } | null>(null);  // per-row … menu (archive/delete)
   const [showArchived, setShowArchived] = useState(false);  // the collapsed 'Archived' group
   const load = () => {
-    void readAttachedWorkspaces().then((v) => { setView(v); setErr(null); }).catch((e: unknown) => setErr(presentError(e).headline));
-    void readActiveSet().then((s) => setActiveSet(s.active)).catch(() => { /* active-set is additive UI; a failure just leaves the toggles at the baseline */ });
+    setViewLoaded(false);
+    setMountStatus("loading");
+    void readAttachedWorkspaces().then((v) => { setView(v); setViewLoaded(true); setErr(null); }).catch((e: unknown) => { setViewLoaded(false); setErr(presentError(e).headline); });
+    void readActiveSet().then((s) => { setActiveSet(s.active); setMountStatus("ready"); }).catch(() => setMountStatus("unavailable"));
     void listSharedMemberships().then(setSharedMemberships).catch(() => { /* shared list is additive; ignore */ });
   };
   useEffect(() => { if (open) load(); }, [open]);
@@ -622,39 +661,47 @@ export function WorkspaceSwitcher({ onSwapped }: { onSwapped: () => void }) {  /
     .toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "tina-workspace";
 
   return (
-    <div style={{ paddingTop: 2 }}>
-      <div onClick={toggle} style={{ fontSize: 11, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".04em", padding: "2px 8px 6px", display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
-        <Icon name="chevR" size={12} style={{ transform: open ? "rotate(90deg)" : "none", transition: "transform .12s" }} />
-        <Icon name="folder" size={12} />workspaces
-      </div>
+    <section className={panelStyles.workspaces}>
+      <button type="button" className={panelStyles.sectionToggle} aria-expanded={open} onClick={toggle}>
+        <span className={panelStyles.chevron} aria-hidden="true"><Icon name="chevR" size={13} /></span>
+        <span className={panelStyles.sectionIcon} aria-hidden="true"><Icon name="folder" size={15} /></span>
+        <span>Workspaces</span>
+      </button>
       {open && (<>
-        {err && <div role="alert" style={{ padding: "2px 9px", fontSize: 12, color: "var(--danger)" }}>⚠ {err}</div>}
-        {slots.map(([slug, meta]) => {
+        {(err || mountStatus === "unavailable") && <div role="alert" className={panelStyles.workspaceProblem}>
+          <p>{err ?? "Couldn’t verify which workspaces are mounted. Sign in again, then retry."}</p>
+          <button type="button" className={panelStyles.retryButton} onClick={load}>Retry</button>
+        </div>}
+        {!viewLoaded && !err && <p role="status" className={panelStyles.emptyState}>Loading workspaces…</p>}
+        {viewLoaded && mountStatus === "loading" && <p role="status" className={panelStyles.emptyState}>Checking which workspaces are mounted…</p>}
+        <div className={panelStyles.workspaceRows}>
+        {viewLoaded && slots.map(([slug, meta]) => {
           // The per-row toggle is a CHECKBOX reflecting ACTIVE-SET membership (WP-A2.1): CHECKED = MOUNTED
           // into the agent turn, UNCHECKED = AVAILABLE (parked, check to mount). Multiple rows can be checked
           // at once — the mount set is a flat, equal-rank list, so a checkbox (multi-select) is the right
           // affordance. EVERY workspace (seed included) follows active-set membership uniformly.
           const isSeed = slug === seedSlug;   // the seed-slot occupant — share/archive/delete are still refused for it
-          const mounted = mountedSlugs.has(slug);
+          const mounted = mountStatus === "ready" && mountedSlugs.has(slug);
           const isRenaming = renaming === slug;
           const display = meta.name || label(slug, meta.repo);
-          const toggleTitle = mounted ? "Mounted into the agent — uncheck to unmount (park)" : "Available — check to mount into the agent";
+          const mountLabel = mountStatus === "ready" ? mounted ? "mounted into the agent" : "available and parked" : mountStatus === "loading" ? "checking mount status" : "mount status unavailable";
+          const toggleTitle = mountStatus !== "ready" ? "Mount status is unavailable. Retry loading workspaces." : mounted ? "Mounted into the agent. Uncheck to unmount and park." : "Available and parked. Check to mount into the agent.";
           return (
-            <div key={slug}
-              style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 9px", borderRadius: 6, fontSize: 12, opacity: busy ? 0.6 : 1 }}
-              onMouseEnter={(e) => { if (!isRenaming) e.currentTarget.style.background = "var(--panel2)"; }} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
-              <Checkbox checked={mounted} disabled={busy}
+            <div key={slug} className={panelStyles.workspaceRow} data-mounted={mounted} data-busy={busy}
+              onMouseEnter={(e) => { if (!isRenaming) e.currentTarget.style.background = "var(--panel2)"; }}
+              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
+              <Checkbox checked={mounted} disabled={busy || mountStatus !== "ready"}
                 onChange={() => void toggleActive(slug, mounted)}
-                title={toggleTitle} label={`${display} — ${mounted ? "mounted into the agent" : "available (parked)"}`} />
+                title={toggleTitle} label={`${display}, ${mountLabel}`} />
               {isRenaming ? (
                 <input autoFocus defaultValue={meta.name ?? ""} placeholder="display name" disabled={busy}
                   onKeyDown={(e) => { if (e.key === "Enter") { cancelled.current = false; e.currentTarget.blur(); } else if (e.key === "Escape") { cancelled.current = true; e.currentTarget.blur(); } }}
                   onBlur={(e) => { if (cancelled.current) { cancelled.current = false; setRenaming(null); } else { void doRename(slug, e.currentTarget.value); } }}
-                  style={{ flex: 1, fontSize: 12, padding: "3px 6px", background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 5, color: "var(--t1)" }} />
+                  className={panelStyles.renameInput} />
               ) : (
-                <span onClick={() => !busy && openManage(slug, { name: display })}
-                  title="Open the manage panel (rename · on/off · GitHub · purpose · participants)"
-                  style={{ flex: 1, color: mounted ? "var(--t1)" : "var(--t2)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", cursor: busy ? "default" : "pointer" }}>{display}</span>
+                <button type="button" disabled={busy} className={panelStyles.workspaceName} data-mounted={mounted}
+                  onClick={() => !busy && openManage(slug, { name: display })}
+                  title="Open workspace settings: rename, mount status, GitHub, purpose, and participants">{display}</button>
               )}
               {/* Row is intentionally minimal: the CHECKBOX mounts/parks, the NAME opens the manage
                   panel. Every management action (rename · publish/push/pull · share · archive · delete)
@@ -665,29 +712,37 @@ export function WorkspaceSwitcher({ onSwapped }: { onSwapped: () => void }) {  /
         {/* SHARED workspaces (member-of) — listed here too, not only in KNOWLEDGE. A CHECKBOX switches each
             ON (mounted into the agent) or OFF (hidden — membership kept). The role gates write: contributor/
             owner are read-write, viewer read-only. Owner/contributor gets a Share action to mint a link. */}
-        {sharedMemberships.map((mem) => {
+        {viewLoaded && sharedMemberships.map((mem) => {
           const wsId = mem.workspace_id;
-          const mounted = activeSet.some((m) => m.role === "shared" && m.slug === wsId);
+          const mounted = mountStatus === "ready" && activeSet.some((m) => m.role === "shared" && m.slug === wsId);
+          const mountLabel = mountStatus === "ready" ? mounted ? "mounted" : "switched off" : mountStatus === "loading" ? "checking mount status" : "mount status unavailable";
           return (
-            <div key={`shared:${wsId}`}
-              style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 9px", borderRadius: 6, fontSize: 12, opacity: busy ? 0.6 : 1 }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = "var(--panel2)")} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
-              <Checkbox checked={mounted} disabled={busy}
+            <div key={`shared:${wsId}`} className={panelStyles.workspaceRow} data-mounted={mounted} data-busy={busy}
+              onMouseEnter={(e) => (e.currentTarget.style.background = "var(--panel2)")}
+              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
+              <Checkbox checked={mounted} disabled={busy || mountStatus !== "ready"}
                 onChange={() => void toggleShared(wsId, !mounted)}
-                title={mounted ? "Mounted — uncheck to switch off (you stay a member)" : "Switched off — check to mount"}
-                label={`${wsId} — shared (${mem.role})`} />
-              <span onClick={() => openManage(wsId, { shared: true, name: wsId })}
-                title="Open the manage panel (GitHub · purpose · participants)"
-                style={{ flex: 1, color: mounted ? "var(--t1)" : "var(--t2)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", cursor: "pointer" }}>{wsId}</span>
+                title={mountStatus !== "ready" ? "Mount status is unavailable. Retry loading workspaces." : mounted ? "Mounted. Uncheck to switch off; membership stays." : "Switched off. Check to mount."}
+                label={`${wsId}, shared, ${mem.role}, ${mountLabel}`} />
+              <button type="button" className={panelStyles.workspaceName} data-mounted={mounted}
+                onClick={() => openManage(wsId, { shared: true, name: wsId })}
+                title="Open shared workspace settings: GitHub, purpose, and participants">{wsId}</button>
               {/* Management (role · share · unshare · participants) lives in the manage panel opened by
                   the name — no per-row action icons. */}
             </div>
           );
         })}
+        </div>
         {/* Attach repo is a LIST-LEVEL action; the FORM opens in a modal (portaled overlay) rather than
             expanding inline in the sidebar — see the Modal block below. */}
-        <div onClick={() => setForm({ repo: "", ref: "", token: "" })} style={{ padding: "5px 9px", fontSize: 12, color: "var(--accent)", cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}>
-          <Icon name="plus" size={12} /> Attach repo…
+        <div className={panelStyles.listActions}>
+          <button type="button" className={panelStyles.listAction} disabled={busy} onClick={() => setForm({ repo: "", ref: "", token: "" })}>
+            <Icon name="plus" size={14} aria-hidden="true" /> <span>Attach repo…</span>
+          </button>
+          <button type="button" className={panelStyles.listAction} disabled={busy} title="Create a blank workspace without replacing the current one"
+            onClick={() => { if (!busy) void doNewWorkspace(); }}>
+            <Icon name="plus" size={14} aria-hidden="true" /> <span>New workspace…</span>
+          </button>
         </div>
         {form !== null && (
           <Modal title="Attach a git repo" onClose={() => setForm(null)}>
@@ -715,20 +770,10 @@ export function WorkspaceSwitcher({ onSwapped }: { onSwapped: () => void }) {  /
             })()}
           </Modal>
         )}
-        {/* New workspace is a LIST-LEVEL action (not a row icon): it CREATES a fresh blank workspace
-            (seeded from the template) and ADDS it to the mount set — additive, so it destroys nothing and
-            leaves the baseline + every other workspace untouched. It lives alongside "+ Attach repo…" as
-            the two ways to bring a new workspace into the set. No confirmation: creating a workspace is
-            non-destructive. The new row appears CHECKED (it joined the active set). */}
-        <div onClick={() => { if (!busy) void doNewWorkspace(); }}
-          title="New workspace — create a blank workspace and add it to your set (nothing is replaced)"
-          style={{ padding: "5px 9px", fontSize: 12, color: "var(--accent)", cursor: "pointer", display: "flex", alignItems: "center", gap: 6, opacity: busy ? 0.6 : 1 }}>
-          <Icon name="plus" size={12} /> New workspace…
-        </div>
         {/* SHARE dialog — mint an invite link (open/restricted · role · TTL) and copy it. */}
         {share !== null && (
           <div style={{ padding: "8px 9px", display: "flex", flexDirection: "column", gap: 7, borderTop: "1px solid var(--line)", marginTop: 4 }}>
-            <div style={{ fontSize: 11, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".04em" }}>Share “{share.wsId}”</div>
+            <div style={{ fontSize: 12, color: "var(--t3)" }}>Share “{share.wsId}”</div>
             <div style={{ display: "flex", gap: 6 }}>
               <select value={share.role} disabled={busy} onChange={(e) => setShare({ ...share, role: e.target.value, link: null })}
                 style={{ flex: 1, fontSize: 12, padding: "4px 6px", background: "var(--panel)", border: "1px solid var(--line)", borderRadius: 6, color: "var(--t1)" }}>
@@ -778,7 +823,7 @@ export function WorkspaceSwitcher({ onSwapped }: { onSwapped: () => void }) {  /
             <div style={{ padding: "6px 9px", display: "flex", flexDirection: "column", gap: 6 }}>
               {pushMode ? (
                 <div title={pubForm.remoteUrl} style={{ fontSize: 12, color: "var(--t2)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                  push updates → {pubForm.remoteUrl}
+                  Push updates to {pubForm.remoteUrl}
                 </div>
               ) : (<>
                 <input autoFocus value={pubForm.name} placeholder="repo name" disabled={busy}
@@ -804,24 +849,22 @@ export function WorkspaceSwitcher({ onSwapped }: { onSwapped: () => void }) {  /
         })()}
         {published && (
           <div style={{ padding: "4px 9px", fontSize: 12, color: "var(--t2)", display: "flex", alignItems: "center", gap: 6 }}>
-            <span style={{ color: "var(--green)" }}>✓</span> published →&nbsp;
+            <span style={{ color: "var(--green)" }}>✓</span> Published:
             <a href={published.repo_url} target="_blank" rel="noreferrer" style={{ color: "var(--accent)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{published.repo_url}</a>
           </div>
         )}
         {/* Archived workspaces — collapsed group; the data is kept, restore to bring them back. */}
         {archivedSlots.length > 0 && (
-          <div style={{ marginTop: 4 }}>
-            <div onClick={() => setShowArchived((v) => !v)}
-              style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 9px", cursor: "pointer", fontSize: 11, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".04em" }}>
-              <Icon name="chevR" size={12} style={{ transform: showArchived ? "rotate(90deg)" : "none", transition: "transform .12s" }} />
+          <div className={panelStyles.archivedGroup}>
+            <button type="button" className={panelStyles.sectionToggle} aria-expanded={showArchived} onClick={() => setShowArchived((v) => !v)}>
+              <span className={panelStyles.chevron} aria-hidden="true"><Icon name="chevR" size={13} /></span>
               Archived ({archivedSlots.length})
-            </div>
+            </button>
             {showArchived && archivedSlots.map(([slug, meta]) => (
-              <div key={`arch:${slug}`} style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 9px 4px 24px", fontSize: 12, color: "var(--t3)", opacity: busy ? 0.6 : 1 }}
-                onMouseEnter={(e) => (e.currentTarget.style.background = "var(--panel2)")} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
-                <span style={{ flex: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{meta.name || label(slug, meta.repo)}</span>
-                <span onClick={() => void doArchive(slug, false)} title="Un-archive" style={{ flex: "none", color: "var(--accent)", cursor: "pointer", fontSize: 11 }}>restore</span>
-                <span onClick={() => void doDelete(slug, meta.name || label(slug, meta.repo))} title="Delete permanently" style={{ flex: "none", color: "var(--t3)", cursor: "pointer", fontSize: 13, padding: "0 3px" }}>×</span>
+              <div key={`arch:${slug}`} className={panelStyles.workspaceRow} data-busy={busy}>
+                <span className={panelStyles.archivedName}>{meta.name || label(slug, meta.repo)}</span>
+                <button type="button" className={panelStyles.archivedAction} disabled={busy} onClick={() => void doArchive(slug, false)}>Restore</button>
+                <button type="button" className={panelStyles.archivedAction} disabled={busy} aria-label={`Delete ${meta.name || label(slug, meta.repo)}`} title="Delete permanently" onClick={() => void doDelete(slug, meta.name || label(slug, meta.repo))}>Delete</button>
               </div>
             ))}
           </div>
@@ -829,12 +872,12 @@ export function WorkspaceSwitcher({ onSwapped }: { onSwapped: () => void }) {  /
         {/* Per-row … menu: archive / delete. */}
         {rowMenu && (
           <ContextMenu x={rowMenu.x} y={rowMenu.y} onClose={() => setRowMenu(null)} items={[
-            { id: "archive", label: "Archive", detail: "collapse · keep data", onSelect: () => void doArchive(rowMenu.slug, true) },
+            { id: "archive", label: "Archive", detail: "Keeps the workspace data", onSelect: () => void doArchive(rowMenu.slug, true) },
             { id: "delete", label: "Delete", detail: "removes all data", onSelect: () => void doDelete(rowMenu.slug, rowMenu.display) },
           ]} />
         )}
       </>)}
-    </div>
+    </section>
   );
 }
 
@@ -875,17 +918,18 @@ function GitSection() {
   }, [open]);
   const toggle = () => setOpen((v) => { const n = !v; writeSS(SS_GIT_OPEN, n ? "1" : "0"); return n; });
   return (
-    <div style={{ marginTop: 14, borderTop: "1px solid var(--line)", paddingTop: 8 }}>
-      <div onClick={toggle} style={{ fontSize: 11, color: "var(--t3)", textTransform: "uppercase", letterSpacing: ".04em", padding: "2px 8px 6px", display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
-        <Icon name="chevR" size={12} style={{ transform: open ? "rotate(90deg)" : "none", transition: "transform .12s" }} />
-        <Icon name="zap" size={12} />source control
-        {git.branch && <span style={{ marginLeft: "auto", fontFamily: "var(--mono)", color: "var(--t2)", textTransform: "none" }}>{git.branch}</span>}
-      </div>
-      {open && gitError && <div role="alert" style={{ padding: "2px 9px", fontSize: 12, color: "var(--danger)" }}>⚠ git unavailable — {gitError}</div>}
+    <section className={panelStyles.gitSection}>
+      <button type="button" className={panelStyles.sectionToggle} aria-expanded={open} onClick={toggle}>
+        <span className={panelStyles.chevron} aria-hidden="true"><Icon name="chevR" size={13} /></span>
+        <Icon name="zap" size={14} aria-hidden="true" />
+        <span>Source control</span>
+        {git.branch && <span className={panelStyles.branch}>{git.branch}</span>}
+      </button>
+      {open && gitError && <p role="alert" className={panelStyles.railError}>Git unavailable. {gitError}</p>}
       {!open || gitError ? null : (!git.branch && feed.length === 0) ? (
         <div style={{ padding: "2px 9px", fontSize: 12, color: "var(--t3)" }}>Not a repo yet.</div>
       ) : (<>
-      {git.changes.length > 0 && <div style={{ fontSize: 10.5, color: "var(--t3)", padding: "2px 9px" }}>CHANGES</div>}
+      {git.changes.length > 0 && <div className={panelStyles.subheading}>Changes</div>}
       {git.changes.map((c) => (
         <div key={c.path} onClick={() => layout.openPreview(docTab(c.path))} onDoubleClick={() => layout.openTab(docTab(c.path))} style={{ display: "flex", alignItems: "center", gap: 8, padding: "4px 9px", borderRadius: 6, cursor: "pointer", fontSize: 12 }}
           onMouseEnter={(e) => (e.currentTarget.style.background = "var(--panel2)")} onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
@@ -893,10 +937,10 @@ function GitSection() {
           <span style={{ color: "var(--t2)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{base(c.path)}</span>
         </div>
       ))}
-      {feed.length > 0 && <div style={{ fontSize: 10.5, color: "var(--t3)", padding: "8px 9px 2px" }}>LATEST COMMIT</div>}
+      {feed.length > 0 && <div className={panelStyles.subheading}>Latest commit</div>}
       {feed.map((c) => <CommitRow key={(c.slug || "") + ":" + c.sha} c={c} wsLabel={c.ws} onOpen={(f) => layout.openPreview(docTab(f, c.slug))} />)}
       </>)}
-    </div>
+    </section>
   );
 }
 
@@ -910,8 +954,8 @@ function PathBreadcrumb({ path }: { path: string }) {
   const [menu, setMenu] = useState<{ x: number; y: number; target: string } | null>(null);
   const seg = { cursor: "pointer" } as const;
   const hover = {
-    onMouseEnter: (e: MouseEvent<HTMLSpanElement>) => { e.currentTarget.style.color = "var(--t1)"; e.currentTarget.style.textDecoration = "underline"; },
-    onMouseLeave: (e: MouseEvent<HTMLSpanElement>) => { e.currentTarget.style.color = ""; e.currentTarget.style.textDecoration = "none"; },
+    onMouseEnter: (e: MouseEvent<HTMLButtonElement>) => { e.currentTarget.style.color = "var(--t1)"; e.currentTarget.style.textDecoration = "underline"; },
+    onMouseLeave: (e: MouseEvent<HTMLButtonElement>) => { e.currentTarget.style.color = ""; e.currentTarget.style.textDecoration = "none"; },
   };
   // any segment surfaces the tree in the LEFT SIDEBAR: un-collapse it, switch to the
   // Knowledge list, expand down to the clicked folder (or the file itself) and flash it.
@@ -921,19 +965,22 @@ function PathBreadcrumb({ path }: { path: string }) {
     revealInTree(target);
   };
   return (
-    <div style={{ fontFamily: "var(--mono)", fontSize: 12, color: "var(--t3)", display: "flex", flexWrap: "wrap", alignItems: "center" }}>
+    <nav className={panelStyles.breadcrumb} aria-label="Document path">
       {parts.map((name, i) => {
         const isFile = i === parts.length - 1;
         const prefix = parts.slice(0, i + 1).join("/");
         return (
-          <span key={prefix} style={{ display: "inline-flex", alignItems: "center" }}>
-            {i > 0 && <span style={{ padding: "0 2px", userSelect: "none" }}>/</span>}
-            <span {...hover} style={seg}
-              title={`Reveal ${prefix}${isFile ? "" : "/"} in the sidebar · right-click to copy a reference`}
+          <span key={prefix} className={panelStyles.breadcrumbPart}>
+            {i > 0 && <span className={panelStyles.breadcrumbSlash} aria-hidden="true">/</span>}
+            <button type="button" {...hover} className={panelStyles.breadcrumbSegment}
+              aria-label={`Reveal ${prefix}${isFile ? "" : " folder"} in Knowledge`}
+              data-file={isFile}
+              style={seg}
+              title={`Reveal ${prefix}${isFile ? "" : "/"} in the sidebar. Right-click to copy a reference.`}
               onClick={() => reveal(prefix)}
               onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setMenu({ x: e.clientX, y: e.clientY, target: prefix }); }}>
               {name}
-            </span>
+            </button>
           </span>
         );
       })}
@@ -943,7 +990,7 @@ function PathBreadcrumb({ path }: { path: string }) {
           { id: "copy-path", label: "Copy path", detail: menu.target, onSelect: () => copyText(menu.target) },
         ]} />
       )}
-    </div>
+    </nav>
   );
 }
 
@@ -987,26 +1034,25 @@ function FmValue({ k, v }: { k: string; v: string }) {
 }
 
 function FrontmatterCard({ fm }: { fm: [string, string][] }) {
+  if (fm.length === 0) return null;
   return (
-    <div style={{ border: "1px solid var(--line)", borderRadius: 10, background: "var(--panel)", padding: "11px 13px", marginBottom: 14, fontSize: 13, display: "flex", flexDirection: "column", gap: 6 }}>
+    <dl className={panelStyles.metadata}>
       {fm.map(([k, v]) => (
-        <div key={k} style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
-          <span style={{ color: "var(--t3)", width: 96, flex: "none", fontSize: 12 }}>{k}</span>
-          <span style={{ minWidth: 0, lineHeight: 1.55 }}><FmValue k={k} v={v} /></span>
+        <div key={k} className={panelStyles.metadataRow}>
+          <dt>{k}</dt>
+          <dd><FmValue k={k} v={v} /></dd>
         </div>
       ))}
-    </div>
+    </dl>
   );
 }
 
 /** ‹ › nav arrow, Obsidian-style: enabled only when the pane history has somewhere to go. */
 function NavArrow({ dir, enabled, onGo }: { dir: -1 | 1; enabled: boolean; onGo: () => void }) {
   return (
-    <button aria-label={dir === -1 ? "Back" : "Forward"} title={dir === -1 ? "Back" : "Forward"}
+    <button type="button" className={panelStyles.historyButton} aria-label={dir === -1 ? "Back" : "Forward"} title={dir === -1 ? "Back" : "Forward"}
       onClick={onGo} disabled={!enabled}
-      style={{ background: "none", border: "none", padding: 3, display: "flex", borderRadius: 6,
-        color: enabled ? "var(--t1)" : "var(--t3)", opacity: enabled ? 1 : 0.35,
-        cursor: enabled ? "pointer" : "default" }}
+      style={{ color: enabled ? "var(--t1)" : "var(--t3)", opacity: enabled ? 1 : 0.35 }}
       onMouseEnter={(e) => { if (enabled) e.currentTarget.style.background = "var(--panel2)"; }}
       onMouseLeave={(e) => { e.currentTarget.style.background = "none"; }}>
       <Icon name="arrowR" size={15} style={dir === -1 ? { transform: "scaleX(-1)" } : undefined} />
@@ -1035,12 +1081,12 @@ function AskAboutDoc({ path, slug }: { path: string; slug?: string }) {
     finally { setBusy(false); }
   };
   return (
-    <span style={{ flex: 'none', display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+    <span className={panelStyles.docActions}>
       <button type="button" disabled={busy} onClick={() => void ask()} title="Ask the agent about this document"
-        style={{ background: 'none', border: 0, cursor: 'pointer', fontSize: 11.5, color: 'var(--accent)' }}>Ask about</button>
+        className={panelStyles.action}>Ask about</button>
       <button type="button" disabled={busy} onClick={() => void ask(true)} title="Research this document and save a sourced private note"
-        style={{ background: 'none', border: 0, cursor: 'pointer', fontSize: 11.5, color: 'var(--accent)' }}>Nghiên cứu &amp; lưu</button>
-      {error && <span role="alert" style={{ fontSize: 11.5, color: 'var(--danger)' }}>{error}</span>}
+        className={panelStyles.action}>Nghiên cứu &amp; lưu</button>
+      {error && <span role="alert" className={panelStyles.docActionError}>{error}</span>}
     </span>
   );
 }
@@ -1057,6 +1103,8 @@ function DocTab({ id, params }: TabProps) {
   // retargeted from OUTSIDE (preview swap, layout restore) → a different doc: reset history
   useEffect(() => { setNav((n) => (n.stack[n.idx] === docked ? n : { stack: [docked], idx: 0 })); }, [docked]);
   const [content, setContent] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [retryKey, setRetryKey] = useState(0);
   const [updated, setUpdated] = useState(false);           // the file changed under us (a member's push)
   const [showDiff, setShowDiff] = useState(false);
   const [diff, setDiff] = useState<string | null>(null);
@@ -1066,14 +1114,17 @@ function DocTab({ id, params }: TabProps) {
   // initial load on doc switch — reset the change/diff affordances
   useEffect(() => {
     const ticket = ++readSerial.current;
-    setContent(null); setUpdated(false); setShowDiff(false); setDiff(null); prevRef.current = null;
+    setContent(null); setLoadError(null); setUpdated(false); setShowDiff(false); setDiff(null); prevRef.current = null;
     scroller.current?.scrollTo(0, 0);
     void readFile(path, slug).then((c) => {
       if (ticket !== readSerial.current) return;
-      prevRef.current = c; setContent(c);
+      prevRef.current = c; setContent(c); setLoadError(null);
+    }).catch((e: unknown) => {
+      if (ticket !== readSerial.current) return;
+      setContent(null); setLoadError(presentError(e).headline);
     });
     return () => { readSerial.current++; };
-  }, [path, slug]);
+  }, [path, slug, retryKey]);
   // LIVE: poll the file while open so an OPEN doc auto-reloads when a member's agent updates it — folks
   // see updates without reopening. A real content change flags the "updated" banner (→ view exact lines).
   useEffect(() => {
@@ -1083,8 +1134,9 @@ function DocTab({ id, params }: TabProps) {
       void readFile(path, slug).then((c) => {
         if (ticket !== readSerial.current) return;
         if (prevRef.current !== null && prevRef.current !== c) setUpdated(true);
-        prevRef.current = c;
-        setContent(c);
+        prevRef.current = c; setContent(c); setLoadError(null);
+      }).catch((e: unknown) => {
+        if (ticket === readSerial.current) setLoadError(presentError(e).headline);
       });
     };
     const iv = setInterval(reload, 5000);
@@ -1132,40 +1184,60 @@ function DocTab({ id, params }: TabProps) {
     show(nav.stack[i]);
   };
   const { fm, body } = parseEntity(content ?? "");
+  const fmTitle = fm.find(([key]) => key === "title")?.[1];
+  const bodyTitle = body.match(/^\s*#\s+(.+?)\s*#*\s*(?:\r?\n|$)/)?.[1]?.trim();
+  const displayFm = fmTitle && fmTitle === bodyTitle ? fm.filter(([key]) => key !== "title") : fm;
   return (
     <DocNavContext.Provider value={navigate}>
     <DocMetaContext.Provider value={{ path, slug }}>
-      <div ref={scroller} style={{ height: "100%", overflowY: "auto", background: "var(--bg)" }}>
-        <div style={{ maxWidth: 760, margin: "0 auto", padding: "22px 24px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 12 }}>
-            <span style={{ display: "inline-flex", gap: 0, flex: "none" }}>
-              <NavArrow dir={-1} enabled={nav.idx > 0} onGo={() => go(-1)} />
-              <NavArrow dir={1} enabled={nav.idx < nav.stack.length - 1} onGo={() => go(1)} />
-            </span>
-            <div style={{ minWidth: 0, flex: 1 }}><PathBreadcrumb path={path} /></div>
+      <div ref={scroller} className={panelStyles.reader}>
+        <div className={panelStyles.article}>
+          <header className={panelStyles.toolbar}>
+            <div className={panelStyles.pathGroup}>
+              <span className={panelStyles.history}>
+                <NavArrow dir={-1} enabled={nav.idx > 0} onGo={() => go(-1)} />
+                <NavArrow dir={1} enabled={nav.idx < nav.stack.length - 1} onGo={() => go(1)} />
+              </span>
+              <PathBreadcrumb path={path} />
+            </div>
+            <div className={panelStyles.actions}>
             {/* Direction A, law #5: every surface answers "how do I open a conversation from here?" */}
-            <span onClick={() => { void copyText(`@file:${path}`); }} title={`Copy the @file reference for ${path}`}
-              style={{ flex: "none", display: "inline-flex", alignItems: "center", gap: 4, cursor: "pointer", fontSize: 11.5, color: "var(--t3)" }}>
-              <Icon name="link" size={12} />Reference
-            </span>
-            <span onClick={loadDiff} title="Show the exact lines changed in the latest commit"
-              style={{ flex: "none", display: "inline-flex", alignItems: "center", gap: 4, cursor: "pointer", fontSize: 11.5, color: showDiff ? "var(--accent)" : "var(--t3)" }}>
-              <Icon name="git" size={12} />Changes
-            </span>
+              <button type="button" className={panelStyles.action} onClick={() => { void copyText(`@file:${path}`); }} title={`Copy the @file reference for ${path}`}>
+                <Icon name="link" size={13} />Reference
+              </button>
+              <button type="button" className={panelStyles.action} aria-pressed={showDiff} onClick={loadDiff} title="Show the exact lines changed in the latest commit">
+                <Icon name="git" size={13} />Changes
+              </button>
             <AskAboutDoc path={path} slug={slug} />
-          </div>
+            </div>
+          </header>
+          {loadError && content !== null && <div className={panelStyles.readWarning} role="status">
+            <Icon name="alert" size={15} /><span>Couldn’t refresh this document. {loadError}</span>
+            <button type="button" className={panelStyles.retryButton} onClick={() => setRetryKey((key) => key + 1)}>Retry</button>
+          </div>}
           {updated && (
-            <div onClick={loadDiff} role="status"
-              style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 10, padding: "5px 10px", cursor: "pointer", background: "var(--panel)", border: "1px solid var(--accent)", borderRadius: 7, fontSize: 12, color: "var(--accent)" }}>
-              <Icon name="zap" size={12} />Updated just now — view the exact lines changed
+            <div className={panelStyles.updatedNotice} role="status">
+              <Icon name="zap" size={14} /><span>Document updated.</span>
+              <button type="button" className={panelStyles.updatedAction} onClick={loadDiff}>View diff</button>
             </div>
           )}
           {showDiff && (diff === null || diff === ""
-            ? <div style={{ fontSize: 12, color: "var(--t3)", marginBottom: 10 }}>loading changes…</div>
+            ? <div role="status" style={{ fontSize: 12, color: "var(--t3)", marginBottom: 10 }}>Loading changes…</div>
             : <div style={{ marginBottom: 12 }}><DiffView text={diff} /></div>)}
-          {fm.length > 0 && <FrontmatterCard fm={fm} />}
-          <MeetingWikiSourceStatus key={`${slug}/${path}`} path={path} slug={slug} content={content || undefined} />
-          <div style={{ fontSize: 14, color: "var(--t1)", lineHeight: 1.6 }}>{content === null ? "loading…" : <MdxDoc>{body}</MdxDoc>}</div>
+          {content === null ? loadError ? <div role="alert" className={panelStyles.loadError}>
+            <Icon name="alert" size={17} />
+            <div className={panelStyles.loadErrorCopy}>
+              <h2>Document couldn’t be opened</h2>
+              <p>{loadError}</p>
+            </div>
+            <button type="button" className={panelStyles.retryButton} onClick={() => setRetryKey((key) => key + 1)}>Retry</button>
+          </div> : <div className={panelStyles.loadingState} role="status" aria-label="Loading document">
+            <div className={panelStyles.skeletonLines} aria-hidden="true"><span /><span /><span /></div>
+          </div> : <>
+            {displayFm.length > 0 && <FrontmatterCard fm={displayFm} />}
+            <MeetingWikiSourceStatus key={`${slug}/${path}`} path={path} slug={slug} content={content || undefined} />
+            <div className={panelStyles.body}><MdxDoc>{body}</MdxDoc></div>
+          </>}
         </div>
       </div>
     </DocMetaContext.Provider>
@@ -1177,4 +1249,5 @@ function DocTab({ id, params }: TabProps) {
 if (!meetingsOnly()) {
   registerList({ id: "files", label: "Knowledge", icon: "book", order: 30, component: FilesList });
   registerTab("doc", DocTab);
+  registerTab("kgGraph", WorkspaceGraphTab);
 }
