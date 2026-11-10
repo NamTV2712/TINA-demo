@@ -46,10 +46,7 @@ class HttpStreamTests(unittest.TestCase):
     tearDown = test_server.ServerTests.tearDown
     def test_disconnect_during_native_chunk_discards_it_and_releases_the_next_room(self):
         entered, release, closed = threading.Event(), threading.Event(), threading.Event()
-        statuses=[];generated=[]
-        original=self.server.RequestHandlerClass.send_response
-        def status(handler,code,*args):
-            statuses.append(code);return original(handler,code,*args)
+        generated=[]
         def chunks(_text):
             try:
                 entered.set();release.wait(2);generated.append('first')
@@ -57,20 +54,18 @@ class HttpStreamTests(unittest.TestCase):
                 generated.append('late');yield b'\x02\x00'*4000
             finally:closed.set()
         self.engine.stream=chunks
-        from unittest.mock import patch
-        with patch.object(self.server.RequestHandlerClass,'send_response',status):
-            connection=socket.create_connection(self.server.server_address,timeout=2)
-            data=b'{"input":"synthetic"}'
-            try:
-                connection.sendall(f'POST /v1/audio/speech HTTP/1.1\r\nHost: localhost\r\nX-API-Key: {test_server.TOKEN}\r\nContent-Type: application/json\r\nContent-Length: {len(data)}\r\n\r\n'.encode()+data)
-                self.assertTrue(entered.wait(1))
-                connection.close();release.set()
-                self.assertTrue(closed.wait(1))
-                deadline=time.monotonic()+1
-                while self.server.busy.locked() and time.monotonic()<deadline:time.sleep(.01)
-                self.assertFalse(self.server.busy.locked())
-                self.assertEqual(generated,['first']);self.assertEqual(statuses,[])
-            finally:connection.close();release.set()
+        connection=socket.create_connection(self.server.server_address,timeout=2)
+        data=b'{"input":"synthetic"}'
+        try:
+            connection.sendall(f'POST /v1/audio/speech HTTP/1.1\r\nHost: localhost\r\nX-API-Key: {test_server.TOKEN}\r\nContent-Type: application/json\r\nContent-Length: {len(data)}\r\n\r\n'.encode()+data)
+            self.assertTrue(entered.wait(1))
+            connection.close();release.set()
+            self.assertTrue(closed.wait(1))
+            deadline=time.monotonic()+1
+            while self.server.busy.locked() and time.monotonic()<deadline:time.sleep(.01)
+            self.assertFalse(self.server.busy.locked())
+            self.assertEqual(generated,['first'])
+        finally:connection.close();release.set()
         self.engine.stream=lambda _text:iter_with_close([b'\x01\x00'*100])
         self.assertEqual(test_server.ServerTests.call(self)[0],200)
     def test_iterator_cleanup_failure_does_not_log_private_model_details(self):

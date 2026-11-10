@@ -84,6 +84,7 @@ jobs:
         run: >-
           uv run --no-project --python 3.11
           --with numpy==2.4.6 --with scipy==1.17.1
+          --with sea-g2p==0.10.0 --with soxr==1.1.0
           python -m unittest discover -s deploy/tts -p 'test_*.py'
 
   node:
