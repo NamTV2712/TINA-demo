@@ -187,19 +187,18 @@ playback. Discord speaking remains unsupported.
 - `auto` selects Trúc Ly explicitly. Standalone `TINA`/`Tina`/`tina` is spoken as "ti na"
   to prevent acronym spelling; agent/transcript text and other acronyms remain unchanged.
 - Limits: 4,000 input characters, 20,000 request bytes, 120 seconds synthesized audio.
-  The sidecar admits at most eight connections and closes each after 145 seconds total
+  The sidecar admits at most sixteen connections and closes each after 145 seconds total
   (including slow headers/body). Excess connections are closed before allocating a handler.
   The bot allows 150 seconds total for synthesis and playback, within the coordinator's
   175-second receipt wait. Slow CPU synthesis can exceed this budget and fails rather than
   reporting completion. Closing a connection cannot preempt native inference; its single
   synthesis lock remains held until inference actually returns.
 - GET `/health` and `/status` expose content-free readiness/format information.
-- One native synthesis at a time; a FIFO queue permits three waiters for at most 15 seconds. Overflow/timeout returns 503; disconnected queued clients are removed.
+- One native synthesis at a time; a FIFO queue permits six waiters for at most 30 seconds. Overflow/timeout returns 503; disconnected queued clients are removed.
 - No CORS, text storage or input/credential logging. Published port is loopback-only; bots use
   the authenticated service on the existing Docker network.
-- The response follows synthesis; this is not token/audio streaming. Native inference is not
-  preemptible: Stop cancels bot playback/request immediately, but native CPU work may finish
-  in the sidecar while its single-flight lock remains held.
+- PCM streams as native audio chunks become available. Stop closes the playback/request immediately;
+  an active native chunk is not forcibly preempted and retains the single-flight lock until it returns.
 
 ## Verification and rollback
 
@@ -294,7 +293,9 @@ treat an incomplete response as failed, even if some audio has already been hear
 
 The shared FIFO/connection/absolute time limits still apply. Cancellation is checked between native
 iterations and writes, closes the generator and releases its slot after any active native call
-returns. A native call already executing is not forcibly preempted. Slow readers exert TCP
+returns. Disconnects are checked again after a native chunk returns, before sending headers or audio,
+so a cancelled first chunk cannot claim HTTP 200 or drain the remainder of the utterance.
+A native call already executing is not forcibly preempted. Slow readers exert TCP
 backpressure; the absolute connection deadline bounds a stalled client.
 
 Each bot holds at most two synthesis handles: the current sentence and one lookahead. Each uses a
@@ -303,7 +304,8 @@ or a valid shorter finished stream. Lookahead never opens the microphone or star
 failed lookahead cannot mute current playback. Source policy is checked again after preparation
 and before each sentence plays. Stop, departure, policy change and final cleanup cancel both
 handles. Completed receipts require the HTTP stream's normal end, valid PCM, successful player exit
-and microphone cleanup; process start is local audio injection, not remote audibility.
+and microphone cleanup. The bot's playback-start callback waits for process spawn and the first
+successful PCM write, after meeting microphone verification; it does not prove remote audibility.
 
 The LLM answer remains fully validated before speech preparation. No unverified token streaming,
 new ASR backend, voice model or inference precision is introduced. `test_streaming.py` checks early

@@ -6,6 +6,39 @@ from livekit.agents.types import APIConnectOptions
 from adapters import TinaLLM, VieNeuTTS, HttpAudioOutput
 
 
+@pytest.mark.parametrize('buffered', [False, True])
+async def test_stop_closes_the_upstream_pcm_iterator_and_clears_unplayed_audio(buffered):
+    entered, closed = asyncio.Event(), asyncio.Event()
+    class Speech:
+        first = True
+        def __aiter__(self): return self
+        async def __anext__(self):
+            if buffered and self.first:
+                self.first=False
+                return b'\x01\x00' * 2400
+            entered.set()
+            await asyncio.Event().wait()
+        async def aclose(self): closed.set()
+    model=VieNeuTTS(lambda _text:Speech())
+    output=HttpAudioOutput()
+    session=AgentSession(tts=model,vad=None,turn_detection='manual',user_away_timeout=None)
+    session.output.audio=output
+    try:
+        await session.start(Agent(instructions='Use local TTS.'))
+        handle=session.say('Synthetic private reply.',add_to_chat_ctx=False)
+        await asyncio.wait_for(entered.wait(),2)
+        if buffered:
+            for _ in range(100):
+                if not output.queue.empty(): break
+                await asyncio.sleep(.01)
+            assert not output.queue.empty()
+        handle.interrupt()
+        await asyncio.wait_for(closed.wait(),2)
+        await asyncio.wait_for(handle.wait_for_playout(),2)
+        assert output.queue.empty() and model.synthesis.failed
+    finally: await session.aclose()
+
+
 async def test_actual_agents_llm_session_calls_tina_once_and_preserves_metadata():
     calls=[]
     async def answer(request):

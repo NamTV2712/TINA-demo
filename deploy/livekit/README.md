@@ -135,3 +135,9 @@ PCM admission credits follow the entire ASGI response lifetime. A client disconn
 or before the body iterator starts closes the iterator and returns the reserved slot, so cancelled
 requests cannot exhaust the two per-room speech/lookahead slots. The regression test injects a
 header-send disconnect and checks both credit and lock cleanup.
+
+The TTS adapter explicitly closes its upstream PCM iterator on completion, failure and cancellation,
+including interruption before the first PCM chunk. SDK interruption also clears unplayed output.
+This unwinds the HTTP streaming context so the shared TTS worker observes the closed connection.
+Tests cover Stop before first audio and with already buffered PCM; the native ONNX chunk already
+executing can finish, but the sidecar discards its late output and starts no further chunks.

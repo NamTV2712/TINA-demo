@@ -195,6 +195,10 @@ class Handler(BaseHTTPRequestHandler):
                     raise ConnectionResetError()
                 try: audio = next(chunks)
                 except StopIteration: break
+                # A disconnect during a native chunk must not publish its late PCM or start another chunk.
+                readable, _, _ = select.select([self.connection], [], [], 0)
+                if readable and self.connection.recv(1, socket.MSG_PEEK) == b'':
+                    raise ConnectionResetError()
                 if not isinstance(audio, bytes) or len(audio) % 2: raise ValueError('Invalid PCM')
                 if not audio: continue
                 total += len(audio)

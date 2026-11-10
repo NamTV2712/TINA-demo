@@ -14,14 +14,21 @@ function setTtsMute(muted: boolean): void {
   execSync('pactl set-source-mute virtual_mic 0', { stdio: 'pipe' });
 }
 export type PlaybackOutcome = 'completed' | 'failed' | 'stopped';
+export interface SpeechTiming {
+  requestedAtMs: number;
+  firstPcmAtMs?: number;
+  readyAtMs?: number;
+  playbackAtMs?: number;
+}
 export interface PreparedSpeech {
   ready: Promise<boolean>;
+  readonly timing?: Readonly<SpeechTiming>;
   readonly failedBeforePlayback?: boolean;
-  play(onStarted?: () => void): Promise<PlaybackOutcome>;
+  play(onStarted?: (timing?: Readonly<SpeechTiming>) => void): Promise<PlaybackOutcome>;
   cancel(): void;
 }
 export interface TtsPlayback {
-  speak(text: string, voice?: string, onStarted?: () => void, timeoutMs?: number): Promise<PlaybackOutcome | void>;
+  speak(text: string, voice?: string, onStarted?: (timing?: Readonly<SpeechTiming>) => void, timeoutMs?: number): Promise<PlaybackOutcome | void>;
   prepare?(text: string, voice?: string, timeoutMs?: number): PreparedSpeech;
   stop(): void;
 }
@@ -42,6 +49,7 @@ export function createTtsPlayback(log: (m: string) => void = () => {}, options: 
   const handles = new Set<PreparedSpeech>();
   let active: PreparedSpeech | undefined;
   function prepare(text: string, voice = 'auto', timeoutMs?: number): PreparedSpeech {
+    const timing: SpeechTiming = { requestedAtMs: Date.now() };
     const buffer = new PassThrough({ highWaterMark: 24000 });
     let request: ClientRequest | undefined, response: IncomingMessage | undefined, proc: ChildProcess | undefined;
     let timer: ReturnType<typeof setTimeout> | undefined, settled = false, ended = false, bytes = 0, playing = false;
@@ -60,6 +68,7 @@ export function createTtsPlayback(log: (m: string) => void = () => {}, options: 
     };
     const handle: PreparedSpeech = {
       ready,
+      get timing() { return {...timing}; },
       get failedBeforePlayback() { return failedBeforePlayback; },
       cancel: () => finish('stopped'),
       async play(onStarted) {
@@ -73,7 +82,13 @@ export function createTtsPlayback(log: (m: string) => void = () => {}, options: 
         const player = proc;
         player.stderr?.on('data', () => { log('[tts] player diagnostic'); });
         player.stdin?.on('error', () => finish('failed'));
-        player.once('spawn', () => { if (!settled) { try { onStarted?.(); } catch { finish('failed'); } } });
+        let spawned = false, written = false;
+        const notify = () => {
+          if (settled || !spawned || !written || timing.playbackAtMs !== undefined) return;
+          timing.playbackAtMs = Date.now();
+          try { onStarted?.({...timing}); } catch { finish('failed'); }
+        };
+        player.once('spawn', () => { spawned = true; notify(); });
         player.once('error', () => finish('failed'));
         player.once('exit', code => {
           // Null the exited child before cleanup so cancellation cannot re-kill it.
@@ -81,6 +96,13 @@ export function createTtsPlayback(log: (m: string) => void = () => {}, options: 
           finish(code === 0 && ended && bytes > 0 && bytes % 2 === 0 ? 'completed' : 'failed');
         });
         buffer.removeAllListeners('readable');
+        // Process spawn alone does not prove that PCM reached the virtual microphone player.
+        const first = buffer.read() as Buffer | null;
+        if (!first || !player.stdin) { finish('failed'); return done; }
+        player.stdin.write(first, error => {
+          if (error) { finish('failed'); return; }
+          written = true; notify();
+        });
         buffer.pipe(player.stdin!);
         return done;
       },
@@ -113,13 +135,15 @@ export function createTtsPlayback(log: (m: string) => void = () => {}, options: 
         }
         res.on('aborted', () => finish('failed')); res.on('error', () => finish('failed'));
         res.on('data', (chunk: Buffer) => {
+          if (chunk.length && timing.firstPcmAtMs === undefined) timing.firstPcmAtMs = Date.now();
           bytes += chunk.length;
           if (bytes > MAX_BYTES) finish('failed');
         });
-        buffer.on('readable', () => { if (buffer.readableLength >= PREBUFFER) readyResolve(true); });
+        const buffered = () => { timing.readyAtMs ??= Date.now(); readyResolve(true); };
+        buffer.on('readable', () => { if (buffer.readableLength >= PREBUFFER) buffered(); });
         res.on('end', () => {
           ended = true;
-          if (!bytes || bytes % 2) finish('failed'); else readyResolve(true);
+          if (!bytes || bytes % 2) finish('failed'); else buffered();
         });
         res.pipe(buffer);
       });

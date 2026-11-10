@@ -749,7 +749,12 @@ export class SpeakerStreamManager {
 
     // Submit if enough unconfirmed audio
     if (unconfirmedSec >= this.minAudioDuration) {
-      await this.submitBuffer(buffer);
+      // Reserve a cadence plus the next capture frame; feedAudio can run just before the timer.
+      const limit = Math.min(this.maxBufferDuration, this.maxRetainedDuration);
+      const frameSec = (buffer.chunks.at(-1)?.length ?? 0) / this.sampleRate;
+      const rolloverAt = Math.max(this.minAudioDuration, limit - Math.min(this.submitInterval + frameSec, limit / 2));
+      if (unconfirmedSec >= rolloverAt) buffer.capCutSample = this.quietCutSample(buffer, 4);
+      await this.submitBuffer(buffer, buffer.capCutSample);
     } else this.diagnose('wait',buffer,'minimum-audio');
   }
 

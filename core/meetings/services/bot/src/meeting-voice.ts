@@ -10,7 +10,7 @@ import type { SpeechReporter } from './speech-status.js';
 import { AudioDiagnostics, type AudioSnapshot } from './audio-diagnostics.js';
 import type { AsrDiagnostic } from '@tina/gmeet-pipeline';
 import {NoiseSuppressor,type NoiseFrame} from './noise-suppression.js';
-import type { PreparedSpeech } from './tts-playback.js';
+import type { PreparedSpeech, SpeechTiming } from './tts-playback.js';
 
 const FOLLOW_UP_MS = 5_000;
 const ACK_TIMEOUT_MS = 3_000;
@@ -46,7 +46,7 @@ export interface VoiceWorker {
 export type WorkerFactory = (event: (value: Record<string, unknown>) => void, failed: () => void) => VoiceWorker;
 type TimingStage = 'speech_end' | 'vad_detected' | 'asr_started' | 'asr_completed' | 'asr_received'
   | 'wake_confirmed' | 'question_ready' | 'answer_requested' | 'answer_received'
-  | 'ack_playback_started' | 'answer_playback_started' | 'turn_finished';
+  | `${'ack' | 'notice' | 'answer'}_${'tts_requested' | 'pcm_received' | 'buffer_ready' | 'playback_started'}` | 'turn_finished';
 
 export function nativeVoiceWorker(event: (value: Record<string, unknown>) => void, failed: () => void,
   env: NodeJS.ProcessEnv = process.env, mode: 'vad' | 'kws' = 'vad'): VoiceWorker {
@@ -341,7 +341,21 @@ export class MeetingVoice {
         ack_after_question: elapsed('question_ready', 'ack_playback_started'),
         answer_playback_after_end: elapsed('speech_end', 'answer_playback_started'),
         answer_playback_after_response: elapsed('answer_received', 'answer_playback_started'),
+        answer_pcm_after_end: elapsed('speech_end', 'answer_pcm_received'),
+        ...Object.fromEntries((['ack','notice','answer'] as const).flatMap(kind => [
+          [`${kind}_first_pcm`, elapsed(`${kind}_tts_requested`, `${kind}_pcm_received`)],
+          [`${kind}_prebuffer`, elapsed(`${kind}_pcm_received`, `${kind}_buffer_ready`)],
+          [`${kind}_mic_start_after_buffer`, elapsed(`${kind}_buffer_ready`, `${kind}_playback_started`)],
+        ])),
+        notice_after_question: elapsed('question_ready', 'notice_playback_started'),
       } })); } catch { /* Best-effort timing must never affect a turn. */ }
+  }
+  private markSpeechTiming(kind: 'ack' | 'notice' | 'answer', timing?: Readonly<SpeechTiming>, started = false) {
+    for (const [suffix, at] of [['tts_requested',timing?.requestedAtMs],['pcm_received',timing?.firstPcmAtMs],
+      ['buffer_ready',timing?.readyAtMs],['playback_started',timing?.playbackAtMs ?? (started ? Date.now() : undefined)]] as const) {
+      const stage: TimingStage = `${kind}_${suffix}`;
+      if (at !== undefined && this.timing?.stages[stage] === undefined) this.markTiming(stage, at);
+    }
   }
   private finishTiming(outcome: string) {
     this.markTiming('turn_finished', Date.now(), outcome); this.timing = undefined;
@@ -618,7 +632,7 @@ export class MeetingVoice {
       const config = await this.api.config(this.abort.signal);
       if (!live()) return;
       if (!config.enabled || !config.ready || config.revision !== this.revision) throw new Error('Voice policy changed');
-      const outcome = await this.speak.speak(this.nextNotice('wake'), 'auto', () => { if (live()) this.markTiming('ack_playback_started'); }, ACK_TIMEOUT_MS);
+      const outcome = await this.speak.speak(this.nextNotice('wake'), 'auto', timing => { if (live()) this.markSpeechTiming('ack',timing,true); }, ACK_TIMEOUT_MS);
       if (!live()) return;
       if (outcome !== 'completed') throw new Error('Acknowledgment playback failed');
       completed = true;
@@ -685,8 +699,8 @@ export class MeetingVoice {
         if (!live() || answerReceived || !config.enabled || !config.ready || config.revision !== this.revision) return;
         const notice = this.nextNotice(progressNotice ? 'summary' : 'wait');
         this.speakingText=notice;
-        return this.speak.speak(notice, 'auto', () => {
-          if (live()) this.markTiming('ack_playback_started');
+        return this.speak.speak(notice, 'auto', timing => {
+          if (live()) this.markSpeechTiming('notice',timing,true);
         }, WAIT_NOTICE_TIMEOUT_MS);
       })().then(result => { if (result && result !== 'completed' && live()) this.log('ack_playback_failed'); },
         () => { if (live()) this.log('ack_playback_failed'); });
@@ -722,13 +736,14 @@ export class MeetingVoice {
           if (prepared) {
             buffered = await prepared.ready;
             if (!live()) return;
+            if (index === 0) this.markSpeechTiming('answer',prepared.timing);
             const fresh = await this.api.config(this.abort.signal);
             if (!live() || !fresh.enabled || !fresh.ready || fresh.revision !== this.revision) { if (live()) this.diagnose('policy_changed'); return; }
           }
           let sentenceStarted = false;
-          const onStarted = () => {
+          const onStarted = (timing?: Readonly<SpeechTiming>) => {
             sentenceStarted = true;
-            if (!didStart && live()) { didStart = true; this.playbackStarted=true;this.markTiming('answer_playback_started'); started = this.report(id, 'started'); void started.catch(() => {}); }
+            if (!didStart && live()) { didStart = true; this.playbackStarted=true;this.markSpeechTiming('answer',timing,true); started = this.report(id, 'started'); void started.catch(() => {}); }
           };
           this.speakingText=sentence;
           const playback = prepared ? prepared.play(onStarted) : this.speak.speak(sentence, 'auto', onStarted);

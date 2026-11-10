@@ -42,7 +42,7 @@ import type { BotPipeline } from './pipeline.js';
 import type { BotRecordingSink } from './recording.js';
 import type { TelemetrySink } from './ports.js';
 import type { RemoteAudioActivityTap } from './aloneness.js';
-import { createTtsPlayback, type TtsPlayback, type PlaybackOutcome, type PreparedSpeech } from './tts-playback.js';
+import { createTtsPlayback, type TtsPlayback, type PlaybackOutcome, type PreparedSpeech, type SpeechTiming } from './tts-playback.js';
 import type {NoiseFrame} from './noise-suppression.js';
 import {setMeetingMicrophone} from './meeting-microphone.js';
 
@@ -1493,7 +1493,7 @@ export async function startRecording(page: Page, inv: Invocation, recording: Bot
 export interface SpeakController {
   prepare?(text: string, voice?: string): PreparedSpeech;
   /** Begin speaking `text` (TTS synthesized + injected via the VM's PulseAudio chain). */
-  speak(text: string, voice?: string, onStarted?: () => void, timeoutMs?: number): Promise<PlaybackOutcome | void>;
+  speak(text: string, voice?: string, onStarted?: (timing?: Readonly<SpeechTiming>) => void, timeoutMs?: number): Promise<PlaybackOutcome | void>;
   /** Stop any in-flight speech (barge-in). */
   stop(): Promise<void>;
 }
@@ -1550,10 +1550,11 @@ export function createSpeakController(
     ...(enabled && tts.prepare ? { prepare(text: string, voice?: string): PreparedSpeech {
       const pending = tts.prepare!(text, voice);
       return { ready: pending.ready, cancel: () => pending.cancel(),
+        get timing() { return pending.timing; },
         get failedBeforePlayback() { return pending.failedBeforePlayback; },
         play: onStarted => play(() => pending.play(onStarted), pending.ready).finally(() => pending.cancel()) };
     } } : {}),
-    async speak(text: string, voice?: string, onStarted?: () => void, timeoutMs?: number): Promise<PlaybackOutcome> {
+    async speak(text: string, voice?: string, onStarted?: (timing?: Readonly<SpeechTiming>) => void, timeoutMs?: number): Promise<PlaybackOutcome> {
       console.log(`[bot] speak request: ${text.length} characters`);
       if (tts.prepare && enabled) {
         tts.stop();

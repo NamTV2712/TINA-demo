@@ -759,6 +759,32 @@ test('fast answer timing has no redundant acknowledgment and includes no questio
   } finally { await f.voice.stop(); }
 });
 
+test('voice timing records first answer PCM separately from buffering, mic injection and waiting notices', async () => {
+  let sequence=0;
+  const snapshots:Array<{requestedAtMs:number;firstPcmAtMs:number;readyAtMs:number;playbackAtMs:number}>=[];
+  const f=fixture(undefined,{
+    async stop(){},async speak(){return 'completed';},
+    prepare(){const base=Date.now()+sequence++*50;
+      const timing={requestedAtMs:base,firstPcmAtMs:base+10,readyAtMs:base+15,playbackAtMs:base+20};
+      snapshots.push(timing);
+      return {ready:Promise.resolve(true),timing,cancel(){},async play(started){started?.(timing);return 'completed';}};
+    },
+  });
+  try {
+    await f.voice.start();await f.capture();
+    const last=f.logs.filter(v=>v.startsWith('{')).map(v=>JSON.parse(v)).at(-1);
+    assert.equal(last.stages_at_ms.answer_pcm_received,snapshots[0].firstPcmAtMs);
+    assert.equal(last.stages_at_ms.answer_playback_started,snapshots[0].playbackAtMs);
+    assert.equal(last.durations_ms.answer_first_pcm,10);
+    assert.equal(last.durations_ms.answer_prebuffer,5);
+    assert.equal(last.durations_ms.answer_mic_start_after_buffer,5);
+    assert.equal(last.durations_ms.answer_pcm_after_end,Math.max(0,snapshots[0].firstPcmAtMs-last.stages_at_ms.speech_end));
+    assert.equal(last.stages_at_ms.notice_playback_started,undefined);
+    assert.equal(last.stages_at_ms.ack_playback_started,undefined);
+    assert.equal(snapshots.length,2);
+  }finally{await f.voice.stop();}
+});
+
 test('VAD short-call ingress crosses the bot adapter once and preserves canonical transcript', async () => {
   let emit!: (value: Record<string, unknown>) => void;
   let pipe: BotPipeline | undefined;

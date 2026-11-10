@@ -8,6 +8,15 @@ ordinary follow-ups keep their existing no-extra-ack behavior. Every fixed phras
 Agents session and pure normalized notice echoes are ignored during caller continuation. The TTS
 `WAKE_TEXTS`/`WAIT_TEXTS`/`SUMMARY_TEXTS` catalog must match these phrases. No LLM chooses filler.
 
+`voice_timing` logs retain only request UUID/channel, timestamps and durations. Speech timing is
+split into `ack_*` (name acknowledgment), `notice_*` (question/recap wait) and `answer_*`.
+Each group records `tts_requested`, `pcm_received`, `buffer_ready` and `playback_started`;
+durations include `first_pcm`, `prebuffer` and `mic_start_after_buffer`. Answer timestamps retain
+the first sentence rather than being overwritten by lookahead. `answer_pcm_after_end` and
+`answer_playback_after_end` start at the final question speech-end timestamp. Playback starts only
+after the meeting mic is verified, the player spawns and its first PCM write succeeds. This proves
+local microphone injection, not receipt or audibility at another participant's speaker.
+
 Slow whole-meeting recap requests receive one fixed, prewarmed waiting notice instead of the
 ordinary acknowledgment. Transcript capture continues; the same voice turn waits for the verified
 result and plays it automatically. Stop/departure, caller correction, generation replacement and

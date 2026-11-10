@@ -115,10 +115,14 @@ class VieNeuStream(tts.ChunkedStream):
                                   mime_type='audio/pcm', frame_size_ms=20)
         try:
             size = 0
-            async for chunk in self.model.speech(self._input_text):
-                size += len(chunk)
-                if size > MAX_AUDIO_BYTES: raise RuntimeError('Audio exceeds bound')
-                output_emitter.push(chunk)
+            chunks = self.model.speech(self._input_text)
+            try:
+                async for chunk in chunks:
+                    size += len(chunk)
+                    if size > MAX_AUDIO_BYTES: raise RuntimeError('Audio exceeds bound')
+                    output_emitter.push(chunk)
+            finally:
+                await chunks.aclose()
             if not size or size % 2: raise RuntimeError('Invalid PCM stream')
             output_emitter.end_input()
             await output_emitter.join()

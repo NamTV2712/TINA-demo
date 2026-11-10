@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { EventEmitter } from 'node:events';
-import { PassThrough } from 'node:stream';
+import { PassThrough, Writable } from 'node:stream';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { ChildProcess } from 'node:child_process';
@@ -12,6 +12,38 @@ import { parseAct } from './contracts.js';
 import type { Invocation } from './config.js';
 
 const id = '00000000-0000-4000-8000-000000000001';
+
+test('speech timing separates first PCM, prebuffer and actual player input; Stop fences a delayed write', async () => {
+  const previous=process.env.TTS_SERVICE_URL;
+  const server=createServer((req,res)=>{req.resume();req.on('end',()=>res.end(Buffer.alloc(8000)));});
+  await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+  process.env.TTS_SERVICE_URL=`http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  let writeDone:((error?:Error|null)=>void)|undefined,spawned=false,starts=0;
+  const playback=createTtsPlayback(()=>{},{setMute(){},spawnProcess(){
+    const child=new EventEmitter() as unknown as ChildProcess;
+    const stdin=new Writable({write(_chunk,_encoding,done){writeDone=done;}});
+    Object.assign(child,{stdin,stderr:new PassThrough(),kill(){child.emit('exit',null);return true;}});
+    stdin.once('finish',()=>setImmediate(()=>child.emit('exit',0)));
+    setImmediate(()=>{spawned=true;child.emit('spawn');});return child;
+  }});
+  try {
+    for(const stop of [false,true]){
+      writeDone=undefined;spawned=false;
+      const pending=playback.prepare!('PRIVATE response');assert.equal(await pending.ready,true);
+      const timing=(pending as any).timing;
+      assert.equal(typeof timing.requestedAtMs,'number');assert(timing.firstPcmAtMs>=timing.requestedAtMs);
+      assert(timing.readyAtMs>=timing.firstPcmAtMs);assert.equal(timing.playbackAtMs,undefined);
+      const before=starts,playing=pending.play(()=>{starts++;});
+      for(let i=0;i<100&&(!spawned||!writeDone);i++)await new Promise(r=>setTimeout(r,2));
+      assert(spawned&&writeDone);assert.equal(starts,before,'spawn is not a playback receipt');
+      if(stop)playback.stop();
+      writeDone!();assert.equal(await playing,stop?'stopped':'completed');
+      assert.equal(starts,before+(stop?0:1));
+      if(!stop)assert((pending as any).timing.playbackAtMs>=timing.readyAtMs);
+    }
+  } finally {playback.stop();if(previous===undefined)delete process.env.TTS_SERVICE_URL;else process.env.TTS_SERVICE_URL=previous;
+    await new Promise<void>(resolve=>server.close(()=>resolve()));}
+});
 
 test('played text receipts stay ordered and never leak into the callback URL',async()=>{
   const bodies:unknown[]=[],urls:string[]=[];
