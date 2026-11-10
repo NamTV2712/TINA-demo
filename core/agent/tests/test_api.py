@@ -72,6 +72,31 @@ def _client(stream_reader=None) -> TestClient:
     ))
 
 
+@pytest.mark.parametrize('header', ['00000000-0000-4000-8000-000000000123', 'invalid-private-header'])
+def test_voice_dispatch_preserves_trace_metadata_separately_from_model_input(tmp_path, monkeypatch, header):
+    from fastapi import Request
+    from control_plane import meeting_knowledge
+    from control_plane.workspace_reader import WorkspaceReader
+    from shared.meeting_knowledge import PREFIX
+    captured = []
+    monkeypatch.setattr(meeting_knowledge, 'register', lambda *args: captured.append(args[-1]))
+    class Reader:
+        def read(self, *args, **kwargs):
+            yield {'type': 'message-delta', 'text': '{"claims":[]}'}
+            yield {'type': 'turn-complete'}
+    dispatcher = Dispatcher(load_settings(), _FakeRuntime(), _FakeIdentity())
+    invocations = []
+    monkeypatch.setattr(dispatcher, 'dispatch', lambda invocation: invocations.append(invocation) or 'test-unit')
+    create_app(dispatcher, reader=WorkspaceReader(str(tmp_path)), stream_reader=Reader())
+    request = Request({'type': 'http', 'headers': [(b'x-user-id', b'u_jane'),
+                      (b'x-tina-voice-request-id', header.encode())]})
+    text = '{"mode":"voice","question":"Synthetic?","sources":[]}'
+    assert captured[0](request, text) == '{"claims":[]}'
+    payload = json.loads(invocations[-1]['start']['entrypoint']['inline'][len(PREFIX):])
+    assert payload['text'] == text
+    assert payload.get('voice_trace_id') == (header if header.startswith('0000') else None)
+
+
 # ── SSE ownership gate (P0) test helpers ──────────────────────────────────────────────────────────
 # The live SSE feed now OWNER-SCOPES every request (subject_of → meeting-api ownership lookup) before it
 # opens the redis stream. In L2 we inject a fake owner-lookup: a map of {(user_id, row_id): native}, and

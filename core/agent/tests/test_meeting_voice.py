@@ -42,6 +42,55 @@ HEADERS = {'X-Internal-Secret': 'test-internal', 'X-User-Id': '7'}
 URL = '/api/internal/meeting-voice/1/answer'
 
 
+def test_voice_request_uuid_correlates_retrieval_and_answer_without_logging_sources(voice, caplog):
+    import logging
+    client, *_ = voice
+    identifier = '00000000-0000-4000-8000-000000000123'
+    with caplog.at_level(logging.INFO, logger='shared.voice_trace'):
+        response = client.post(URL, headers=HEADERS | {'X-Tina-Voice-Request-Id': identifier},
+                               json={'question': 'Budget?', 'revision': 1})
+    assert response.status_code == 200
+    records = [json.loads(r.message) for r in caplog.records if r.name == 'shared.voice_trace']
+    assert {r['request_id'] for r in records} == {identifier}
+    assert {'semantic_retrieval', 'answer'} <= {r['stage'] for r in records}
+    assert 'PRIVATE' not in caplog.text and 'budget' not in caplog.text.casefold()
+
+
+def test_stopped_summary_turn_cannot_dispatch_more_work(voice, monkeypatch):
+    client, row, _, prompts, _ = voice
+    original = api.meeting_get
+    permits = []
+    row['data']['voice_assistant']['include_transcript'] = True
+    def fetch(base, user, mid, path):
+        if path.startswith('/internal/meeting-voice/'):
+            permits.append(path)
+            return {'current': False}
+        return original(base, user, mid, path)
+    monkeypatch.setattr(api, 'meeting_get', fetch)
+    response = client.post(URL, headers=HEADERS | {'X-Tina-Voice-Request-Id': '00000000-0000-4000-8000-000000000123'},
+                           json={'question': 'Tổng hợp toàn bộ quyết định trong cuộc họp.', 'revision': 1})
+    assert response.status_code == 200 and response.json()['reason'] == 'verification_unavailable'
+    assert permits and not prompts
+
+
+def test_summary_permit_reads_use_the_internal_secret_only_on_the_internal_path(monkeypatch):
+    import io
+    requests = []
+    def open_request(request, **kwargs):
+        requests.append({k.lower(): v for k, v in request.header_items()})
+        return io.BytesIO(b'{"current":true}')
+    monkeypatch.setattr(api.urllib.request, 'urlopen', open_request)
+    monkeypatch.setenv('TINA_INTERNAL_API_SECRET', 'synthetic-internal-secret')
+    assert api.meeting_get('http://meeting.test', '7', 1, '/internal/meeting-voice/1/turn/test')['current']
+    assert requests[-1]['x-internal-secret'] == 'synthetic-internal-secret'
+    api.meeting_get('http://meeting.test', '7', 1, '/meetings/1')
+    assert 'x-internal-secret' not in requests[-1]
+    monkeypatch.delenv('TINA_INTERNAL_API_SECRET')
+    with pytest.raises(HTTPException) as error:
+        api.meeting_get('http://meeting.test', '7', 1, '/internal/meeting-voice/1/turn/test')
+    assert error.value.status_code == 503 and len(requests) == 2
+
+
 def test_only_explicit_shared_sources_enter_voice_prompt(voice):
     client, row, root, prompts, mutate = voice
     response = client.post(URL, headers=HEADERS, json={'question': 'Budget?', 'revision': 1})

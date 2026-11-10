@@ -210,3 +210,49 @@ def test_failed_review_skips_repair_and_forged_repair_sources_are_rejected():
     assert result['claims']==[] and result['verification']==['unsupported_claim','repair_failed']
     for body in ({'claims':[],'follow_up':'Bạn nói rõ?'}, {'claims':json.loads(raw)['claims'],'follow_up':'Chắc chắn.'}):
         with pytest.raises(ValueError):validate_voice_answer(json.dumps(body),sources)
+
+
+def test_conversational_reply_keeps_citations_and_missing_detail_through_verification():
+    from shared.voice_knowledge import verify_voice_reply
+    raw = json.dumps({'claims': [{'text': 'Lan phụ trách demo.', 'source_ids': ['s0']}],
+                      'follow_up': 'Bạn có số điện thoại của Lan không?'})
+    source = {'id': 's0', 'quote': 'Lan phụ trách demo.'}
+    seen = []
+    def review(prompt):
+        seen.append(json.loads(prompt))
+        return '{"approved":true}'
+    result = json.loads(verify_voice_reply(raw, 'Ai làm demo và số điện thoại là gì?', [source], review, diagnostics=True))
+    assert result['claims'][0]['source_ids'] == ['s0'] and result['verification'] == ['approved']
+    assert seen[0]['reply']['follow_up'] == result['follow_up']
+    assert seen[0]['sources'] == [source]
+
+
+@pytest.mark.parametrize('recovered,review,expected', [
+    ('{"claims":[{"text":"Lan làm demo.","source_ids":["s0"]}]}', '{"approved":true}', 'Lan làm demo.'),
+    ('plain text again', '{"approved":true}', None),
+    ('{"claims":[{"text":"Minh làm demo.","source_ids":["s0"]}]}', '{"approved":false,"reason":"contradiction"}', None),
+])
+def test_malformed_voice_reply_gets_one_regeneration_and_still_requires_source_review(monkeypatch, recovered, review, expected):
+    from types import SimpleNamespace
+    from worker import engine
+    from shared.meeting_knowledge import PREFIX
+    from shared.voice_knowledge import VOICE_FORMAT_SYSTEM, VERIFY_SYSTEM
+    identifier = 'format-recovery'; events = []; systems = []
+    monkeypatch.setenv('TINA_CHAT_SESSION', 'meeting-knowledge-' + identifier)
+    source = {'mode': 'voice', 'question': 'Ai làm demo và số điện thoại là gì?',
+              'sources': [{'id': 's0', 'quote': 'Lan làm demo.'}], 'tools_remaining': 0}
+    calls = iter(['Lan làm demo. {"claims":[]}', recovered, review, '{"claims":[]}', review])
+    def complete(prompt, **kwargs):
+        systems.append(kwargs.get('system')); return SimpleNamespace(text=next(calls))
+    monkeypatch.setattr(engine, 'completion_from_env', lambda **_: SimpleNamespace(complete=complete))
+    stream = SimpleNamespace(xadd=lambda _, e: events.append(json.loads(e['event'])), expire=lambda *_: None)
+    engine._run_meeting_knowledge(stream, 'synthetic', {'entrypoint': {'inline': PREFIX + json.dumps({
+        'request_id': identifier, 'text': json.dumps(source)})}})
+    assert systems.count(VOICE_FORMAT_SYSTEM) == 1
+    output = [json.loads(e['text']) for e in events if e['type'] == 'message-delta']
+    if expected:
+        assert output[0]['claims'][0]['text'] == expected and VERIFY_SYSTEM in systems
+        assert output[0]['verification'] == ['approved']
+    else:
+        assert not output or not output[0]['claims']
+    assert events[-1]['type'] == 'turn-complete'

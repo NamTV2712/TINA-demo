@@ -17,7 +17,8 @@ from typing import Optional
 
 import httpx
 
-from llm.errors import LLMAuthError, LLMConfigError, LLMError
+from llm.errors import (LLMAuthError, LLMConfigError, LLMError,
+                        LLMStructuredOutputUnsupported, structured_output_unsupported)
 from llm.ports import CompletionResult
 
 
@@ -37,6 +38,13 @@ class OpenAICompatCompletion:
 
     def complete(self, prompt: str, *, system: Optional[str] = None,
                  model: Optional[str] = None) -> CompletionResult:
+        return self._complete(prompt, system=system, model=model)
+
+    def complete_structured(self, prompt: str, *, system: str, schema: dict) -> CompletionResult:
+        return self._complete(prompt, system=system, schema=schema)
+
+    def _complete(self, prompt: str, *, system: Optional[str] = None,
+                  model: Optional[str] = None, schema: dict | None = None) -> CompletionResult:
         target = (model or "").strip() or self._model
         if not self._base:
             raise LLMConfigError(
@@ -51,12 +59,18 @@ class OpenAICompatCompletion:
         messages = ([{"role": "system", "content": system}] if system else [])
         messages.append({"role": "user", "content": prompt})
         headers = {"Authorization": f"Bearer {self._key}"} if self._key else {}
+        payload = {"model": target, "messages": messages}
+        if schema is not None:
+            payload['response_format'] = {'type': 'json_schema', 'json_schema': {
+                'name': 'tina_voice', 'strict': True, 'schema': schema}}
         try:
             r = self._client.post(f"{self._base}/chat/completions",
-                                  json={"model": target, "messages": messages}, headers=headers)
+                                  json=payload, headers=headers)
         except httpx.HTTPError as exc:
             detail = str(exc).replace(self._key, "[redacted]") if self._key else str(exc)
             raise LLMError(f"completion transport failure against {self._base}: {detail}") from exc
+        if schema is not None and structured_output_unsupported(r, 'response_format'):
+            raise LLMStructuredOutputUnsupported('Structured output is unsupported')
         if r.status_code in (401, 403):
             detail = r.text.replace(self._key, "[redacted]") if self._key else r.text
             raise LLMAuthError(f"{r.status_code} from {self._base}: {detail[:300]}", status_code=r.status_code)

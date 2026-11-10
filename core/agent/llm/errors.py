@@ -33,6 +33,23 @@ class LLMAuthError(LLMError):
     token/endpoint mismatch instead of a generic model error."""
 
 
+class LLMStructuredOutputUnsupported(LLMError):
+    """The endpoint explicitly rejected the structured-output request parameter."""
+
+
+def structured_output_unsupported(response: httpx.Response, parameter: str) -> bool:
+    if response.status_code not in (400, 422):
+        return False
+    try:
+        error = response.json().get('error', {})
+        return (isinstance(error, dict)
+                and error.get('code') in ('unsupported_parameter', 'unsupported_value')
+                and isinstance(error.get('param'), str)
+                and (error['param'] == parameter or error['param'].startswith(parameter + '.')))
+    except (ValueError, AttributeError):
+        return False
+
+
 def completion_failure_code(exc: Exception) -> str:
     """Classify typed failures only. Never infer status from model/provider text."""
     if isinstance(exc, LLMAuthError):

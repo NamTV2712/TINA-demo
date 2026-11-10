@@ -64,19 +64,23 @@ def gather(jobs, deadline):
                 for index in active.pop(future): completed[index] = result
         if len(completed) == len(jobs): return [completed[i] for i in range(len(jobs))], len(completed)
         remaining = deadline - time.monotonic()
-        if remaining <= 0 or not active: return None, len(completed)
+        if remaining <= 0: return None, len(completed)
+        if not active:
+            # Another recap may own all slots; wait inside this turn instead of asking for a repeat.
+            time.sleep(min(remaining, .05))
+            continue
         wait(active, timeout=min(remaining,.25), return_when=FIRST_COMPLETED)
     return [], 0
 
 
 def pending(question, completed, total):
     english = bool(re.search(r'\b(?:summary|summari[sz]e|recap)\b', question.casefold()))
-    text = (f'I have prepared {completed} of {total} parts in this stage. Please ask for the recap again to continue.' if english else
-            f'Tôi mới tổng hợp {completed}/{total} phần ở bước này. Bạn hỏi lại sau một chút để tôi tiếp tục nhé.')
+    text = ('The recap did not finish within the waiting limit. I do not have a fully verified summary yet.' if english else
+            'Việc tổng hợp chưa hoàn tất trong thời gian chờ. Em chưa có bản tóm tắt đã được kiểm chứng.')
     return {'text':text,'sources':[],'answer_kind':'meeting','reason':'summary_pending'}
 
 
-def recap(question, candidates, scope, complete, *, budget=70):
+def recap(question, candidates, scope, complete, *, budget=120):
     deadline = time.monotonic() + budget
     sources = [s | {'id':f's{i}'} for i,s in enumerate(candidates)]
     parts = summary_parts(sources)
@@ -85,7 +89,7 @@ def recap(question, candidates, scope, complete, *, budget=70):
         return (scope, stage, digest(payload)), work
     jobs = [job('map',part,partial(map_part,complete,part)) for part in parts]
     try:
-        mapped, count = gather(jobs, min(deadline, time.monotonic()+35))
+        mapped, count = gather(jobs, deadline)
     except Exception: return voice_failure('verification_unavailable')
     if mapped is None: return pending(question,count,len(parts))
     facts = [claim for group in mapped for claim in group]

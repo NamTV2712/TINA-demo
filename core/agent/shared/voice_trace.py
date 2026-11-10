@@ -1,0 +1,50 @@
+"""Content-free voice stage timings correlated with the bot's existing request UUID."""
+from contextlib import contextmanager
+from contextvars import ContextVar
+from functools import wraps
+import json
+import logging
+import time
+from uuid import UUID, uuid4
+
+log = logging.getLogger(__name__)
+log.setLevel(logging.INFO)
+if not log.hasHandlers(): log.addHandler(logging.StreamHandler())
+voice_trace_id = ContextVar('voice_trace_id', default=None)
+
+
+@contextmanager
+def voice_span(stage, request_id=None):
+    current = voice_trace_id.get()
+    try:
+        identifier = str(UUID(str(request_id))) if request_id else current or str(uuid4())
+    except (ValueError, AttributeError):
+        identifier = current or str(uuid4())
+    token = voice_trace_id.set(identifier)
+    started = time.monotonic()
+    metrics = {}
+    status = 'ok'
+    try:
+        yield metrics
+    except BaseException:
+        status = 'error'
+        raise
+    finally:
+        voice_trace_id.reset(token)
+        record = {'type': 'voice_stage', 'request_id': identifier, 'stage': stage,
+                  'elapsed_ms': round((time.monotonic() - started) * 1000), 'status': status}
+        for key in ('input_sources', 'output_sources'):
+            if type(metrics.get(key)) is int: record[key] = metrics[key]
+        if metrics.get('outcome') in ('applied', 'fallback', 'skipped'): record['outcome'] = metrics['outcome']
+        log.info('%s', json.dumps(record))
+
+
+def trace_voice_request(stage):
+    def decorate(function):
+        @wraps(function)
+        def traced(*args, **kwargs):
+            request = kwargs.get('request') if 'request' in kwargs else args[0]
+            with voice_span(stage, request.headers.get('x-tina-voice-request-id')):
+                return function(*args, **kwargs)
+        return traced
+    return decorate

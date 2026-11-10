@@ -11,7 +11,8 @@ from typing import Optional
 
 import httpx
 
-from llm.errors import LLMAuthError, LLMConfigError, LLMError
+from llm.errors import (LLMAuthError, LLMConfigError, LLMError,
+                        LLMStructuredOutputUnsupported, structured_output_unsupported)
 from llm.ports import CompletionResult
 from llm.citations import safe_web_source
 
@@ -34,6 +35,9 @@ class OpenAIResponsesCompletion:
                  model: Optional[str] = None) -> CompletionResult:
         return self._complete(prompt, system=system, model=model)
 
+    def complete_structured(self, prompt: str, *, system: str, schema: dict) -> CompletionResult:
+        return self._complete(prompt, system=system, schema=schema)
+
     def search(self, question: str) -> CompletionResult:
         """An explicit public query only; no room history, files or credentials enter the input."""
         return self._complete(question, web_search=True, system=(
@@ -43,7 +47,8 @@ class OpenAIResponsesCompletion:
         ))
 
     def _complete(self, prompt: str, *, system: Optional[str] = None,
-                  model: Optional[str] = None, web_search: bool = False) -> CompletionResult:
+                  model: Optional[str] = None, web_search: bool = False,
+                  schema: dict | None = None) -> CompletionResult:
         target = (model or "").strip() or self._model
         if not self._key:
             raise LLMConfigError("OpenAI Responses credential is missing")
@@ -58,6 +63,9 @@ class OpenAIResponsesCompletion:
         }
         if system:
             payload["instructions"] = system
+        if schema is not None:
+            payload['text'] = {'format': {'type': 'json_schema', 'name': 'tina_voice',
+                                         'strict': True, 'schema': schema}}
         if web_search:
             payload.update(tools=[{"type": "web_search"}], tool_choice="required")
         sources, searched, completed = {}, False, False
@@ -72,6 +80,10 @@ class OpenAIResponsesCompletion:
                 "POST", f"{self._base}/responses", json=payload,
                 headers={"Authorization": f"Bearer {self._key}"},
             ) as response:
+                if schema is not None and response.status_code in (400, 422):
+                    response.read()
+                    if structured_output_unsupported(response, 'text.format'):
+                        raise LLMStructuredOutputUnsupported('Structured output is unsupported')
                 if response.status_code in (401, 403):
                     detail = response.read().decode("utf-8", errors="replace")[:300]
                     raise LLMAuthError(f"{response.status_code} from {self._base}: {detail}", status_code=response.status_code)

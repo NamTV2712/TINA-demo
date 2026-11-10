@@ -32,6 +32,15 @@ fakes.
 HTTP completion adapters use raw `httpx`; CLI harnesses use the provider's supported local process
 interface so TINA can keep its existing workspace and event boundary.
 
+OpenAI Responses and Chat Completions adapters also expose the optional
+`complete_structured(prompt, system=..., schema=...)` capability for meeting voice. They request
+strict JSON Schema using `text.format` or `response_format`; ordinary `complete` calls keep their
+existing request shape. Only an explicit 400/422 `unsupported_parameter`/`unsupported_value`
+for that format parameter raises `LLMStructuredOutputUnsupported`. The voice worker can then
+use ordinary completion within its remaining budget, retaining source validation and review.
+Auth, quota, invalid schemas, transport failures and incomplete streams never trigger this fallback.
+Other completion adapters keep the existing prompt/validation path; no new dependency is required.
+
 Completion exceptions retain typed HTTP status in `LLMError.status_code`. The public
 `completion_failure_code()` helper maps only typed auth/config/status/timeout/parse errors to
 fixed recovery codes, never interpreting provider or model text. Live translation uses this

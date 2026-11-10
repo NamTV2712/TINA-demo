@@ -41,3 +41,24 @@ Voice ranking accepts an injected semantic candidate ranking and fuses it with B
 voice_summary owns conservative whole-meeting recap intent detection, chronological bounded transcript parts and separate map/selection prompts. Local/time-limited recaps retain normal query retrieval.
 
 Supplemental voice context uses opaque key/fingerprint hashes and at most three adjacent original chunks on each side. Multi-query merging shares the existing budget across lookup groups so earlier useful evidence is retained.
+
+The spoken meeting prompt uses concise conversational phrasing, direct answers and short follow-ups.
+Vietnamese replies use “em” only when self-reference is useful, address the listener as “bạn” without
+inferring age/rank, and omit pronouns where unnecessary. Partial answers describe the missing detail
+without claiming whole-meeting coverage. This affects generated and repaired wording only; cited
+claims, numeric checks, reviewer requirements and history-as-context rules remain authoritative.
+
+Voice source review checks the claims actually asserted. A cited answer may cover the known part
+of a compound request without inventing an unknown detail; missing coverage alone is not a false
+claim. The reviewer still rejects invented details, unsupported absence claims and contradictions.
+VOICE_FORMAT_SYSTEM regenerates malformed wire output from the original authorized evidence; its
+result must pass ordinary claim and source review before release.
+
+`voice_schema.py` builds provider-side answer/plan/review/rerank shapes with authorized source-ID
+enums. Nullable optional fields preserve the existing semantic validator and source checks.
+`voice_rerank.py` optionally selects up to 12 useful excerpts when retrieval returns more than
+eight, retaining recent speech and heard-history references within 32 excerpts/24000 characters.
+Invalid/empty rankings, oversized protected context and provider failures retain the original list.
+The verifier and repair still see every originally retrieved excerpt, including contradictions.
+`voice_trace.py` records only UUIDs, fixed stages/statuses, elapsed milliseconds and source counts.
+Its request context is reset after each call; questions, excerpts, tokens and provider output are omitted.

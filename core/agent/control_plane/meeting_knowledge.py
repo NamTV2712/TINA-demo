@@ -11,7 +11,6 @@ import time
 import yaml
 from datetime import datetime, timezone
 from pathlib import Path
-from functools import partial
 
 from fastapi import HTTPException, Request
 from pydantic import BaseModel, Field, PositiveInt, field_validator
@@ -26,6 +25,7 @@ from llm import safe_web_source
 from control_plane.voice_retrieval import semantic_rank
 from control_plane.voice_summary import recap
 from shared.voice_summary import wants_summary
+from shared.voice_trace import trace_voice_request, voice_span
 
 
 class Question(BaseModel):
@@ -103,7 +103,12 @@ class VoiceAgentQuery(VoiceQuestion):
 def meeting_get(base, subject, meeting_id, suffix):
     if not base:
         raise HTTPException(503, 'Meeting service is not configured')
-    req = urllib.request.Request(base.rstrip('/') + suffix, headers={'X-User-Id': subject})
+    headers = {'X-User-Id': subject}
+    if suffix.startswith('/internal/meeting-voice/'):
+        secret = os.environ.get('TINA_INTERNAL_API_SECRET', '')
+        if not secret: raise HTTPException(503, 'Internal voice credential is missing')
+        headers['X-Internal-Secret'] = secret
+    req = urllib.request.Request(base.rstrip('/') + suffix, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=15) as response:
             data = response.read(4_000_001)
@@ -371,9 +376,15 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete):
         return request,row,base,policy,candidates
 
     def semantic_for(row, policy):
-        return partial(semantic_rank, f"{row['user_id']}:{row['id']}:{policy['revision']}")
+        def rank(question, sources):
+            with voice_span('semantic_retrieval') as metrics:
+                result = semantic_rank(f"{row['user_id']}:{row['id']}:{policy['revision']}", question, sources)
+                metrics.update(input_sources=len(sources), output_sources=len(result))
+                return result
+        return rank
 
     @app.post('/api/internal/meeting-voice/{meeting_id}/agent',include_in_schema=False)
+    @trace_voice_request('agent')
     def voice_agent(request:Request,meeting_id:int,body:VoiceAgentQuery):
         request,row,base,policy,candidates=authorized_voice(request,meeting_id,body)
         if policy.get('engine')!='livekit': raise HTTPException(409,'LiveKit room policy required')
@@ -438,6 +449,7 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete):
         return result
 
     @app.post('/api/internal/meeting-voice/{meeting_id}/answer', include_in_schema=False)
+    @trace_voice_request('answer')
     def voice_answer(request: Request, meeting_id: int, body: VoiceQuestion):
         request,row,base,policy,candidates=authorized_voice(request,meeting_id,body)
         paths=policy.get('documents',[])
@@ -473,13 +485,25 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete):
         now_ms = int(time.time() * 1000)
         if kind == 'meeting' and wants_summary(body.question):
             summary_sources = [s for s in candidates if s['kind']=='transcript']
+            turn_id = request.headers.get('x-tina-voice-request-id')
+            if turn_id:
+                try: turn_id = str(uuid.UUID(turn_id))
+                except ValueError: raise HTTPException(409, 'Invalid summary turn') from None
+            def current_turn():
+                if turn_id:
+                    value = meeting_get(meeting_api_url, str(row['user_id']), meeting_id,
+                        f'/internal/meeting-voice/{meeting_id}/turn/{turn_id}')
+                    if value.get('current') is not True: raise HTTPException(409, 'Summary turn was stopped')
             def summary_complete(payload):
                 scoped_request = Request({**request.scope, 'state': {}})
                 _,fresh_row,fresh_base,fresh_policy,fresh_sources = authorized_voice(scoped_request,meeting_id,body)
                 if fresh_base!=base or fresh_policy!=policy or stale({'sources':summary_sources},fresh_sources):
                     raise HTTPException(409,'Summary sources changed')
-                return complete(scoped_request,json.dumps(payload,ensure_ascii=False))
-            answer = recap(body.question,candidates,f"{row['user_id']}:{meeting_id}:{policy['revision']}",summary_complete)
+                current_turn()
+                result = complete(scoped_request,json.dumps(payload,ensure_ascii=False))
+                current_turn()
+                return result
+            answer = recap(body.question,candidates,f"{row['user_id']}:{meeting_id}:{policy['revision']}:{turn_id or 'legacy'}",summary_complete)
         elif kind == 'meeting':
             history = current_history([t.model_dump() for t in body.history], candidates, now_ms)
             selected, recent_ids = voice_sources(candidates, body.question, history, now_ms,semantic=semantic_for(row,policy))

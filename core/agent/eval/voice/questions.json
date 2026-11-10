@@ -299,6 +299,86 @@
       "question": "Tra cứu web về HTTP status 503",
       "mode": "web",
       "expected_terms": []
+    },
+    {
+      "id": 31,
+      "question": "Ai phụ trách demo và bàn giao hôm nào?",
+      "mode": "meeting",
+      "expected_terms": [
+        "Lan",
+        "thứ Sáu"
+      ],
+      "expect_evidence": true,
+      "review_focus": "Direct answer; combine related facts without report-style preamble."
+    },
+    {
+      "id": 32,
+      "question": "Vậy còn hạn bàn giao?",
+      "mode": "meeting",
+      "expected_terms": [
+        "thứ Sáu"
+      ],
+      "expect_evidence": true,
+      "review_focus": "Answer only the follow-up detail; keep the same demo topic.",
+      "history": [
+        {
+          "question": "Ai phụ trách demo?",
+          "answer": "Lan phụ trách demo.",
+          "segment_ids": [
+            "demo"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 33,
+      "question": "Demo chuyển sang thứ Hai rồi đúng không?",
+      "mode": "meeting",
+      "expected_terms": [
+        "thứ Sáu"
+      ],
+      "expect_evidence": true,
+      "review_focus": "Correct the premise gently; preserve the negation."
+    },
+    {
+      "id": 34,
+      "question": "Ai phụ trách demo và số điện thoại của người đó là gì?",
+      "mode": "meeting",
+      "expected_terms": [
+        "Lan"
+      ],
+      "expect_evidence": true,
+      "review_focus": "Answer the known owner; do not invent a phone number or claim nobody shared it."
+    },
+    {
+      "id": 35,
+      "question": "Hạn nào đã chốt vậy?",
+      "mode": "meeting",
+      "expected_terms": [
+        "thứ Sáu"
+      ],
+      "expect_evidence": true,
+      "review_focus": "Resolve the short follow-up from heard history, without inventing a new topic.",
+      "history": [
+        {
+          "question": "Ai phụ trách demo?",
+          "answer": "Lan phụ trách demo.",
+          "segment_ids": [
+            "demo"
+          ]
+        }
+      ]
+    },
+    {
+      "id": 36,
+      "question": "Bạn nhắc lại phần phê duyệt và kiểm thử giúp tôi nhé.",
+      "mode": "meeting",
+      "expected_terms": [
+        "Mai",
+        "Huy"
+      ],
+      "expect_evidence": true,
+      "review_focus": "Distinguish approval from testing in ordinary spoken Vietnamese."
     }
   ]
 }

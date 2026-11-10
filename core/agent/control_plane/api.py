@@ -1164,6 +1164,14 @@ def create_app(
         else:
             prefix, session = units.DICTATION_TRANSLATE_PREFIX, "dictation-translate"
         payload = {"request_id": request_id, "text": text}
+        if task == 'knowledge':
+            from shared.voice_trace import voice_trace_id
+            trace_id = voice_trace_id.get()
+            if trace_id is None:
+                # Recap jobs run on a pool; their scoped Request preserves the internal UUID header.
+                try: trace_id = str(uuid.UUID(request.headers.get('x-tina-voice-request-id', '')))
+                except ValueError: pass
+            if trace_id: payload['voice_trace_id'] = trace_id
         if target_language is not None:
             payload["target_language"] = target_language
         inline = prefix + json.dumps(payload, ensure_ascii=False)

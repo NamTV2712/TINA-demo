@@ -28,6 +28,7 @@ def wants_summary(question):
     if re.search(r'(?:\d+|vài|mấy)\s*(?:phút|giờ)|gần đây|vừa rồi|vừa nói|recent|last\s+\d+', text):
         return False
     return bool(re.search(r'(?:tóm tắt|tổng kết|tổng hợp|điểm lại)\s+(?:(?:lại|cho tôi|giúp tôi|toàn bộ|cả|nội dung|buổi)\s+)*(?:cuộc họp|meeting)', text)
+        or re.search(r'(?:tóm tắt|tổng kết|tổng hợp|điểm lại).*?(?:quyết định|công việc|ý chính|kết luận).*?(?:cuộc họp|meeting)', text)
         or re.search(r'từ đầu.*(?:đến giờ|đến nay|tới giờ).*(?:chốt|quyết định|thảo luận|nói|việc|thống nhất)', text)
         or re.search(r'(?:tóm tắt|tổng kết|tổng hợp).*từ đầu.*(?:đến giờ|đến nay)', text)
         or re.search(r'\b(?:summari[sz]e|recap|summari[sz]ation|summary of)\s+(?:(?:the|this|whole|entire|our)\s+)*meeting\b', text))
