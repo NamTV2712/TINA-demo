@@ -26,6 +26,12 @@
       "note": "Connection pooler. Wrapper image is MIT; PgBouncer itself is ISC — both Category A."
     },
     {
+      "name": "livekit/livekit-server",
+      "license": "Apache-2.0",
+      "disposition": "sidecar",
+      "note": "Self-hosted LiveKit SFU for the opt-in voice agent stack; upstream livekit/livekit is Apache-2.0."
+    },
+    {
       "name": "versity/versitygw",
       "license": "Apache-2.0",
       "disposition": "sidecar",
