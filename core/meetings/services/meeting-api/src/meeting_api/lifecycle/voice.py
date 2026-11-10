@@ -216,7 +216,7 @@ def policy_of(row):
 def build_voice_router(repo, redis, publisher, playback=None, client_factory=httpx.AsyncClient):
     router = APIRouter()
 
-    async def meeting(mid, user=None, session=None, authorization=None):
+    async def meeting(mid, user=None, session: str | None = None, authorization=None):
         row = await repo.get_meeting(mid)
         if row is None or (user is not None and str(row['user_id']) != str(user)):
             raise HTTPException(404, 'Meeting not found')
@@ -261,7 +261,7 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
     def keys(mid, session, request):
         return f'meeting:voice:{mid}:lock', f'meeting:voice:{mid}:{session}:{request}'
 
-    async def reserve(mid, session, request):
+    async def reserve(mid, session: str, request):
         lock, _ = keys(mid, session, request)
         for _ in range(4):
             try:
@@ -289,7 +289,7 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
                 continue
         raise HTTPException(409, 'Voice reservation changed concurrently')
 
-    async def release(mid, session, request):
+    async def release(mid, session: str, request):
         lock, _ = keys(mid, session, request)
         for _ in range(3):
             async with redis.pipeline(transaction=True) as pipe:
@@ -507,7 +507,7 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
                 await release(mid, session, body.request_id)
         return {'accepted': True}
 
-    async def heard_history(mid, session, policy, speaker, row):
+    async def heard_history(mid, session: str, policy, speaker, row):
         key = f'meeting:voice:{mid}:{session}:history:{policy.revision}:{speaker}' if speaker else None
         stored = json.loads(await redis.get(key) or '[]') if key else []
         replies = (row.get('data') or {}).get('voice_replies') or {}
@@ -532,7 +532,7 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
             raise HTTPException(409, 'Conversation is no longer current')
         return matched
 
-    async def livekit_reservation(mid, session, body, speaker, policy):
+    async def livekit_reservation(mid, session: str, body, speaker, policy):
         if policy.engine != 'livekit': raise HTTPException(409, 'LiveKit room policy required')
         lock, key = keys(mid, session, body.request_id)
         saved = json.loads(await redis.get(key + ':agent') or '{}')
