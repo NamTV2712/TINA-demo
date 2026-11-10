@@ -200,12 +200,13 @@ async def test_new_room_defaults_on_and_continuation_preserves_explicit_room_cho
     await request_bot(repo,runtime,user_id=USER,platform='google_meet',native_meeting_id='new-defaults',voice_agent_enabled=True,token_secret=SECRET)
     row=next(iter(repo._meetings.values()));policy=row['data']['voice_assistant']
     assert policy['enabled'] and policy['noise_suppression'] and policy['include_transcript'] and policy['documents']==[]
+    assert policy['engine']=='livekit' and policy['allow_general_knowledge'] and policy['allow_web_search']
     if saved is None:row['data'].pop('voice_assistant')
     else:row['data']['voice_assistant']=saved.copy()
     row['status']='completed'
     await request_bot(repo,runtime,user_id=USER,platform='google_meet',native_meeting_id='new-defaults',voice_agent_enabled=True,token_secret=SECRET,continue_meeting=True)
     current=next(iter(repo._meetings.values()))['data']['voice_assistant']
-    if not saved:assert current['enabled'] and current['noise_suppression'] and current['documents']==[]
+    if not saved:assert current==policy
     else:assert current==saved
     assert json.loads(runtime.specs[-1]['env']['BOT_CONFIG'])['transcriptionServiceUrl']=='http://asr.test'
 

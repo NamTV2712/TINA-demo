@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 
 interface Services {
+  new_meeting_policy?:RoomPolicy;
   wake:{method:string;names:string[];platforms:string[];engine?:string;version?:string;device?:string;
     status?:string;sessions?:Array<{meeting_id:number;status:string}>};voice_pipeline_configured:boolean;default_prepare_new_bots:boolean;
   tts:{configured:boolean;ready:boolean;busy:boolean;model:string|null;voice:string|null;device:string|null};
@@ -18,6 +19,7 @@ export function VoiceSettings(){
   const kwsLabels:Record<string,string>={ready:'Ready',starting:'Starting…',failed:'Unavailable',off:'Disabled',
     unknown:'Needs a new bot',no_active_bot:'No active bot'};
   const kwsLabel = (status?:string) => kwsLabels[status||'']||'Checking…';
+  const defaultVoice=services?.voice_pipeline_configured&&(value==='on'||(value==='default'&&services.default_prepare_new_bots));
   useEffect(()=>{
     alive.current=true;const abort=new AbortController();
     void Promise.all([fetch('/api/user/voice',{cache:'no-store',signal:abort.signal}),
@@ -57,6 +59,27 @@ export function VoiceSettings(){
     finally{if(alive.current&&!abort.signal.aborted)setPreviewBusy(false);}
   }
   return <div style={{display:'grid',gridTemplateColumns:'minmax(0,1fr)',gap:12,maxWidth:620,minWidth:0}} aria-label="Voice assistant settings">
+    <section style={card} aria-label="New meeting defaults">
+      <div style={{display:'flex',gap:12,justifyContent:'space-between',flexWrap:'wrap'}}>
+        <strong>New meeting defaults</strong>
+        <span>{services?.new_meeting_policy?.engine==='livekit'?'LiveKit Agents':services?.new_meeting_policy?.engine==='tina'?'TINA':'Checking…'}</span>
+      </div>
+      <span style={{fontSize:12,color:'var(--t3)'}}>Applied automatically to new Google Meet meetings. No room setup needed.</span>
+      <dl style={{display:'grid',gap:8,margin:0,fontSize:13}}>
+        {([['enabled','Voice assistant'],['include_transcript','Meeting transcript'],
+          ['allow_general_knowledge','General knowledge'],['allow_web_search','Public web search']] as const).map(([key,label])=>
+          <div key={key} style={{display:'flex',justifyContent:'space-between',gap:12}}>
+            <dt>{label}</dt><dd style={{margin:0,color:'var(--t2)'}}>{!services?.new_meeting_policy?'Unavailable':(key==='enabled'?defaultVoice:services.new_meeting_policy[key])?'On':'Off'}</dd>
+          </div>)}
+      </dl>
+      <label htmlFor="voice-default" style={{fontSize:12,color:'var(--t3)'}}>Default for new Google Meet bots</label>
+      <select id="voice-default" style={{...button,width:'100%'}} value={value} disabled={loading||busy} onChange={e=>setValue(e.target.value)}>
+        <option value="default">Use deployment default{services?` (${services.default_prepare_new_bots?'on':'off'})`:''}</option>
+        <option value="on">Enable voice</option><option value="off">Disable voice</option>
+      </select>
+      {saved!==value&&<button type="button" style={{...button,justifySelf:'start'}} disabled={loading||busy} onClick={save}>Save default</button>}
+      <span style={{fontSize:12,color:'var(--t3)'}}>Saved meeting settings stay unchanged. Documents require sharing.</span>
+    </section>
     <RoomVoiceSettings sessions={services?.wake.sessions||[]}/>
     <section style={card} aria-label="Wake phrases">
       <div style={{display:'flex',gap:12,justifyContent:'space-between',flexWrap:'wrap'}}>
@@ -84,15 +107,6 @@ export function VoiceSettings(){
       </div>
       <span style={{fontSize:12,color:'var(--t3)'}}>Preview plays in your browser only. Voice is set by the server.</span>
       {audioUrl&&<audio ref={audio} controls src={audioUrl} aria-label="TINA voice preview" style={{width:'100%'}}/>}
-    </section>
-    <section style={card} aria-label="New bot default">
-      <label htmlFor="voice-default" style={{fontWeight:600}}>Default for new Google Meet bots</label>
-      <select id="voice-default" style={{...button,width:'100%'}} value={value} disabled={loading||busy} onChange={e=>setValue(e.target.value)}>
-        <option value="default">Use deployment default{services?` (${services.default_prepare_new_bots?'on':'off'})`:''}</option>
-        <option value="on">Enable voice</option><option value="off">Disable voice</option>
-      </select>
-      <p style={{margin:0,fontSize:12,color:'var(--t3)',lineHeight:1.5}}>Applies to new bots unless overridden. New meetings use their transcript; documents stay off.</p>
-      <button type="button" style={{...button,justifySelf:'start'}} disabled={loading||busy||saved===value} onClick={save}>Save default</button>
     </section>
     {error&&<p role="alert" style={{margin:0,color:'var(--warn)'}}>{error}</p>}
     {notice&&<p role="status" style={{margin:0,color:'var(--t2)'}}>{notice}</p>}
@@ -125,20 +139,21 @@ function RoomVoiceSettings({sessions}:{sessions:Array<{meeting_id:number;status:
     }catch(e){if(identity.current===id)setMessage((e as Error).message);}
     finally{if(identity.current===id)setBusy(false);}
   }
-  return <section style={card} aria-label="Room answers">
-    <strong>Room answers</strong>
+  if(!sessions.length)return null;
+  return <details style={{...card,display:'block'}} aria-label="Room answers">
+    <summary style={{cursor:'pointer'}}>Meeting overrides (optional)</summary>
+    <div style={{display:'grid',gap:10,paddingTop:12}}>
     <label htmlFor="voice-room">Active meeting</label>
     <select id="voice-room" value={meeting} disabled={busy} onChange={e=>setMeeting(e.target.value)} style={button}>
       <option value="">Choose a meeting</option>{sessions.map(s=><option key={s.meeting_id} value={s.meeting_id}>Meeting #{s.meeting_id}</option>)}
     </select>
-    {!sessions.length&&<span style={{fontSize:12,color:'var(--t3)'}}>Start a Google Meet bot to configure its answer sources.</span>}
     {meeting&&policy&&<>
       <label htmlFor="voice-runtime">Voice runtime</label>
       <select id="voice-runtime" value={policy.engine||'tina'} disabled={busy} style={button}
         onChange={e=>setPolicy({...policy,engine:e.target.value as 'tina'|'livekit'})}>
-        <option value="tina">TINA</option><option value="livekit" disabled={!livekit}>LiveKit Agents · local pilot{livekit?'':' · not configured'}</option>
+        <option value="tina">TINA</option><option value="livekit" disabled={!livekit}>LiveKit Agents{livekit?'':' · not configured'}</option>
       </select>
-      {policy.engine==='livekit'&&<span style={{fontSize:12,color:'var(--t3)'}}>One meeting at a time. Uses the same ASR, approved sources and local voice. Select TINA to return.</span>}
+      {policy.engine==='livekit'&&<span style={{fontSize:12,color:'var(--t3)'}}>Up to 3 concurrent meetings. Uses your selected ASR, approved sources and local voice.</span>}
       {([['enabled','Enable voice'],['include_transcript','Use this meeting’s transcript'],
         ['allow_general_knowledge','Allow general knowledge'],['allow_web_search','Allow public web search']] as const).map(([key,label])=>
         <label key={key}><input type="checkbox" checked={!!policy[key]} disabled={busy} onChange={e=>setPolicy({...policy,[key]:e.target.checked})}/> {label}</label>)}
@@ -151,5 +166,6 @@ function RoomVoiceSettings({sessions}:{sessions:Array<{meeting_id:number;status:
       <button type="button" disabled={busy} style={{...button,justifySelf:'start'}} onClick={save}>Save room settings</button>
     </>}
     {message&&<p role="status" style={{margin:0,fontSize:12}}>{message}</p>}
-  </section>;
+    </div>
+  </details>;
 }

@@ -9,6 +9,7 @@ import httpx
 from fastapi import APIRouter, Header, HTTPException, Response
 
 from .stop_router import _resolve_user_id
+from .voice import new_meeting_voice_policy
 
 PREVIEW_TEXT = 'Xin chào, tôi là TINA. Tôi sẵn sàng hỗ trợ cuộc họp của bạn.'
 
@@ -64,6 +65,7 @@ def build_voice_settings_router(redis, client_factory=httpx.AsyncClient, repo=No
             statuses = {r['status'] for r in wake['sessions']}
             if statuses: wake['status'] = next((s for s in ['failed','unknown','starting','off','ready'] if s in statuses))
         return {'wake':wake,
+                'new_meeting_policy':new_meeting_voice_policy(),
                 'voice_pipeline_configured':os.environ.get('TINA_MEETING_VOICE', '').lower() in ('1','true','yes','on'),
                 'default_prepare_new_bots':bool(url), 'tts':tts}
 

@@ -33,6 +33,8 @@ async def test_service_metadata_is_authenticated_safe_and_reports_the_actual_voi
     assert r.json()['tts']['voice']=='Trúc Ly' and r.json()['tts']['ready']
     assert r.json()['wake']['names']==['TINA ơi','hey TINA']
     assert r.json()['wake']['method']=='livekit_wakeword' and r.json()['wake']['status']=='no_active_bot'
+    from meeting_api.lifecycle.voice import new_meeting_voice_policy
+    assert r.json()['new_meeting_policy']==new_meeting_voice_policy()
     assert 'synthetic-secret' not in r.text and 'tts.test' not in r.text
     assert requests[0].headers['X-API-Key']=='synthetic-secret'
 
