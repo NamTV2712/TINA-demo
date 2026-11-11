@@ -58,6 +58,8 @@ CASES = [
     ("GET", "/meetings/42/voice-assistant/sources/00000000-0000-4000-8000-000000000001",
      "/meetings/{meeting_id}/voice-assistant/sources/{request_id}"),
     ("PUT", "/meetings/42/voice-assistant", "/meetings/{meeting_id}/voice-assistant"),
+    ("POST", "/meetings/42/voice-assistant/navigation/00000000-0000-4000-8000-000000000123",
+     "/meetings/{meeting_id}/voice-assistant/navigation/{request_id}"),
     ("GET", "/meetings", "/meetings"),
     ("POST", "/meetings", "/meetings"),
     ("GET", "/meetings/42", "/meetings/{meeting_id}"),
@@ -332,7 +334,7 @@ def test_matrix_covers_every_declared_route():
 
     Both sides are read from the same build: `ROUTE_SCOPES` is what this build publishes, and
     `CARRIED_CASES` is the rows it can exercise. So this stays an EXACT equality in a build that
-    fronts four domains (62 rows) as much as in one that fronts five (69) — it never degrades to a
+    fronts four domains (63 rows) as much as in one that fronts five (70) — it never degrades to a
     subset check, which would be the one way for a declaration to go unexercised unnoticed."""
     covered = {(method, template) for method, _url, template in CARRIED_CASES}
     assert covered == set(ROUTE_SCOPES), (
