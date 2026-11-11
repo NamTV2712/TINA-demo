@@ -106,3 +106,17 @@ runs right before `git add -A` — it reverts any tracked `policy/` change back 
 untracked `policy/` add, emitting `{"type":"policy-reverted","paths":[…]}`. So a turn's legitimate
 (non-policy) writes still commit while a policy tamper is reverted before it can land. (Chosen default
 per plan Q3: post-turn validation + revert.)
+
+The internal meeting-voice agent endpoint validates shared sources and heard history for LiveKit context/plan/lookup; final answers retain source verification and revocation checks.
+
+Fixed assistant identity/capability/social replies do not generate room facts. Verified partial answers may ask one missing-detail question; source revocation still fences release.
+
+Voice source creation and the final revocation check use the same deterministic chunk projection. Full parent fingerprints invalidate every affected chunk; private documents and canonical transcript remain outside generated writes.
+
+Voice retrieval uses local INT8 multilingual-E5-small embeddings plus BM25 reciprocal rank fusion. Only already-approved source chunks enter encoding/scoring. The in-memory vector cache is bounded to 8192 entries, scoped by owner/meeting/policy revision/key/fingerprint and expires after 15 minutes. Runtime loads pinned local model/tokenizer files; no model downloads or outbound text embedding calls occur.
+
+Whole-meeting voice recaps map every approved transcript chunk through verified per-part facts, reduce bounded groups, then review final claims against original evidence plus related passages. The existing background pool completes map/select/verify under one 120-second waiting deadline, without returning early after the map stage. The bot announces once and plays the verified result automatically in the same reserved voice turn. An expired run emits summary_pending with no factual summary or promise of later playback. RAM work is scoped by owner/meeting/policy/request UUID; an abandoned request cannot poison a new turn with its cancelled futures. Each job rechecks current sources/policy and the internal Meeting API turn permit before and after inference; Stop, a replacement session/request or deletion refuses further dispatch. Final release still rechecks the original full input snapshot.
+
+A LiveKit second plan sees prior successful queries and bounded original excerpts, can stop or target a missing detail, and can read context only with supplied per-turn handles. Private meeting queries are never converted into web queries.
+
+The internal voice sources endpoint resolves saved key/fingerprint references against current owner-linked, room-approved transcript and document chunks, including ended meetings. It returns no old quote after edits, deletion or revocation and rechecks sources/policy before release.

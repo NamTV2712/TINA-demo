@@ -24,6 +24,16 @@ agent suite includes POSIX file locks and symlinks; run it on Linux/WSL or in th
 test environment when developing on Windows. Frontend behavior belongs to the Terminal canvas
 and extension suites, not these backend tests.
 
+`test_voice_structured.py` checks schema wire formats, authorized ID enums, nullable optionals,
+explicit capability fallback and no fallback for auth/quota/schema errors. `test_voice_rerank.py`
+covers invalid IDs/timeouts, protected context and reviewing against the original evidence.
+`test_voice_trace.py` plus voice API tests check UUID correlation and content-free timings.
+
+`test_voice_summary.py` checks waiting for the background map/select/verify stages in one turn,
+the shared deadline and no partial publication on expiry. Voice API tests cover the service-secret
+turn permit and no further dispatch after Stop; bot tests cover the one-time notice, automatic
+playback and late-result fences across Stop, departure, policy change and a new question.
+
 `test_api.py` rejects partial translation deltas on terminal worker errors or missing completion
 markers. `test_llm_openai_compat.py` checks typed failure status through all three HTTP completion
 adapters, including quota and timeout, without live credentials.
@@ -46,6 +56,27 @@ offline/read-only turns and metadata/credential protection. The web probe uses a
 fixture to inspect real Codex requests on new/resumed threads: live, cached and disabled modes.
 It does not claim that a live model/account actually performed a search.
 
+Voice regressions: `test_voice_knowledge.py` covers relevance/recency, source budgets, stale history
+and bounded clarifications; `test_meeting_voice.py` checks approved-source isolation and the dedicated
+voice CompletionPort prompt. These use synthetic sources and no provider credentials.
+Conversation tests retain authorized clarification context for short answers, expire pending
+clarification hints, and reject history whose source fingerprints changed.
+
+Voice answer coverage: `test_voice_knowledge.py`, `test_meeting_voice.py` and
+`test_llm_openai_responses_voice.py` prove bounded lookups, public-mode opt-ins, source isolation,
+revocation checks, verifier diagnostics and required native search citations. See `eval/voice` for
+30 synthetic questions and an explicit live-provider evaluation command.
+
 The refinement Apply/Restore translation regression verifies that canonical text changes
 invalidate the affected phrase's cached translation, retain other phrases, and translate
 restored source text again without returning the previous revision's translation.
+
+`test_meeting_voice.py` covers LiveKit tool planning, authorized retrieval, explicit public-query isolation, heard-history revocation and final generation without a nested tool loop.
+
+Voice regression cases cover conservative assistant intents, partial replies, one-repair limits, forged citations, verifier outages and bounded completion timeouts.
+
+test_llm_openai_responses_voice.py covers valid JSON generation/verdict deltas followed by early EOF, [DONE], incomplete/failed events, or invalid terminal status, plus successful completion with/without deltas and existing web citation validation. All provider calls are synthetic.
+
+Voice format-recovery tests exercise the worker boundary with a malformed first reply, valid
+recovery, repeated malformed output and contradicted recovery. Only one format regeneration is
+allowed and successful output still requires the reviewer. Test provider responses are synthetic.

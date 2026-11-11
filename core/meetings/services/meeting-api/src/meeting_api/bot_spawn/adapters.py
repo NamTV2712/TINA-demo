@@ -608,6 +608,38 @@ class SqlAlchemyMeetingRepo:
             )).scalars().all()
             return [_row_to_dict(m) for m in rows]
 
+    async def set_voice_policy(self, meeting_id, user_id, expected_revision, policy):
+        from sqlalchemy import select
+        from sqlalchemy.orm.attributes import flag_modified
+        from ..sessions.models import Meeting
+        async with self._session_factory() as db:
+            row = (await db.execute(select(Meeting).where(Meeting.id == meeting_id,
+                Meeting.user_id == user_id).with_for_update())).scalars().first()
+            if row is None:
+                raise ValueError('Meeting unavailable')
+            data = dict(row.data or {})
+            current = data.get('voice_assistant') or {}
+            if current.get('revision', 0) != expected_revision:
+                raise ValueError('Policy changed')
+            policy = dict(policy, revision=expected_revision + 1)
+            data['voice_assistant'] = policy
+            row.data = data
+            flag_modified(row, 'data')
+            await db.commit()
+            return policy
+
+    async def save_voice_reply(self, meeting_id, session_uid, reply):
+        from sqlalchemy import select
+        from sqlalchemy.orm.attributes import flag_modified
+        from ..sessions.models import Meeting
+        from ..lifecycle.voice_replies import merge_reply
+        async with self._session_factory() as db:
+            row = (await db.execute(select(Meeting).where(Meeting.id == meeting_id).with_for_update())).scalars().first()
+            if row is None: raise ValueError('Meeting unavailable')
+            row.data = merge_reply(row.data, session_uid, reply)
+            flag_modified(row, 'data')
+            await db.commit()
+
     async def merge_meeting_data(self, meeting_id, patch: dict) -> None:
         """Merge ``patch`` into ``meeting.data`` (a ``None`` value REMOVES the key) — the sweep's
         error/backoff stamping primitive. Row-locked; a missing row is a no-op."""

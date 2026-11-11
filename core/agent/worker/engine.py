@@ -633,7 +633,14 @@ def start_prompt(start: dict) -> str | None:
 
 
 def _run_meeting_knowledge(stream, out_topic: str, start: dict) -> None:
+    from llm import LLMStructuredOutputUnsupported
+    from shared.voice_schema import voice_schema
+    from shared.voice_rerank import RERANK_SYSTEM, rerank_voice_sources
+    from shared.voice_trace import voice_span
     from shared.meeting_knowledge import PREFIX, SYSTEM, validate_answer
+    from shared.voice_knowledge import (VOICE_SYSTEM, VOICE_TOOLS, VOICE_PLAN_SYSTEM, VOICE_REPAIR_SYSTEM, VOICE_FORMAT_SYSTEM, GENERAL_SYSTEM, VERIFY_SYSTEM,
+        validate_voice_answer, verify_voice_reply, voice_tool_calls)
+    from shared.voice_summary import MAP_SYSTEM, SELECT_SYSTEM
     try:
         inline = start_prompt(start) or ''
         if not inline.startswith(PREFIX):
@@ -642,11 +649,102 @@ def _run_meeting_knowledge(stream, out_topic: str, start: dict) -> None:
         if os.environ.get('TINA_CHAT_SESSION') != 'meeting-knowledge-' + payload['request_id']:
             raise ValueError('Knowledge request mismatch')
         source = json.loads(payload['text'])
-        result = completion_from_env(timeout=45).complete(payload['text'], system=SYSTEM)
-        if len(result.text) > 50000:
-            raise ValueError('Knowledge answer too large')
-        validate_answer(result.text, source['sources'])
-        stream.xadd(out_topic, {'event': json.dumps({'type': 'message-delta', 'text': result.text})})
+        trace_id = payload.get('voice_trace_id', payload['request_id'])
+        mode = source.get('mode')
+        voice = mode in ('voice', 'voice_summary_map', 'voice_summary_verify')
+        voice_deadline = time.monotonic() + 50
+        def generate(provider, prompt, system, schema=None):
+            if not str(mode).startswith('voice'):
+                return generate_text(provider, prompt, system, schema)
+            stage = {VERIFY_SYSTEM: 'verify', VOICE_REPAIR_SYSTEM: 'repair',
+                     VOICE_FORMAT_SYSTEM: 'format_repair', VOICE_PLAN_SYSTEM: 'plan',
+                     RERANK_SYSTEM: 'rerank'}.get(system, 'generation')
+            with voice_span(stage, trace_id):
+                return generate_text(provider, prompt, system, schema)
+        def generate_text(provider, prompt, system, schema):
+            structured = getattr(provider, 'complete_structured', None)
+            if schema is not None and structured is not None:
+                try:
+                    return structured(prompt, system=system, schema=schema).text
+                except LLMStructuredOutputUnsupported:
+                    if system == RERANK_SYSTEM: raise
+                    # Older compatible endpoints retain validation and the existing one-repair limit.
+                    log.info('voice schema unsupported; using validated completion')
+                    remaining = voice_deadline - time.monotonic()
+                    if remaining < 1: raise TimeoutError('Voice completion budget exhausted')
+                    provider = completion_from_env(timeout=min(10, remaining))
+            return provider.complete(prompt, system=system).text
+        def checked_completion(prompt, system):
+            remaining = voice_deadline - time.monotonic()
+            if remaining < 1: raise TimeoutError('Voice completion budget exhausted')
+            schema = voice_schema('verify' if system == VERIFY_SYSTEM else 'answer', source.get('sources', []))
+            return generate(completion_from_env(timeout=min(10, remaining)), prompt, system, schema)
+        provider = completion_from_env(timeout=10 if mode=='voice_plan' else 25 if voice or mode=='voice_general' else 45)
+        if mode == 'voice_summary_select':
+            text = generate(completion_from_env(timeout=15), payload['text'], SELECT_SYSTEM)
+            ids = {i for fact in source['summary_facts'] for i in fact['source_ids']}
+            validate_voice_answer(text,[{'id':i} for i in ids])
+        elif mode == 'voice_summary_verify':
+            text = verify_voice_reply(json.dumps(source['proposed_reply'],ensure_ascii=False),source['question'],source['sources'],
+                lambda prompt: checked_completion(prompt,VERIFY_SYSTEM),
+                repair=lambda prompt: checked_completion(prompt,VOICE_REPAIR_SYSTEM),diagnostics=True)
+        elif mode == 'voice_plan':
+            text = generate(provider, payload['text'], VOICE_PLAN_SYSTEM,
+                            voice_schema('plan', tools=source['available_tools']))
+        elif mode == 'voice_web':
+            search = getattr(provider, 'search', None)
+            if search is None:
+                text = json.dumps({'reason': 'web_unavailable'})
+            else:
+                try:
+                    with voice_span('web_search', trace_id):
+                        result = search(source['question'])
+                    text = json.dumps({'text': result.text, 'links': result.sources}, ensure_ascii=False)
+                except Exception:
+                    text = json.dumps({'reason': 'web_unavailable'})
+        else:
+            system = MAP_SYSTEM if mode == 'voice_summary_map' else (VOICE_SYSTEM + ('\n' + VOICE_TOOLS if source.get('tools_remaining', 0) else '')) if voice else GENERAL_SYSTEM if mode == 'voice_general' else SYSTEM
+            generation_source = source
+            if mode == 'voice':
+                with voice_span('source_selection', trace_id) as metrics:
+                    ranked, outcome = rerank_voice_sources(source['question'], source['sources'],
+                        source.get('history', []), source.get('recent_source_ids', []),
+                        lambda prompt: generate(completion_from_env(timeout=4), prompt, RERANK_SYSTEM,
+                                                voice_schema('rerank', source['sources'])))
+                    metrics.update(input_sources=len(source['sources']), output_sources=len(ranked), outcome=outcome)
+                generation_source = source | {'sources': ranked}
+            tools = ('get_recent_transcript', 'search_meeting', 'search_shared_documents') if source.get('tools_remaining') else ()
+            prompt = json.dumps(generation_source, ensure_ascii=False) if mode == 'voice' else payload['text']
+            raw = generate(provider, prompt, system,
+                           voice_schema('answer', generation_source['sources'], tools=tools) if mode == 'voice' else None)
+            if len(raw) > 50000:
+                raise ValueError('Knowledge answer too large')
+            if mode == 'voice':
+                try:
+                    calls = voice_tool_calls(raw)
+                    if calls is None:
+                        validate_voice_answer(raw, source['sources'])
+                    elif not source.get('tools_remaining', 0):
+                        raise ValueError('No voice tools remaining')
+                except (ValueError, TypeError, AttributeError):
+                    raw = checked_completion(json.dumps({'question': source['question'],
+                        'sources': source['sources'], 'history': source.get('history', []),
+                        'invalid_output': raw}, ensure_ascii=False), VOICE_FORMAT_SYSTEM)
+                    validate_voice_answer(raw, source['sources'])
+                    log.info('voice response format regenerated')
+            if mode == 'voice_general':
+                text = raw
+            elif voice and source.get('tools_remaining', 0) and voice_tool_calls(raw) is not None:
+                text = raw
+            else:
+                (validate_voice_answer if voice else validate_answer)(raw, source['sources'])
+                text = verify_voice_reply(raw, source['question'], source['sources'],
+                    lambda prompt: checked_completion(prompt, VERIFY_SYSTEM),
+                    repair=lambda prompt: checked_completion(prompt, VOICE_REPAIR_SYSTEM),
+                    diagnostics=True) if voice else raw
+                if voice:
+                    log.info('voice verification checks=%s', ','.join(json.loads(text).get('verification', [])))
+        stream.xadd(out_topic, {'event': json.dumps({'type': 'message-delta', 'text': text})})
     except Exception as exc:  # Never log questions, sources or provider responses.
         log.warning('meeting knowledge failed error=%s', type(exc).__name__)
     stream.xadd(out_topic, {'event': json.dumps({'type': 'turn-complete'})})

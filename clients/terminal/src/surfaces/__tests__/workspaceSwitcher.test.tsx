@@ -265,3 +265,40 @@ describe("WorkspaceSwitcher — selecting a row opens the MANAGE tab (not a togg
     expect(api.deactivateWorkspace).not.toHaveBeenCalled();  // the name no longer toggles
   });
 });
+
+describe("WorkspaceSwitcher — unknown mount state", () => {
+  it("does not show a fallback workspace as parked when workspace loading fails", async () => {
+    sessionStorage.setItem("ws.attach.open", "1");
+    vi.mocked(api.readAttachedWorkspaces).mockRejectedValue(new Error("Your API key was rejected"));
+    vi.mocked(api.readActiveSet).mockRejectedValue(new Error("Your API key was rejected"));
+    render(withServices(<WorkspaceSwitcher onSwapped={vi.fn()} />));
+
+    expect(await screen.findByText("Your API key was rejected")).toBeTruthy();
+    expect(screen.queryByText("Personal")).toBeNull();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+  });
+
+  it("keeps mount checkboxes disabled when the active set cannot be verified", async () => {
+    sessionStorage.setItem("ws.attach.open", "1");
+    vi.mocked(api.readAttachedWorkspaces).mockResolvedValue(view);
+    vi.mocked(api.readActiveSet).mockRejectedValue(new Error("Your API key was rejected"));
+    render(withServices(<WorkspaceSwitcher onSwapped={vi.fn()} />));
+
+    const checkbox = await screen.findByRole("checkbox", { name: /leo, mount status unavailable/i });
+    expect(checkbox.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(checkbox);
+    expect(api.activateWorkspace).not.toHaveBeenCalled();
+    expect(api.deactivateWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("retries the workspace list after an API error", async () => {
+    sessionStorage.setItem("ws.attach.open", "1");
+    vi.mocked(api.readAttachedWorkspaces).mockRejectedValueOnce(new Error("Your API key was rejected"))
+      .mockResolvedValue(view);
+    vi.mocked(api.readActiveSet).mockResolvedValue(activeSet);
+    render(withServices(<WorkspaceSwitcher onSwapped={vi.fn()} />));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
+    expect(await screen.findByRole("button", { name: "leo" })).toBeTruthy();
+  });
+});

@@ -86,3 +86,15 @@ it('distinct speaker IDs with equal names remain separate transcript blocks',()=
   expect(container.textContent?.match(/Minh/g)?.length).toBe(2);
   unmount();
 });
+
+it('retains every segment identity in a merged speaker block for voice evidence navigation', () => {
+  const { container, unmount } = render(<LiveTranscriptEngine segments={[
+    { id: 'owner', speaker: 'Lan', text: 'Lan phụ trách demo.' },
+    { id: 'deadline', speaker: 'Lan', text: 'Hạn thứ Sáu.' },
+  ]} />);
+  const anchor = container.querySelector<HTMLElement>('[data-transcript-segments]')!;
+  expect(JSON.parse(anchor.dataset.transcriptSegments!)).toEqual(['owner', 'deadline']);
+  expect(anchor.tabIndex).toBe(-1);
+  expect(anchor.textContent).toContain('Hạn thứ Sáu.');
+  unmount();
+});

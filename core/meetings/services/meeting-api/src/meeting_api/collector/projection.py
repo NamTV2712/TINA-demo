@@ -99,6 +99,7 @@ CALENDAR_SOURCE_LIST_KEYS = frozenset({
 # (``webhooks.delivery._INTERNAL_DATA_KEYS``) and how ``GET /user/webhook`` reports the config
 # (``webhook_secret_set`` + a masked value, never the value).
 SENSITIVE_OMIT_KEYS = frozenset({
+    "voice_replies",  # Owner-only dedicated voice endpoint; never leak approved-document answers through transcript shares.
     "canonical_transcript", "meeting_memory", "canonical_notes", "stt_replicas", "stt_foundation", "stt_instance_id",
     "speaker_registry",
     "transcript_outbox",

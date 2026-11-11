@@ -42,3 +42,23 @@ only the tool-less translation and leaves original/canonical transcripts unchang
 It calls the existing tool-less meeting CompletionPort using canonical text and resolved speaker
 names, then emits a candidate result. It does not publish live notes, edit canonical text or
 overwrite workspace documents. Meeting API owns source/lease validation and final publication.
+
+Meeting voice planning uses a bounded read-only CompletionPort prompt (`voice_plan`). LiveKit executes the selected tools; the existing final voice completion still verifies every room claim.
+
+Voice review and one optional repair share the remaining completion deadline. No repair runs after verifier outages; every corrected claim and follow-up is checked again.
+
+Recap map jobs use the normal numeric/semantic review and repair; reduction jobs select/compress cited map facts but never authorize evidence. A separate final verify job reviews original transcript chunks. All jobs keep the selected CompletionPort model and existing bounded completion deadlines.
+
+Malformed ordinary voice replies get at most one final JSON regeneration within the same
+50-second completion budget. This includes prose around JSON and unexpected tools in a final-only
+step. Regeneration receives the original sources/question and untrusted failed output, cannot
+execute tools, and must pass claim validation and semantic review. Invalid recovery and provider
+failures still fail closed; private drafts are never logged.
+
+Meeting voice uses optional provider-side JSON Schema for generation, plans, review and repairs.
+A larger retrieval (>8 excerpts) first gets one optional ranker call with a four-second HTTP timeout,
+using the same selected model and authorized excerpts. Rank failures retain the original retrieval;
+the ranking call has no capability fallback retry. This call consumes the existing 50-second
+scheduling budget; source/numeric/semantic checks and one-repair limits remain mandatory.
+Structured `voice_stage` logs correlate ranking/generation/review/repair with the bot request UUID
+forwarded by Meeting API and the control-plane dispatch envelope. No content is logged.

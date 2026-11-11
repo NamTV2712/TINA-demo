@@ -25,7 +25,7 @@ uv run --project clients/speech tina-speech devices
 `setup` is the only network/download operation. It fetches the upstream English GigaSpeech
 3.3M KWS archive (~17.6 MB), verifies its pinned SHA-256 and size, and installs only the INT8
 encoder/decoder/joiner, tokenizer, token table and original model card (~5.5 MB).
-[`model-assets.json`](tina_speech/model-assets.json) pins archive and file hashes. The archive
+[`model-assets.json`](../../core/meetings/modules/voice-engine/tina_meeting_voice/model-assets.json) pins archive and file hashes. The archive
 hash is recorded from the HTTPS download, not represented as an upstream signed checksum.
 SentencePiece encodes `HEY TINA` using that exact model's BPE as:
 
@@ -261,3 +261,7 @@ a successful turn from the other host client. Both returned to ARMED. Evidence i
 `output/speech-stage4/native-proof.json`. No microphone, real LLM or Meet was used in that smoke.
 Phase 4 changes only the optional Python client/coordinator: existing phase 3 stack images do
 not need rebuilding. Restart the coordinator and all participant clients together after updating.
+
+## Bot-hosted Google Meet mode
+
+Participants need no local client in this mode. See [in-bot voice deployment](../../docs/tina-meeting-voice.md). This host CLI remains an optional local pilot; KWS, assets and Silero capture are shared from `tina-meeting-voice`.

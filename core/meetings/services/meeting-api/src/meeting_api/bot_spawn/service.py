@@ -424,7 +424,7 @@ async def request_bot(
     transcription_tier: str = "realtime",
     recording_enabled: bool = False,
     transcribe_enabled: bool = True,
-    voice_agent_enabled: bool = False,
+    voice_agent_enabled: Optional[bool] = False,
     automatic_leave: Optional[dict] = None,
     continue_meeting: bool = False,
     max_concurrent: Optional[int] = None,
@@ -481,6 +481,10 @@ async def request_bot(
     transcription_service_token = os.getenv("TRANSCRIPTION_SERVICE_TOKEN") or None
     transcription_model = os.getenv("TRANSCRIPTION_MODEL") or None
     bot_context = await _fetch_bot_context(user_id)
+    if voice_agent_enabled is None:
+        pref = (bot_context.get('voice') or {}).get('prepare_new_bots')
+        context_available = bool(bot_context) or not os.getenv('ADMIN_API_URL', '').strip()
+        voice_agent_enabled = context_available and bool(os.getenv('TTS_SERVICE_URL', '').strip()) and pref is not False
     configured = _transcription_from_context(bot_context)
     # O-TEL-1 fixture collection, resolved from the SAME best-effort lookup (one hop, two readers).
     # Default ON: only an explicit false from identity stops the tape.
@@ -714,12 +718,19 @@ async def request_bot(
                     fields={"active": active, "cap": max_concurrent},
                 )
                 raise MaxBotsExceeded(user_id, max_concurrent)
+        policy_patch = {}
+        if (voice_agent_enabled and transcribe_enabled and platform=='google_meet' and env_flag('TINA_MEETING_VOICE',False)
+                and not (reused_row.get('data') or {}).get('voice_assistant')):
+            from ..lifecycle.voice import new_meeting_voice_policy
+            policy_patch['voice_assistant']=new_meeting_voice_policy()
         row = await repo.reopen_meeting(
             meeting_id=reused_row["id"],
             data_patch={
+                **policy_patch,
                 "transcribe_enabled": transcribe_enabled,
                 "recording_enabled": recording_enabled,
                 "voice_agent_enabled": voice_agent_enabled,
+                "voice_assistant_capable": bool(voice_agent_enabled and platform == "google_meet" and env_flag("TINA_MEETING_VOICE", False)),
                 "transcription_provider": transcription_provider,
                 "service_authority": authority_record,
             },
@@ -731,6 +742,10 @@ async def request_bot(
         meeting_data["transcribe_enabled"] = transcribe_enabled
         meeting_data["recording_enabled"] = recording_enabled
         meeting_data["voice_agent_enabled"] = voice_agent_enabled
+        meeting_data["voice_assistant_capable"] = bool(voice_agent_enabled and platform == "google_meet" and env_flag("TINA_MEETING_VOICE", False))
+        if meeting_data['voice_assistant_capable'] and transcribe_enabled:
+            from ..lifecycle.voice import new_meeting_voice_policy
+            meeting_data['voice_assistant']=new_meeting_voice_policy()
         if transcription_provider is not None:
             meeting_data["transcription_provider"] = transcription_provider
         meeting_data["service_authority"] = authority_record
@@ -849,6 +864,11 @@ async def request_bot(
             tts_env["TTS_SERVICE_URL"] = tts_url
         if tts_token:
             tts_env["TTS_API_TOKEN"] = tts_token
+    if voice_agent_enabled and platform == 'google_meet' and env_flag('TINA_MEETING_VOICE', False):
+        from ..lifecycle.voice import voice_token
+        tts_env.update(TINA_VOICE_URL=f'{meeting_api_url}/bots/voice/{meeting_id}/{connection_id}',
+                       TINA_VOICE_TOKEN=voice_token(token_secret, meeting_id, connection_id),
+                       TINA_VOICE_MODEL_DIR='/models/meeting-voice')
     spec = build_workload_spec(
         workload_id=f"{'dc' if is_discord else 'mtg'}-{meeting_id}-{connection_id[:8]}",
         profile="discord-bot" if is_discord else "meeting-bot",

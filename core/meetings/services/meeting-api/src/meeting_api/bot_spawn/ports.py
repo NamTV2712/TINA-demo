@@ -152,6 +152,14 @@ class MeetingRepo(Protocol):
         never happened. ``data`` merges extra keys (the stop path's ``stop_requested``)."""
         ...
 
+    async def save_voice_reply(self, meeting_id: int, session_uid: str, reply: dict) -> None:
+        """Row-locked, idempotent voice reply history; never changes canonical ASR rows."""
+        ...
+
+    async def set_voice_policy(self, meeting_id: int, user_id: int, expected_revision: int, policy: dict) -> dict:
+        """Owner-scoped, row-locked compare-and-swap of room-shared voice sources."""
+        ...
+
     async def get_meeting(self, meeting_id: int) -> Optional[dict]:
         """Read ONE meeting row by id — the spawn fence's fresh read of ``data.stop_requested``
         (and the stop route's fresh read of ``bot_container_id``). Deliberately not served from any

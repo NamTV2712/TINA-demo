@@ -1,5 +1,30 @@
 # bot — the meetings ephemeral join+capture worker (Node/TS)
 
+Fixed voice notices rotate independently within each bot/meeting: four name-only acknowledgments,
+four generic question-wait phrases and four recap-wait phrases in `VOICE_NOTICES`. A completed
+question never uses the name-only group. Fast answers skip filler, including a result arriving while
+the notice's policy check is pending. Slow new questions receive at most one notice after 900ms;
+ordinary follow-ups keep their existing no-extra-ack behavior. Every fixed phrase bypasses the busy
+Agents session and pure normalized notice echoes are ignored during caller continuation. The TTS
+`WAKE_TEXTS`/`WAIT_TEXTS`/`SUMMARY_TEXTS` catalog must match these phrases. No LLM chooses filler.
+
+`voice_timing` logs retain only request UUID/channel, timestamps and durations. Speech timing is
+split into `ack_*` (name acknowledgment), `notice_*` (question/recap wait) and `answer_*`.
+Each group records `tts_requested`, `pcm_received`, `buffer_ready` and `playback_started`;
+durations include `first_pcm`, `prebuffer` and `mic_start_after_buffer`. Answer timestamps retain
+the first sentence rather than being overwritten by lookahead. `answer_pcm_after_end` and
+`answer_playback_after_end` start at the final question speech-end timestamp. Playback starts only
+after the meeting mic is verified, the player spawns and its first PCM write succeeds. This proves
+local microphone injection, not receipt or audibility at another participant's speaker.
+
+Slow whole-meeting recap requests receive one fixed, prewarmed waiting notice instead of the
+ordinary acknowledgment. Transcript capture continues; the same voice turn waits for the verified
+result and plays it automatically. Stop/departure, caller correction, generation replacement and
+policy revision fence late results. The notice is not a factual answer or a heard-history turn.
+It uses direct shared TTS to avoid the busy Agents session, with a six-second notice deadline. Service wait is bounded to 170 seconds
+and the whole turn to 330 seconds, inside the 360-second server reservation. Only one voice turn
+runs per meeting; this does not enable simultaneous questions or unbounded background playback.
+
 ## Purpose
 
 The disposable meeting-joining browser bot (P7 worker). It boots from a single `invocation.v1`
@@ -88,3 +113,7 @@ node core/meetings/services/bot/dist/audio-archive.js capture.jsonl observations
 The reader is bounded to 30 seconds, keeps channels separate, and refuses missing/overlapping data
 rather than filling silence. Existing recordings lacking source-clock annotations still have their
 original playback/replay path, but cannot claim exact sample-index recovery through this reader.
+
+Voice audio uses separate PulseAudio sinks: meeting_rx receives browser playback, while tts_sink
+feeds virtual_mic. The source stays unmuted so Meet sees a usable device; TTS sink mute plus the
+verified meeting UI gate speech. This does not change captured PCM or either ASR backend.

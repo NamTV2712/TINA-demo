@@ -14,7 +14,7 @@ import pytest
 
 from tina_speech.coordinator import Coordinator, create_app
 from tina_speech.session import RoomClient, RoomMonitor, SpeechSession
-from tina_speech.wakeword import WakeDetector
+from tina_meeting_voice.wakeword import WakeDetector
 from test_capture import Client, QUIET, VOICE, Vad
 from test_coordinator import FakeServices, room, wav, wait
 

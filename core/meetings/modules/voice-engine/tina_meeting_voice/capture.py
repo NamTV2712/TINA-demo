@@ -20,6 +20,7 @@ class SileroVad:
         config.silero_vad.max_speech_duration = 22
         self.vad = sherpa.VoiceActivityDetector(config, buffer_size_in_seconds=24)
         self.pending = np.array([], dtype=np.float32)
+        self.last_end_sample = None
 
     def feed(self, audio):
         self.pending = np.concatenate([self.pending, audio])
@@ -28,6 +29,8 @@ class SileroVad:
             self.vad.accept_waveform(self.pending[:512])
             self.pending = self.pending[512:]
             while not self.vad.empty():
+                segment = self.vad.front
+                self.last_end_sample = segment.start + len(segment.samples)
                 ended = True
                 self.vad.pop()
         return self.vad.is_speech_detected(), ended

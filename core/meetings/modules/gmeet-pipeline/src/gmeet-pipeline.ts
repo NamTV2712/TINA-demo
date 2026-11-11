@@ -25,7 +25,17 @@ import { continuityPrompt, type TranscriptionResult, type TranscriptionTiming } 
 import type { TranscriptSegment, TranscriptSink } from './contracts/transcript-v1.js';
 
 let nextTimelineSession=0;
+export interface VoiceHypothesis {
+  channel: number; speakerKey: string; participant?: string | null;
+  startMs: number; endMs: number; text: string; final: boolean;
+  segments?: Array<{ text: string; startMs: number; endMs: number }>;
+  asrStartedAtMs?: number; asrCompletedAtMs?: number;
+  speechStartMs?: number;
+}
+
 export interface GmeetPipelineOptions {
+  onAsrDiagnostic?: (event: AsrDiagnostic) => void;
+  onHypothesis?: (value: VoiceHypothesis) => void;
   /** Optional content-free decision trace for latency diagnosis; never changes confirmation policy. */
   onDiagnostic?: (event: SpeakerStreamDiagnostic) => void;
   timeline?:AudioTimelinePool;
@@ -49,9 +59,16 @@ export interface GmeetPipelineOptions {
   onError?: (fault: unknown) => void;
 }
 
+export interface AsrDiagnostic {
+  channel: number; request: number; stage: 'started' | 'completed' | 'failed'; at_ms: number;
+  capture_age_ms?: number; roundtrip_ms?: number; queue_ms?: number;
+}
+
 export interface GmeetPipeline {
   /** One capture.v1 frame: CHANNEL index + glow NAME (undefined ⇒ no single glow now). */
   feedAudio(channel: number, glowName: string | undefined, pcm: Float32Array, tsMs: number, participantId?:string|null,startSample?:number):void;
+  /** null cancels a pending endpoint when VAD reports resumed speech. */
+  requestEndpoint(channel: number, endMs: number | null): void;
   flush(): Promise<void>;
   dispose(): Promise<void>;
 }
@@ -67,9 +84,22 @@ export function createGmeetPipeline(opts: GmeetPipelineOptions): GmeetPipeline {
   mgr.onOverflow=(samples)=>opts.onError?.({source:'buffer',kind:'overflow',detail:`${samples} samples left the live ASR window; use archived audio for recovery`});
   const inflight = new Map<Promise<void>, string>();
   const closing=new Set<string>();
+  const sourceChannels = new Map<string, number>();
+  const endpoints = new Map<string, number>();
+  const lastHypotheses = new Map<string, VoiceHypothesis>();
+  let disposed = false;
+  let asrRequest = 0;
+  const asrDiagnostic = (event: AsrDiagnostic) => {
+    try { opts.onAsrDiagnostic?.(event); } catch { /* Diagnostics never control transcript processing. */ }
+  };
   // Per channel: the CURRENT turn's stream key, bound name, last-audio time, turn counter.
   const participants = new Map<string, string | null>();
-  const chan = new Map<number, { key: string; name: string; lastMs:number;lastSpeechMs:number;turn:number }>();
+  const chan = new Map<number, { key: string; name: string; onsetMs: number; lastMs:number;lastSpeechMs:number;turn:number; endpointMs?: number }>();
+
+  const coversEndpoint = (value: VoiceHypothesis, endMs: number) => value.startMs <= endMs && value.endMs >= endMs - 2;
+  const observe = (value: VoiceHypothesis) => {
+    try { opts.onHypothesis?.(value); } catch { /* voice observers cannot interrupt transcript confirmation */ }
+  };
 
   // Emit the SEALED transcript.v1 shape (snake_case, segment_id + completed, source
   // in the contract's enum) — the pipeline IS the transcript.v1 producer, so its
@@ -93,15 +123,43 @@ export function createGmeetPipeline(opts: GmeetPipelineOptions): GmeetPipeline {
     l && l !== 'unknown' ? l : undefined;
 
   mgr.onSegmentReady = (speakerId, _name, audio) => {
+    const channel = sourceChannels.get(speakerId), request = ++asrRequest, started = Date.now();
     const p = (async () => {
       try {
+        const audioStartMs = mgr.getBufferStartMs(speakerId);
+        const finalSubmission = mgr.isFinalSubmission(speakerId);
         const audioEndMs = mgr.getSubmittedAudioEndMs(speakerId, audio.length);
+        const speechStartMs = channel === undefined ? undefined : chan.get(channel)?.onsetMs;
         if(!opts.transcribe)return;
+        if (channel !== undefined) asrDiagnostic({channel, request, stage:'started', at_ms:started,
+          capture_age_ms: audioEndMs === undefined ? undefined : Math.max(0, started - audioEndMs)});
+        const asrStartedAtMs = Date.now();
         const r = await opts.transcribe(audio, continuityPrompt(mgr.getLastConfirmedText(speakerId), audio, opts.config?.sampleRate ?? 16000),
           audioEndMs == null ? undefined : { capture_ms: Math.max(0, Date.now() - audioEndMs) });
+        const asrCompletedAtMs = Date.now();
+        if (channel !== undefined) asrDiagnostic({channel, request, stage:'completed', at_ms:asrCompletedAtMs,
+          roundtrip_ms: asrCompletedAtMs - started, queue_ms:r?.queue_ms});
         const segs = r?.segments;
+        if (channel !== undefined && audioEndMs !== undefined && mgr.isCurrentSubmission(speakerId)) {
+          const value: VoiceHypothesis = { channel, speakerKey: speakerId, participant: participants.get(speakerId),
+            startMs: audioStartMs, endMs: audioEndMs, text: r?.text || '', final: finalSubmission,
+            asrStartedAtMs, asrCompletedAtMs, speechStartMs,
+            segments: segs?.map(seg => ({ text: seg.text, startMs: audioStartMs + seg.start * 1000, endMs: audioStartMs + seg.end * 1000 })) };
+          const endpoint = endpoints.get(speakerId);
+          const current = chan.get(channel);
+          if (endpoint !== undefined && current?.key !== speakerId) endpoints.delete(speakerId);
+          else if (endpoint !== undefined && coversEndpoint(value, endpoint)) { value.final = true; endpoints.delete(speakerId); }
+          lastHypotheses.set(speakerId, value);
+          observe(value);
+        } else {
+          endpoints.delete(speakerId); lastHypotheses.delete(speakerId);
+        }
         mgr.handleTranscriptionResult(speakerId, (r?.text || '').trim(), segs?.[segs.length - 1]?.end, segs, langOf(r?.language));
+        // A request already in flight may have missed the tail. Reuse its result first, then submit once.
+        if (endpoints.has(speakerId)) mgr.requestEarlySubmit(speakerId);
       } catch (e) {
+        if (channel !== undefined) asrDiagnostic({channel, request, stage:'failed', at_ms:Date.now(), roundtrip_ms:Date.now()-started});
+        endpoints.delete(speakerId);
         opts.onError?.(e);                          // P18: report the fault, don't swallow it…
         mgr.handleTranscriptionResult(speakerId, '');   // …but still free the turn (graceful degrade)
       }
@@ -133,10 +191,24 @@ export function createGmeetPipeline(opts: GmeetPipelineOptions): GmeetPipeline {
       await settle(key);
       mgr.removeSpeaker(key);
       participants.delete(key);
+      sourceChannels.delete(key);
+      endpoints.delete(key); lastHypotheses.delete(key);
     })().catch(e => opts.onError?.(e)).finally(()=>closing.delete(key));
   };
 
   return {
+    requestEndpoint(channel, endMs) {
+      const st = chan.get(channel);
+      if (st && endMs === null) { endpoints.delete(st.key); return; }
+      if (disposed || !st || endMs === null || closing.has(st.key) || !Number.isFinite(endMs) || endMs > Date.now() + 1000
+          || endMs < st.onsetMs || endMs < mgr.getBufferStartMs(st.key)
+          || (st.endpointMs !== undefined && endMs <= st.endpointMs)) return;
+      st.endpointMs = endMs;
+      const previous = lastHypotheses.get(st.key);
+      if (previous && coversEndpoint(previous, endMs)) { observe({ ...previous, final: true }); return; }
+      endpoints.set(st.key, endMs);
+      mgr.requestEarlySubmit(st.key);
+    },
     feedAudio: (channel,glowName,pcm,tsMs,participantId,startSample) => {
       let accepted;
       try { accepted=timeline.append({session,source:String(channel),samples:pcm,captureMs:tsMs,startSample}); }
@@ -171,7 +243,8 @@ export function createGmeetPipeline(opts: GmeetPipelineOptions): GmeetPipeline {
         const turn = (st ? st.turn : 0) + 1;
         const key = `ch-${channel}:${turn}`;
         if(!mgr.addSpeaker(key,glowName || UNKNOWN))return;
-        st = { key, name: glowName || UNKNOWN, lastMs:tsMs,lastSpeechMs:frame.captureMs,turn };
+        sourceChannels.set(key, channel);
+        st = { key, name: glowName || UNKNOWN, onsetMs: frame.captureMs, lastMs:tsMs,lastSpeechMs:frame.captureMs,turn };
         chan.set(channel, st);
 
       } else if (voiced && st.name === UNKNOWN && glowName) {
@@ -187,9 +260,11 @@ export function createGmeetPipeline(opts: GmeetPipelineOptions): GmeetPipeline {
     },
     flush: async () => { for (const st of chan.values()) await mgr.flushSpeaker(st.key, true); await settle(); },
     dispose: async () => {
+      disposed = true; endpoints.clear();
       for (const st of chan.values()) await mgr.flushSpeaker(st.key, true);
       await settle();
       mgr.removeAll();
+      lastHypotheses.clear();
       timeline.release(session);
       await opts.sink.finalize();
     },

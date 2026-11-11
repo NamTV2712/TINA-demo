@@ -1,0 +1,11 @@
+{
+  "enabled": true,
+  "include_transcript": true,
+  "documents": [],
+  "revision": 0,
+  "wake_variants": [],
+  "noise_suppression": true,
+  "engine": "livekit",
+  "allow_general_knowledge": true,
+  "allow_web_search": true
+}

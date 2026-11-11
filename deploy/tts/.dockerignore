@@ -2,5 +2,7 @@
 !requirements.txt
 !engine.py
 !server.py
+!speech_text.py
+!pronunciations.json
 !install_models.py
 !model-assets.json

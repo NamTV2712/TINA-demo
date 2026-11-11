@@ -3,19 +3,20 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 from pathlib import Path
+from speech_text import spoken_text, default_pronunciations
 
 MODEL = "vieneu-v3-turbo"
 SAMPLE_RATE = 24000
 MAX_AUDIO_SECONDS = 120
 PRESET_VOICE = "Trúc Ly"
-
-
-def spoken_text(text: str) -> str:
-    # The Vietnamese normalizer spells uppercase TINA as an acronym. Only alter
-    # the spoken copy of this standalone name, not agent text or other acronyms.
-    return re.sub(r"\bTINA\b", "ti na", text, flags=re.IGNORECASE)
+ACK_TEXT = "Dạ, em nghe."
+SUMMARY_NOTICE = "Em đang tổng hợp, bạn chờ một chút nhé."
+# Keep these public phrases aligned with the bot's VOICE_NOTICES catalog.
+WAKE_TEXTS = (ACK_TEXT, "Em đây, bạn nói đi.", "Dạ, bạn cứ nói nhé.", "Dạ, em đây.")
+WAIT_TEXTS = ("Đợi em chút nhé.", "Để em kiểm tra nhé.", "Em đang kiểm tra thông tin nhé.", "Chờ em một lát nhé.")
+SUMMARY_TEXTS = (SUMMARY_NOTICE, "Em đang tổng hợp thông tin nhé.", "Em tổng hợp lại một chút nhé.", "Em gom lại các ý chính nhé.")
+FIXED_TEXTS = WAKE_TEXTS + WAIT_TEXTS + SUMMARY_TEXTS
 
 
 def verify_assets(directory: Path) -> None:
@@ -61,6 +62,7 @@ def pcm24(samples, rate: int) -> bytes:
 
 class Engine:
     def __init__(self, directory: Path):
+        self.pronunciations = default_pronunciations()
         verify_assets(directory)
         import onnxruntime
         onnxruntime.disable_telemetry_events()
@@ -69,7 +71,48 @@ class Engine:
         self.tts = Vieneu(mode="v3turbo", backend="onnx", device="cpu", threads=2,
                           backbone_repo="pnnbao-ump/VieNeu-TTS-v3-Turbo")
 
-    def synthesize(self, text: str) -> bytes:
+    def cached_public(self, text: str) -> bytes | None:
+        return getattr(self, '_fixed_pcm', {}).get(text) if text in FIXED_TEXTS else None
+
+    def synthesize(self, text: str, meeting_id: int | None = None) -> bytes:
         # Preset voice only: never accept an audio reference or user model path.
-        audio = self.tts.infer(spoken_text(text), voice=PRESET_VOICE, apply_watermark=False)
-        return pcm24(audio, self.tts.sample_rate)
+        cache = getattr(self, '_fixed_pcm', {})
+        cached = self.cached_public(text)
+        if cached is not None:
+            return cached
+        glossary = getattr(self, 'pronunciations', default_pronunciations()).for_meeting(meeting_id)
+        speech_text = text if text in FIXED_TEXTS else spoken_text(text, glossary)
+        audio = self.tts.infer(speech_text, voice=PRESET_VOICE, apply_watermark=False)
+        pcm = pcm24(audio, self.tts.sample_rate)
+        if text in FIXED_TEXTS:
+            cache[text] = pcm; self._fixed_pcm = cache
+        return pcm
+
+    def stream(self, text: str, meeting_id: int | None = None):
+        import numpy as np
+        import soxr
+        cached = self.cached_public(text)
+        if cached is not None:
+            yield cached
+            return
+        glossary = self.pronunciations.for_meeting(meeting_id)
+        speech = text if text in FIXED_TEXTS else spoken_text(text, glossary)
+        rate = self.tts.sample_rate
+        resampler = soxr.ResampleStream(rate, SAMPLE_RATE, 1, dtype='float32', quality='HQ') if rate != SAMPLE_RATE else None
+        chunks = self.tts.infer_stream(speech, voice=PRESET_VOICE, apply_watermark=False)
+        samples = 0
+        try:
+            for chunk in chunks:
+                audio = np.asarray(chunk, dtype=np.float32)
+                if audio.ndim != 1 or not np.isfinite(audio).all(): raise ValueError('Invalid audio chunk')
+                samples += audio.size
+                if samples > rate * MAX_AUDIO_SECONDS: raise ValueError('Speech exceeds audio budget')
+                if not audio.size: continue
+                output = resampler.resample_chunk(audio) if resampler else audio
+                if output.size:
+                    yield np.rint(np.clip(output, -1, 1) * 32767).astype('<i2').tobytes()
+            if resampler:
+                output = resampler.resample_chunk(np.array([], dtype=np.float32), last=True)
+                if output.size: yield np.rint(np.clip(output, -1, 1) * 32767).astype('<i2').tobytes()
+        finally:
+            chunks.close()

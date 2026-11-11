@@ -1,0 +1,36 @@
+/** Read-only presentation of the owner-scoped meeting-voice.v1 runtime. */
+export const voiceActivities = {
+  LISTENING: { label: 'Chờ gọi tên', title: 'Sẵn sàng nhận “hey TINA” hoặc “TINA ơi”.' },
+  CAPTURING: { label: 'Đang nghe câu hỏi', title: 'TINA đang thu câu hỏi của người vừa gọi.' },
+  THINKING: { label: 'Đang xử lý', title: 'TINA đang tìm nguồn và chuẩn bị câu trả lời.' },
+  SPEAKING: { label: 'Đang trả lời', title: 'TINA đang phát giọng nói vào cuộc họp.' },
+  QUIET: { label: 'Chờ nghe lại', title: 'Đợi âm thanh yên trước khi nhận lượt gọi tiếp theo.' },
+  CHECKING: { label: 'Đang kiểm tra', title: 'Đang đọc trạng thái voice của bot.' },
+  STARTING: { label: 'Đang khởi động', title: 'Voice assistant đang chuẩn bị.' },
+  OFF: { label: 'Voice đang tắt', title: 'Voice assistant chưa được bật hoặc chưa sẵn sàng.' },
+  NO_BOT: { label: 'Chưa có bot', title: 'Chưa có phiên bot đang hoạt động cho cuộc họp này.' },
+  ENDED: { label: 'Đã kết thúc', title: 'Cuộc họp đã kết thúc; TINA không còn nghe.' },
+  ERROR: { label: 'Voice gặp lỗi', title: 'Kiểm tra Voice assistant trong Settings.' },
+  UNAVAILABLE: { label: 'Mất kết nối voice', title: 'Chưa nhận được trạng thái mới; không thể xác nhận TINA đang nghe.' },
+} as const;
+export type VoiceActivity = keyof typeof voiceActivities;
+export const VOICE_ACTIVITY_TTL = 15_000;
+const record = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+export function voiceActivity(value: unknown, now = Date.now(), ended = false): VoiceActivity {
+  if (ended) return 'ENDED';
+  if (value === undefined) return 'CHECKING';
+  const body = record(value), runtime = record(body.runtime), policy = record(body.policy);
+  if (runtime.session_active === false) return 'NO_BOT';
+  if (policy.enabled === false || body.available === false) return 'OFF';
+  if (runtime.session_active !== true || policy.enabled !== true || runtime.heartbeat_fresh !== true) return 'UNAVAILABLE';
+  const state = runtime.state;
+  if (state === 'OFF') return record(runtime.diagnostic).code === 'starting' ? 'STARTING' : 'OFF';
+  if (state === 'LISTENING') {
+    const kws = record(runtime.kws);
+    if (kws.status === 'starting') return 'STARTING';
+    if (kws.status === 'failed') return 'ERROR';
+    if (kws.status !== 'ready' || typeof kws.observed_at_ms !== 'number' || !Number.isFinite(kws.observed_at_ms)
+        || now - kws.observed_at_ms < -5000 || now - kws.observed_at_ms >= VOICE_ACTIVITY_TTL) return 'UNAVAILABLE';
+  }
+  return typeof state === 'string' && Object.prototype.hasOwnProperty.call(voiceActivities, state) ? state as VoiceActivity : 'UNAVAILABLE';
+}

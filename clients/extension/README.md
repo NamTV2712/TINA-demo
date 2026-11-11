@@ -33,7 +33,7 @@ new calls. Reopening resumes missing segments without regenerating cached transl
 
 ## Transcript sources
 
-- **Meeting Bot · TINA Terminal** lists meetings the signed-in TINA account may read through the Meeting Bot API gateway. Select a row to view exact-row snapshots, including drafts and accepted transcript edits. **Open Terminal** opens that meeting in TINA Terminal. **Open Dashboard** uses the configured Dashboard URL.
+- **Meeting Bot · TINA Terminal** lists meetings the signed-in TINA account may read through the Meeting Bot API gateway. Select a row to view exact-row snapshots, including drafts and accepted transcript edits. **Open Terminal** opens that meeting in TINA Terminal. A compact TINA voice status occupies the right side of the footer for Google Meet bots.
 - **Desktop archive · Dashboard** lists saved Desktop journal meetings through the Desktop API gateway. It opens the same transcript review page served by that Desktop gateway. It does not merge Desktop SQLite data into Meeting API/PostgreSQL.
 
 Both lists use existing read endpoints. The extension sends the API key in the `X-API-Key` header, refuses redirects, and clears a transcript when the server denies access. It stores the key and endpoint settings in `chrome.storage.local`. Transcript snapshots are polled every 1.5 seconds while selected; transient failures retry after 3 seconds.

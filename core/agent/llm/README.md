@@ -32,6 +32,15 @@ fakes.
 HTTP completion adapters use raw `httpx`; CLI harnesses use the provider's supported local process
 interface so TINA can keep its existing workspace and event boundary.
 
+OpenAI Responses and Chat Completions adapters also expose the optional
+`complete_structured(prompt, system=..., schema=...)` capability for meeting voice. They request
+strict JSON Schema using `text.format` or `response_format`; ordinary `complete` calls keep their
+existing request shape. Only an explicit 400/422 `unsupported_parameter`/`unsupported_value`
+for that format parameter raises `LLMStructuredOutputUnsupported`. The voice worker can then
+use ordinary completion within its remaining budget, retaining source validation and review.
+Auth, quota, invalid schemas, transport failures and incomplete streams never trigger this fallback.
+Other completion adapters keep the existing prompt/validation path; no new dependency is required.
+
 Completion exceptions retain typed HTTP status in `LLMError.status_code`. The public
 `completion_failure_code()` helper maps only typed auth/config/status/timeout/parse errors to
 fixed recovery codes, never interpreting provider or model text. Live translation uses this
@@ -204,3 +213,11 @@ keeps shell networking offline; a globally forced proxy is rejected before start
 The real CLI smoke probes in `tests/codex_network_smoke.py` and `tests/codex_web_smoke.py` verify
 network/filesystem isolation and web-tool request construction without a provider account. Their
 fixture responses do not establish live search availability, provider quota, or account access.
+
+`OpenAIResponsesCompletion.search(question)` is a separate opt-in public-query capability. Ordinary
+`complete()` calls remain tool-less. Search requires a completed native web call and provider URL
+citations; it returns at most six validated source links in `CompletionResult.sources`. Room voice
+never passes its sources/history to this method. Other completion adapters have no implicit search
+fallback. API/model/account support must be verified on the target deployment.
+
+OpenAI Responses completions require a response.completed terminal event for ordinary generation and verification as well as web search. Early EOF, a bare [DONE], response.incomplete, and explicit non-completed envelope status fail closed without returning accumulated deltas. Successful terminal envelopes may omit status for existing compatible gateways; explicit status must be completed.

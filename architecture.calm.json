@@ -4,7 +4,7 @@
   {
    "tina": {
     "purpose": "SSOT architecture model: module/service/contract inventory AND the runtime data plane (carriers, ownership, flows, egress boundary). gate:dataflow enforces model<->disk completeness, single-writer + render-only ownership, and a reality diff against code; gate:calm validates it against the FINOS meeting-intelligence pattern.",
-    "principle": "P23 — one writer per data carrier; readers never re-derive a producer's data; the model covers every module/service/contract (no drift)."
+    "principle": "P23 \u2014 one writer per data carrier; readers never re-derive a producer's data; the model covers every module/service/contract (no drift)."
    }
   }
  ],
@@ -13,7 +13,7 @@
    "unique-id": "meetings",
    "node-type": "system",
    "name": "meetings",
-   "description": "capture → transcribe → record; owns the raw transcript",
+   "description": "capture \u2192 transcribe \u2192 record; owns the raw transcript",
    "metadata": [
     {
      "path": "core/meetings"
@@ -91,7 +91,7 @@
    "unique-id": "agent-api",
    "node-type": "service",
    "name": "agent-api",
-   "description": "unit control-plane; dispatch -> runtime spawn; meeting copilot Per-user ChatGPT disconnect keeps TINA/ASR sessions separate. Terminal OAuth state is cancelled locally; authenticated internal Agent API owns profile writes, disconnect and generation checks under the same file lock as token refresh. Credentials stay in the private auth volume; callbacks from a disconnected generation cannot restore an old account. Existing in-flight workers may retain short-lived tokens. Owner-scoped meeting Q&A reads canonical transcript and explicitly selected linked private Wiki documents, validates source IDs, stores source fingerprints, and creates a new Wiki page only after explicit Apply; existing pages and canonical data are never overwritten. Routine files are owner-scoped active private-workspace resources: anchored no-symlink I/O, per-owner serialized reconcile, source SHA preconditions for explicit Edit/toggle/delete, and stable IDs per workspace/file. Delete removes the source before cancelling all related jobs; shared workspace files never grant schedules. Chat dispatch serializes configuration changes per thread in Redis using expiring locks and keyed model-configuration digests under agent:chat-config:*. Raw credentials are never stored in that metadata. An unchanged configuration reuses its warm worker; changed provider, credential or model waits for the previous turn-complete and requests cooperative stop through the existing chat input stream, confirms terminal state through runtime.v1 and replaces the idle workload before pre-delivering and spawning the next turn. Busy or unverifiable refreshes return actionable errors without sending the prompt to an old provider. The existing thread id, output stream and provider-session history are preserved. Bedrock model discovery reads paginated regional foundation-model/inference-profile lists; credential tests use native InvokeModel. The API image packages the same Python provider helpers and automatic thinking policy as the worker. All providers use automatic thinking; legacy effort pins are ignored, and the settings UI exposes no manual thinking field. Worker configuration digests include the deployed provider-adapter revision, so adapter fixes replace old warm workers without discarding conversation history. Gemini defaults to gemini-3.5-flash. Gemini, DeepSeek and Bedrock credential tests verify native function-call/result round trips before reporting success; Bedrock uses the same InvokeModelWithResponseStream protocol as its CLI and decodes complete AWS event-stream frames with checksum validation; custom API model registration supplies exact model IDs to the pinned CLI SDK rather than embedding endpoint URIs. Groq credential tests verify a real function-call/result round trip through the worker request adapter before testing summaries. Model discovery excludes speech-only Orpheus entries and marks known text-only ALLaM as summary-only, preventing chat selection while preserving meeting use. Explicit /research chat commands and document research requests resolve a private writable note destination from the authenticated active set. Private Codex history restores turn-scoped recorded source metadata and original opened URLs; missing reference mappings remain visibly unresolved.",
+   "description": "unit control-plane; dispatch -> runtime spawn; meeting copilot Per-user ChatGPT disconnect keeps TINA/ASR sessions separate. Terminal OAuth state is cancelled locally; authenticated internal Agent API owns profile writes, disconnect and generation checks under the same file lock as token refresh. Credentials stay in the private auth volume; callbacks from a disconnected generation cannot restore an old account. Existing in-flight workers may retain short-lived tokens. Owner-scoped meeting Q&A reads canonical transcript and explicitly selected linked private Wiki documents, validates source IDs, stores source fingerprints, and creates a new Wiki page only after explicit Apply; existing pages and canonical data are never overwritten. Routine files are owner-scoped active private-workspace resources: anchored no-symlink I/O, per-owner serialized reconcile, source SHA preconditions for explicit Edit/toggle/delete, and stable IDs per workspace/file. Delete removes the source before cancelling all related jobs; shared workspace files never grant schedules. Chat dispatch serializes configuration changes per thread in Redis using expiring locks and keyed model-configuration digests under agent:chat-config:*. Raw credentials are never stored in that metadata. An unchanged configuration reuses its warm worker; changed provider, credential or model waits for the previous turn-complete and requests cooperative stop through the existing chat input stream, confirms terminal state through runtime.v1 and replaces the idle workload before pre-delivering and spawning the next turn. Busy or unverifiable refreshes return actionable errors without sending the prompt to an old provider. The existing thread id, output stream and provider-session history are preserved. Bedrock model discovery reads paginated regional foundation-model/inference-profile lists; credential tests use native InvokeModel. The API image packages the same Python provider helpers and automatic thinking policy as the worker. All providers use automatic thinking; legacy effort pins are ignored, and the settings UI exposes no manual thinking field. Worker configuration digests include the deployed provider-adapter revision, so adapter fixes replace old warm workers without discarding conversation history. Gemini defaults to gemini-3.5-flash. Gemini, DeepSeek and Bedrock credential tests verify native function-call/result round trips before reporting success; Bedrock uses the same InvokeModelWithResponseStream protocol as its CLI and decodes complete AWS event-stream frames with checksum validation; custom API model registration supplies exact model IDs to the pinned CLI SDK rather than embedding endpoint URIs. Groq credential tests verify a real function-call/result round trip through the worker request adapter before testing summaries. Model discovery excludes speech-only Orpheus entries and marks known text-only ALLaM as summary-only, preventing chat selection while preserving meeting use. Explicit /research chat commands and document research requests resolve a private writable note destination from the authenticated active set. Private Codex history restores turn-scoped recorded source metadata and original opened URLs; missing reference mappings remain visibly unresolved. Voice API traces use the bot request UUID forwarded in an internal header and carry it as separate worker dispatch metadata. Structured logs include only stages/status, duration and source counts; no source text, questions or credentials. Whole-meeting recaps use the existing three-worker background pool and one 120-second map/select/verify waiting budget. Computation is request-UUID scoped and never returns a partial summary as whole-meeting evidence. Each stage probes the internal owner/service-authenticated Meeting API turn permit before and after inference, in addition to source/policy checks; stopped/replaced turns cannot authorize further stages or late publication.",
    "metadata": [
     {
      "path": "core/agent/services/agent-api"
@@ -108,7 +108,7 @@
    "unique-id": "completion-provider",
    "node-type": "system",
    "name": "configured completion provider",
-   "description": "the deployment or per-user model endpoint; may be tenant-hosted or an external provider. Groq uses Codex Responses at https://api.groq.com/openai/v1 for chat, DeepSeek uses the Claude Code Anthropic-compatible endpoint at https://api.deepseek.com/anthropic, and Gemini uses agy with its Gemini API-key provider. Their tool-less meeting jobs use OpenAI-compatible Chat Completions at the respective fixed Groq, DeepSeek and Gemini endpoints. The same masked per-user/platform provider credential selects both paths; TINA transcript API tokens remain separate.",
+   "description": "the deployment or per-user model endpoint; may be tenant-hosted or an external provider. Groq uses Codex Responses at https://api.groq.com/openai/v1 for chat, DeepSeek uses the Claude Code Anthropic-compatible endpoint at https://api.deepseek.com/anthropic, and Gemini uses agy with its Gemini API-key provider. Their tool-less meeting jobs use OpenAI-compatible Chat Completions at the respective fixed Groq, DeepSeek and Gemini endpoints. The same masked per-user/platform provider credential selects both paths; TINA transcript API tokens remain separate. Room voice public web lookup may use the configured OpenAI Responses built-in web_search only after owner opt-in and an explicit spoken public search query; no transcript, private documents or voice history is included. Unsupported providers return a visible unavailable reason.",
    "interfaces": [
     {
      "unique-id": "completion-provider-api",
@@ -120,7 +120,7 @@
    "unique-id": "conformance",
    "node-type": "service",
    "name": "conformance",
-   "description": "conformance — service in gateway",
+   "description": "conformance \u2014 service in gateway",
    "metadata": [
     {
      "path": "core/gateway/services/conformance"
@@ -169,7 +169,7 @@
    "unique-id": "bot",
    "node-type": "service",
    "name": "bot",
-   "description": "spawned-per-meeting worker: join -> capture -> STT -> transcript.v1",
+   "description": "Spawned-per-meeting worker: join -> capture -> selected ASR -> transcript.v1. Opt-in Google Meet voice reuses original ASR hypotheses before LocalAgreement, accepts local LiveKit WakeWord acoustic calls for TINA \u01a1i/hey TINA, assembles same-channel bounded source-clock questions, fences duplicate/late windows and preserves transcript. Separate native VAD and KWS children; verified answer sentences use shared local TTS plus existing Stop. Owner diagnostics use allowlisted reason codes and at most three ASR prefix words; no full question/provider errors enter logs. Voice-only VAD endpoints advance the same ASR window below minimum/cadence, reuse covered results and serialize uncovered tails without closing/resetting transcript state. Content-free request-correlated timing logs separate acknowledgment from answer playback and preserve source clocks. Voice onset is distinct from retained pre-roll, and buffer generation/deferred-close fences run before hypothesis observation. Receive audio uses a separate meeting_rx sink; tts_sink feeds an always-available virtual_mic source. TTS sink mute plus verified Meet UI gate speech; system source mute is never used as a speech gate. Playback requires observed meeting microphone state after a bounded single-toggle verification and bounded device-recovery wait; blocked or unknown state fails closed. Bounded content-free audio counters observe the unchanged capture tee and same ASR requests; per-frame telemetry never adds HTTP calls. Opt-in NS runs after original archive taps and before both ASR and Silero. Off is synchronous bypass; timeout/overload/error drains only unacknowledged raw packets once, fences late outputs, and exposes failed mode. Capture stops before NS drain and ASR finalization. Voice timing separates acknowledgment, waiting notice and answer request, first PCM, prebuffer and local microphone injection. The playback receipt requires verified meeting mic, player spawn and successful first PCM write; it does not prove remote audibility. First-answer timestamps survive lookahead; logs contain no text or credentials.",
    "metadata": [
     {
      "path": "core/meetings/services/bot"
@@ -203,7 +203,7 @@
    "unique-id": "transcription",
    "node-type": "service",
    "name": "transcription",
-   "description": "transcription — OpenAI-compatible /v1/audio/transcriptions boundary with selectable backends: faster-whisper/CTranslate2, Apple MLX/Metal, and loopback FunASR Qwen3-ASR with FSMN-VAD. Clients send bounded audio windows, continuity prompts and content-free capture-lag metadata. FunASR exposes asr-status.v1 with actual device, bounded request timing samples, queue and model percentiles; Terminal reads it through a verified admin proxy. Browser render timings remain local. Does not write any redis carrier (the bot XADDs segments). Optional native Rust backend runs Silero VAD and Qwen3-ASR-0.6B INT8 through sherpa-onnx on CPU at host loopback :18001; it preserves VAD segment offsets and the same ASR status contract. The FunASR adapter forwards min_silence_duration_ms to FSMN max_end_silence_time (100-2000 ms, default 800 ms, explicitly pinned), preserving per-VAD sentence offsets for downstream alignment. An isolated single-source Apple Silicon PoC under deploy/transcription/streaming-poc validates real Qwen Transformers decoder token callbacks and paced growing-window hypotheses on cached VI/EN evaluation clips. It is not a selected production endpoint, does not claim an incremental audio encoder, and never changes/restarts production services; private external artifacts record token timing, accuracy, RAM and before/after listener identities. Sub-200 ms FunASR inputs receive trailing silence only in the temporary inference file to avoid incomplete FSMN frames; source PCM, reported duration and sentence bounds retain the original source interval. Empty input and inference failures remain errors. Optional authenticated loopback :18002 backend composes FunASR FSMN-VAD CPU with hash-pinned Gipformer 1.5 INT8 via Sherpa-ONNX OfflineRecognizer. The root Compose asr profile runs that same CPU service, mounts the pinned model directory and owns host port 18002 while enabled; unload the host LaunchAgent to avoid a port conflict. Existing Custom endpoint settings select it for Desktop/Bot without altering the Qwen platform default. Original VAD sample offsets survive speech slicing; no word timing, prompt conditioning, language detection or token streaming is claimed. One inference plus three bounded waiters, no audio/text in diagnostics. Optional native VieGem-ASR + KenLM endpoint at loopback :18005 uses separately pinned VieGem and EmbeddingGemma 2 assets, PyTorch FP32 on explicit MPS/CPU/CUDA, FSMN on CPU and upstream 4-gram CTC prefix beam decoding. It shares the authenticated bounded HTTP worker with Gipformer; inference is serialized and source VAD offsets stay on the original timeline. Installation does not select the endpoint globally. No incremental streaming, word alignment or automatic transcript polish is claimed; VieGem use is restricted by its non-commercial research license and Gemma terms. Identity also exposes the named viegem backend: administrators configure viegem_url in the platform transcription registry and a dotenvx-encrypted TINA_VIEGEM_TOKEN is injected at deployment startup (legacy database token supported only without that env); native startup decrypts its separate private env file strictly, user preferences select the backend name, and internal Bot/Desktop/dictation resolution carries only its registry-owned endpoint credential. Custom endpoints do not inherit the VieGem platform token; the browser-facing admin settings edge treats that credential as write-only. The source-build entrypoint resolves TINA_VIEGEM_DEVICE=auto to native MPS on Apple Silicon or Docker CUDA on Linux/Windows WSL2. Only the CTC model/encoder uses the GPU; FSMN and KenLM remain CPU. Actual MPS/CUDA compute and authenticated audio must pass before deployment succeeds; no silent CPU fallback. CUDA adds an owned Compose overlay with pinned cu130 wheels and one GPU reservation for inference only. MPS excludes the Docker VieGem profile and stops only the old owned CPU service before binding the same host endpoint; native startup failure attempts to restore that prior service while reporting failure. Explicit cpu remains available. Gipformer and token-free Docker model-install jobs are independent; native setup prepares the same pinned cache before activation. Inference mounts cached weights read-only, runtime tokens come from dotenvx and private keys are not mounted. make-down also removes/stops the owned MPS LaunchAgent. Only a fresh registry receives a VieGem default; existing preferences and foreign worker ownership are preserved. Per-account ASR runtime control keeps shared workers alive while any enabled account requests them. A derived-key authenticated drain fence refuses new requests and cannot stop a worker with active inference. CUDA hardware validation remains pending on a real NVIDIA host.",
+   "description": "transcription \u2014 OpenAI-compatible /v1/audio/transcriptions boundary with selectable backends: faster-whisper/CTranslate2, Apple MLX/Metal, and loopback FunASR Qwen3-ASR with FSMN-VAD. Clients send bounded audio windows, continuity prompts and content-free capture-lag metadata. FunASR exposes asr-status.v1 with actual device, bounded request timing samples, queue and model percentiles; Terminal reads it through a verified admin proxy. Browser render timings remain local. Does not write any redis carrier (the bot XADDs segments). Optional native Rust backend runs Silero VAD and Qwen3-ASR-0.6B INT8 through sherpa-onnx on CPU at host loopback :18001; it preserves VAD segment offsets and the same ASR status contract. The FunASR adapter forwards min_silence_duration_ms to FSMN max_end_silence_time (100-2000 ms, default 800 ms, explicitly pinned), preserving per-VAD sentence offsets for downstream alignment. An isolated single-source Apple Silicon PoC under deploy/transcription/streaming-poc validates real Qwen Transformers decoder token callbacks and paced growing-window hypotheses on cached VI/EN evaluation clips. It is not a selected production endpoint, does not claim an incremental audio encoder, and never changes/restarts production services; private external artifacts record token timing, accuracy, RAM and before/after listener identities. Sub-200 ms FunASR inputs receive trailing silence only in the temporary inference file to avoid incomplete FSMN frames; source PCM, reported duration and sentence bounds retain the original source interval. Empty input and inference failures remain errors. Optional authenticated loopback :18002 backend composes FunASR FSMN-VAD CPU with hash-pinned Gipformer 1.5 INT8 via Sherpa-ONNX OfflineRecognizer. The root Compose asr profile runs that same CPU service, mounts the pinned model directory and owns host port 18002 while enabled; unload the host LaunchAgent to avoid a port conflict. Existing Custom endpoint settings select it for Desktop/Bot without altering the Qwen platform default. Original VAD sample offsets survive speech slicing; no word timing, prompt conditioning, language detection or token streaming is claimed. One inference plus three bounded waiters, no audio/text in diagnostics. Optional native VieGem-ASR + KenLM endpoint at loopback :18005 uses separately pinned VieGem and EmbeddingGemma 2 assets, PyTorch FP32 on explicit MPS/CPU/CUDA, FSMN on CPU and upstream 4-gram CTC prefix beam decoding. It shares the authenticated bounded HTTP worker with Gipformer; inference is serialized and source VAD offsets stay on the original timeline. Installation does not select the endpoint globally. No incremental streaming, word alignment or automatic transcript polish is claimed; VieGem use is restricted by its non-commercial research license and Gemma terms. Identity also exposes the named viegem backend: administrators configure viegem_url in the platform transcription registry and a dotenvx-encrypted TINA_VIEGEM_TOKEN is injected at deployment startup (legacy database token supported only without that env); native startup decrypts its separate private env file strictly, user preferences select the backend name, and internal Bot/Desktop/dictation resolution carries only its registry-owned endpoint credential. Custom endpoints do not inherit the VieGem platform token; the browser-facing admin settings edge treats that credential as write-only. The source-build entrypoint resolves TINA_VIEGEM_DEVICE=auto to native MPS on Apple Silicon or Docker CUDA on Linux/Windows WSL2. Only the CTC model/encoder uses the GPU; FSMN and KenLM remain CPU. Actual MPS/CUDA compute and authenticated audio must pass before deployment succeeds; no silent CPU fallback. CUDA adds an owned Compose overlay with pinned cu130 wheels and one GPU reservation for inference only. MPS excludes the Docker VieGem profile and stops only the old owned CPU service before binding the same host endpoint; native startup failure attempts to restore that prior service while reporting failure. Explicit cpu remains available. Gipformer and token-free Docker model-install jobs are independent; native setup prepares the same pinned cache before activation. Inference mounts cached weights read-only, runtime tokens come from dotenvx and private keys are not mounted. make-down also removes/stops the owned MPS LaunchAgent. Only a fresh registry receives a VieGem default; existing preferences and foreign worker ownership are preserved. Per-account ASR runtime control keeps shared workers alive while any enabled account requests them. A derived-key authenticated drain fence refuses new requests and cannot stop a worker with active inference. CUDA hardware validation remains pending on a real NVIDIA host. VieGem has an optional operator-only bounded name prior, default zero/off; paired local name experiments do not alter production tuning without evidence.",
    "metadata": [
     {
      "path": "core/meetings/services/transcription"
@@ -394,7 +394,7 @@
    "unique-id": "buffer",
    "node-type": "module",
    "name": "buffer",
-   "description": "buffer — atomic module in meetings; source-local sample-indexed AudioRing/AudioTimelinePool: 30s Float32 PCM with validity bitmap, global active-source budget, independent range reads, gap/duplicate/eviction/clock diagnostics Provides a deterministic sustained-silence sample cut that retains both PCM partitions and never treats soft speech as a relative-energy silence.",
+   "description": "buffer \u2014 atomic module in meetings; source-local sample-indexed AudioRing/AudioTimelinePool: 30s Float32 PCM with validity bitmap, global active-source budget, independent range reads, gap/duplicate/eviction/clock diagnostics Provides a deterministic sustained-silence sample cut that retains both PCM partitions and never treats soft speech as a relative-energy silence.",
    "metadata": [
     {
      "path": "core/meetings/modules/buffer"
@@ -405,7 +405,7 @@
    "unique-id": "capture-codec",
    "node-type": "module",
    "name": "capture-codec",
-   "description": "capture-codec — atomic module in meetings Shared sample-range.v1 opt-in PCM ACK metadata/type; indexed binary frame layout and legacy golden bytes stay unchanged.",
+   "description": "capture-codec \u2014 atomic module in meetings Shared sample-range.v1 opt-in PCM ACK metadata/type; indexed binary frame layout and legacy golden bytes stay unchanged.",
    "metadata": [
     {
      "path": "core/meetings/modules/capture-codec"
@@ -416,7 +416,7 @@
    "unique-id": "gmeet-capture",
    "node-type": "module",
    "name": "gmeet-capture",
-   "description": "gmeet-capture — atomic module in meetings Default capture uses RMS 0.0001 to preserve quiet speech; explicit peak-gate overrides remain supported.",
+   "description": "gmeet-capture \u2014 atomic module in meetings Default capture uses RMS 0.0001 to preserve quiet speech; explicit peak-gate overrides remain supported. Worklet frame size is explicit: default 4096, or 1024 samples (64 ms at 16 kHz) for voice-enabled Google Meet bots. Both sizes preserve capture frame/sample timestamps; transcript and voice consume the same PCM.",
    "metadata": [
     {
      "path": "core/meetings/modules/gmeet-capture"
@@ -427,7 +427,7 @@
    "unique-id": "gmeet-pipeline",
    "node-type": "module",
    "name": "gmeet-pipeline",
-   "description": "gmeet-pipeline — atomic module in meetings A host-supplied hallucinationFilter covers every confirmation and flush branch; default isHallucination remains unchanged. Live ASR submissions use the shared continuityPrompt selector: no inherited text for sub-two-second PCM; existing long-window context and confirmation remain unchanged.",
+   "description": "gmeet-pipeline \u2014 atomic module in meetings A host-supplied hallucinationFilter covers every confirmation and flush branch; default isHallucination remains unchanged. Live ASR submissions use the shared continuityPrompt selector: no inherited text for sub-two-second PCM; existing long-window context and confirmation remain unchanged.",
    "metadata": [
     {
      "path": "core/meetings/modules/gmeet-pipeline"
@@ -438,7 +438,7 @@
    "unique-id": "jitsi-capture",
    "node-type": "module",
    "name": "jitsi-capture",
-   "description": "jitsi-capture — atomic module in meetings",
+   "description": "jitsi-capture \u2014 atomic module in meetings",
    "metadata": [
     {
      "path": "core/meetings/modules/jitsi-capture"
@@ -449,7 +449,7 @@
    "unique-id": "join",
    "node-type": "module",
    "name": "join",
-   "description": "join — atomic module in meetings",
+   "description": "join \u2014 atomic module in meetings",
    "metadata": [
     {
      "path": "core/meetings/modules/join"
@@ -460,7 +460,7 @@
    "unique-id": "mixed-capture-core",
    "node-type": "module",
    "name": "mixed-capture-core",
-   "description": "mixed-capture-core — atomic module in meetings Default mixed capture uses RMS 0.0001 and retains the original sample clock across skipped frames.",
+   "description": "mixed-capture-core \u2014 atomic module in meetings Default mixed capture uses RMS 0.0001 and retains the original sample clock across skipped frames.",
    "metadata": [
     {
      "path": "core/meetings/modules/mixed-capture-core"
@@ -471,7 +471,7 @@
    "unique-id": "mixed-pipeline",
    "node-type": "module",
    "name": "mixed-pipeline",
-   "description": "mixed-pipeline — atomic module in meetings ASR energy floor is RMS 0.0001; transport/name evidence thresholds remain independent. Provisional CSRC rolls wait for a sustained quiet cut after the last draft; EOF flushes remaining owned audio after a roll, preserving the source clock and same track. Stop/reconnect blocks new PCM, drains already-fed segmentation callbacks, then flushes the final turn; concurrent disposals share one completion task. Live ASR submissions use the shared continuityPrompt selector: no inherited text for sub-two-second PCM; existing long-window context and confirmation remain unchanged.",
+   "description": "mixed-pipeline \u2014 atomic module in meetings ASR energy floor is RMS 0.0001; transport/name evidence thresholds remain independent. Provisional CSRC rolls wait for a sustained quiet cut after the last draft; EOF flushes remaining owned audio after a roll, preserving the source clock and same track. Stop/reconnect blocks new PCM, drains already-fed segmentation callbacks, then flushes the final turn; concurrent disposals share one completion task. Live ASR submissions use the shared continuityPrompt selector: no inherited text for sub-two-second PCM; existing long-window context and confirmation remain unchanged.",
    "metadata": [
     {
      "path": "core/meetings/modules/mixed-pipeline"
@@ -482,7 +482,7 @@
    "unique-id": "record-chunker",
    "node-type": "module",
    "name": "record-chunker",
-   "description": "record-chunker — atomic module in meetings MediaRecorder pause/resume waits for source events; blob encoding/delivery is serialized and fully awaited before the final marker; concurrent stops share completion and late tap startup can be cancelled.",
+   "description": "record-chunker \u2014 atomic module in meetings MediaRecorder pause/resume waits for source events; blob encoding/delivery is serialized and fully awaited before the final marker; concurrent stops share completion and late tap startup can be cancelled.",
    "metadata": [
     {
      "path": "core/meetings/modules/record-chunker"
@@ -493,7 +493,7 @@
    "unique-id": "recording",
    "node-type": "module",
    "name": "recording",
-   "description": "recording — atomic module in meetings",
+   "description": "recording \u2014 atomic module in meetings",
    "metadata": [
     {
      "path": "core/meetings/modules/recording"
@@ -504,7 +504,7 @@
    "unique-id": "remote-browser",
    "node-type": "module",
    "name": "remote-browser",
-   "description": "remote-browser — atomic module in meetings",
+   "description": "remote-browser \u2014 atomic module in meetings",
    "metadata": [
     {
      "path": "core/meetings/modules/remote-browser"
@@ -515,7 +515,7 @@
    "unique-id": "teams-capture",
    "node-type": "module",
    "name": "teams-capture",
-   "description": "teams-capture — atomic module in meetings",
+   "description": "teams-capture \u2014 atomic module in meetings",
    "metadata": [
     {
      "path": "core/meetings/modules/teams-capture"
@@ -526,7 +526,7 @@
    "unique-id": "whisper",
    "node-type": "module",
    "name": "whisper",
-   "description": "whisper — atomic module in meetings Exports a sample-count-based live continuity-context selector: previous confirmed text is omitted below two seconds of PCM, retained for longer windows. Explicit direct/refinement prompts, raw results and vi-en review protection remain available.",
+   "description": "whisper \u2014 atomic module in meetings Exports a sample-count-based live continuity-context selector: previous confirmed text is omitted below two seconds of PCM, retained for longer windows. Explicit direct/refinement prompts, raw results and vi-en review protection remain available.",
    "metadata": [
     {
      "path": "core/meetings/modules/whisper"
@@ -537,7 +537,7 @@
    "unique-id": "zoom-capture",
    "node-type": "module",
    "name": "zoom-capture",
-   "description": "zoom-capture — atomic module in meetings",
+   "description": "zoom-capture \u2014 atomic module in meetings",
    "metadata": [
     {
      "path": "core/meetings/modules/zoom-capture"
@@ -548,7 +548,7 @@
    "unique-id": "event.v1",
    "node-type": "contract",
    "name": "event.v1",
-   "description": "event.v1 — sealed/published contract (agent)",
+   "description": "event.v1 \u2014 sealed/published contract (agent)",
    "metadata": [
     {
      "path": "core/agent/contracts/event.v1",
@@ -560,7 +560,7 @@
    "unique-id": "invoke.v1",
    "node-type": "contract",
    "name": "invoke.v1",
-   "description": "invoke.v1 — sealed/published contract (agent)",
+   "description": "invoke.v1 \u2014 sealed/published contract (agent)",
    "metadata": [
     {
      "path": "core/agent/contracts/invoke.v1",
@@ -572,7 +572,7 @@
    "unique-id": "proactive-card.v1",
    "node-type": "contract",
    "name": "proactive-card.v1",
-   "description": "proactive-card.v1 — sealed/published contract (agent)",
+   "description": "proactive-card.v1 \u2014 sealed/published contract (agent)",
    "metadata": [
     {
      "path": "core/agent/contracts/proactive-card.v1",
@@ -584,7 +584,7 @@
    "unique-id": "routine.v1",
    "node-type": "contract",
    "name": "routine.v1",
-   "description": "routine.v1 — sealed/published contract (agent)",
+   "description": "routine.v1 \u2014 sealed/published contract (agent)",
    "metadata": [
     {
      "path": "core/agent/contracts/routine.v1",
@@ -596,7 +596,7 @@
    "unique-id": "task.v1",
    "node-type": "contract",
    "name": "task.v1",
-   "description": "task.v1 — sealed/published contract (agent)",
+   "description": "task.v1 \u2014 sealed/published contract (agent)",
    "metadata": [
     {
      "path": "core/agent/contracts/task.v1",
@@ -608,7 +608,7 @@
    "unique-id": "tool.v1",
    "node-type": "contract",
    "name": "tool.v1",
-   "description": "tool.v1 — sealed/published contract (agent)",
+   "description": "tool.v1 \u2014 sealed/published contract (agent)",
    "metadata": [
     {
      "path": "core/agent/contracts/tool.v1",
@@ -620,7 +620,7 @@
    "unique-id": "tool-approval.v1",
    "node-type": "contract",
    "name": "tool-approval.v1",
-   "description": "tool-approval.v1 — sealed/published per-call MCP approval request and decision contract (agent)",
+   "description": "tool-approval.v1 \u2014 sealed/published per-call MCP approval request and decision contract (agent)",
    "metadata": [
     {
      "path": "core/agent/contracts/tool-approval.v1",
@@ -632,7 +632,7 @@
    "unique-id": "unit.v1",
    "node-type": "contract",
    "name": "unit.v1",
-   "description": "unit.v1 — sealed/published contract (agent)",
+   "description": "unit.v1 \u2014 sealed/published contract (agent)",
    "metadata": [
     {
      "path": "core/agent/contracts/unit.v1",
@@ -644,7 +644,7 @@
    "unique-id": "workspace.v1",
    "node-type": "contract",
    "name": "workspace.v1",
-   "description": "workspace.v1 — sealed/published contract (agent)",
+   "description": "workspace.v1 \u2014 sealed/published contract (agent)",
    "metadata": [
     {
      "path": "core/agent/contracts/workspace.v1",
@@ -656,7 +656,7 @@
    "unique-id": "api.v1",
    "node-type": "contract",
    "name": "api.v1",
-   "description": "api.v1 — sealed/published contract (gateway)",
+   "description": "api.v1 \u2014 sealed/published contract (gateway)",
    "metadata": [
     {
      "path": "core/gateway/contracts/api.v1",
@@ -668,7 +668,7 @@
    "unique-id": "logevent.v1",
    "node-type": "contract",
    "name": "logevent.v1",
-   "description": "logevent.v1 — sealed/published contract (gateway)",
+   "description": "logevent.v1 \u2014 sealed/published contract (gateway)",
    "metadata": [
     {
      "path": "core/gateway/contracts/logevent.v1",
@@ -680,7 +680,7 @@
    "unique-id": "ws.v1",
    "node-type": "contract",
    "name": "ws.v1",
-   "description": "ws.v1 — sealed/published contract (gateway)",
+   "description": "ws.v1 \u2014 sealed/published contract (gateway)",
    "metadata": [
     {
      "path": "core/gateway/contracts/ws.v1",
@@ -692,7 +692,7 @@
    "unique-id": "identity.v1",
    "node-type": "contract",
    "name": "identity.v1",
-   "description": "identity.v1 — sealed/published contract (identity)",
+   "description": "identity.v1 \u2014 sealed/published contract (identity)",
    "metadata": [
     {
      "path": "core/identity/contracts/identity.v1",
@@ -704,7 +704,7 @@
    "unique-id": "acts.v1",
    "node-type": "contract",
    "name": "acts.v1",
-   "description": "acts.v1 — sealed/published contract (meetings)",
+   "description": "acts.v1 \u2014 sealed/published contract (meetings)",
    "metadata": [
     {
      "path": "core/meetings/contracts/acts.v1",
@@ -716,7 +716,7 @@
    "unique-id": "captured-signal.v1",
    "node-type": "contract",
    "name": "captured-signal.v1",
-   "description": "captured-signal.v1 — sealed/published contract (meetings)",
+   "description": "captured-signal.v1 \u2014 sealed/published contract (meetings)",
    "metadata": [
     {
      "path": "core/meetings/contracts/captured-signal.v1",
@@ -728,7 +728,7 @@
    "unique-id": "flagged-issue.v1",
    "node-type": "contract",
    "name": "flagged-issue.v1",
-   "description": "flagged-issue.v1 — sealed/published contract (meetings)",
+   "description": "flagged-issue.v1 \u2014 sealed/published contract (meetings)",
    "metadata": [
     {
      "path": "core/meetings/contracts/flagged-issue.v1",
@@ -740,7 +740,7 @@
    "unique-id": "invocation.v1",
    "node-type": "contract",
    "name": "invocation.v1",
-   "description": "invocation.v1 — sealed/published contract (meetings)",
+   "description": "invocation.v1 \u2014 sealed/published contract (meetings)",
    "metadata": [
     {
      "path": "core/meetings/contracts/invocation.v1",
@@ -752,7 +752,7 @@
    "unique-id": "lifecycle.v1",
    "node-type": "contract",
    "name": "lifecycle.v1",
-   "description": "lifecycle.v1 — sealed/published bot status with producer-observed transition time (meetings)",
+   "description": "lifecycle.v1 \u2014 sealed/published bot status with producer-observed transition time (meetings)",
    "metadata": [
     {
      "path": "core/meetings/contracts/lifecycle.v1",
@@ -764,7 +764,7 @@
    "unique-id": "service-authority.v1",
    "node-type": "contract",
    "name": "service-authority.v1",
-   "description": "service-authority.v1 — sealed opt-in admission and active-service decision contract without hosted billing data",
+   "description": "service-authority.v1 \u2014 sealed opt-in admission and active-service decision contract without hosted billing data",
    "metadata": [
     {
      "path": "core/meetings/contracts/service-authority.v1",
@@ -776,7 +776,7 @@
    "unique-id": "transcript.v1",
    "node-type": "contract",
    "name": "transcript.v1",
-   "description": "transcript.v1 — sealed/published contract (meetings)",
+   "description": "transcript.v1 \u2014 sealed/published contract (meetings)",
    "metadata": [
     {
      "path": "core/meetings/contracts/transcript.v1",
@@ -788,7 +788,7 @@
    "unique-id": "webhook.v1",
    "node-type": "contract",
    "name": "webhook.v1",
-   "description": "webhook.v1 — sealed/published delivery including privacy-safe terminal service provenance (meetings)",
+   "description": "webhook.v1 \u2014 sealed/published delivery including privacy-safe terminal service provenance (meetings)",
    "metadata": [
     {
      "path": "core/meetings/contracts/webhook.v1",
@@ -800,7 +800,7 @@
    "unique-id": "runtime.v1",
    "node-type": "contract",
    "name": "runtime.v1",
-   "description": "runtime.v1 — sealed/published contract (runtime)",
+   "description": "runtime.v1 \u2014 sealed/published contract (runtime)",
    "metadata": [
     {
      "path": "core/runtime/contracts/runtime.v1",
@@ -812,7 +812,7 @@
    "unique-id": "schedule.v1",
    "node-type": "contract",
    "name": "schedule.v1",
-   "description": "schedule.v1 — sealed/published contract (runtime)",
+   "description": "schedule.v1 \u2014 sealed/published contract (runtime)",
    "metadata": [
     {
      "path": "core/runtime/contracts/schedule.v1",
@@ -824,7 +824,7 @@
    "unique-id": "execution-targets.v1",
    "node-type": "contract",
    "name": "execution-targets.v1",
-   "description": "execution-targets.v1 — sealed/published contract (deploy)",
+   "description": "execution-targets.v1 \u2014 sealed/published contract (deploy)",
    "metadata": [
     {
      "path": "deploy/contracts/execution-targets.v1",
@@ -836,7 +836,7 @@
    "unique-id": "config.v1",
    "node-type": "contract",
    "name": "config.v1",
-   "description": "config.v1 — sealed/published contract (deploy): per-service deployment-config declaration (required-explicit / defaulted / capability tri-state + live probes), preflight + gate:config-contract (ADR-0026)",
+   "description": "config.v1 \u2014 sealed/published contract (deploy): per-service deployment-config declaration (required-explicit / defaulted / capability tri-state + live probes), preflight + gate:config-contract (ADR-0026)",
    "metadata": [
     {
      "path": "deploy/contracts/config.v1",
@@ -848,7 +848,7 @@
    "unique-id": "slim",
    "node-type": "webclient",
    "name": "slim",
-   "description": "slim — client",
+   "description": "slim \u2014 client",
    "metadata": [
     {
      "path": "clients/slim"
@@ -870,7 +870,7 @@
    "unique-id": "claude-plugin",
    "node-type": "webclient",
    "name": "claude-plugin",
-   "description": "claude-plugin — client (Claude Code plugin: manifest, skills, hosted MCP config; no code)",
+   "description": "claude-plugin \u2014 client (Claude Code plugin: manifest, skills, hosted MCP config; no code)",
    "metadata": [
     {
      "path": "clients/claude-plugin"
@@ -881,7 +881,7 @@
    "unique-id": "terminal",
    "node-type": "webclient",
    "name": "terminal",
-   "description": "terminal — client Manual ChatGPT OAuth callback handoff from another browser completes only in the initiating authenticated TINA session; anonymous or mismatched callbacks do not consume pending state. Per-user ChatGPT disconnect keeps TINA/ASR sessions separate. Terminal OAuth state is cancelled locally; authenticated internal Agent API owns profile writes, disconnect and generation checks under the same file lock as token refresh. Credentials stay in the private auth volume; callbacks from a disconnected generation cannot restore an old account. Existing in-flight workers may retain short-lived tokens. /routine authoring includes the browser IANA zone and asks when cadence is missing. Routines Edit has Save/Cancel, source SHA preconditions, stable-ID controls and next-run presentation in the declared timezone. Start brief actions require synchronous chat delivery acceptance and carry explicit meeting focus; busy or unavailable chat is reported rather than a false running state. Personal brief prompts and readers share stable native/row-ID paths in explicitly selected private writable mounts, reuse legacy files with Vietnamese normalization, and retain workspace slugs on document navigation. Personal brief discovery and shared README rendering refresh on visible polling/focus with errors separate from missing content; Today uses the same active private mount set and row-ID convention.",
+   "description": "terminal \u2014 client Manual ChatGPT OAuth callback handoff from another browser completes only in the initiating authenticated TINA session; anonymous or mismatched callbacks do not consume pending state. Per-user ChatGPT disconnect keeps TINA/ASR sessions separate. Terminal OAuth state is cancelled locally; authenticated internal Agent API owns profile writes, disconnect and generation checks under the same file lock as token refresh. Credentials stay in the private auth volume; callbacks from a disconnected generation cannot restore an old account. Existing in-flight workers may retain short-lived tokens. /routine authoring includes the browser IANA zone and asks when cadence is missing. Routines Edit has Save/Cancel, source SHA preconditions, stable-ID controls and next-run presentation in the declared timezone. Start brief actions require synchronous chat delivery acceptance and carry explicit meeting focus; busy or unavailable chat is reported rather than a false running state. Personal brief prompts and readers share stable native/row-ID paths in explicitly selected private writable mounts, reuse legacy files with Vietnamese normalization, and retain workspace slugs on document navigation. Personal brief discovery and shared README rendering refresh on visible polling/focus with errors separate from missing content; Today uses the same active private mount set and row-ID convention.",
    "metadata": [
     {
      "path": "clients/terminal"
@@ -941,7 +941,7 @@
    "description": "change-only transcript deltas the gateway + agent-api subscribe to",
    "controls": {
     "ownership": {
-     "description": "shared — review (P23 prefers one writer)",
+     "description": "shared \u2014 review (P23 prefers one writer)",
      "requirements": [
       {
        "requirement-url": "urn:tina:calm:controls:single-writer",
@@ -1222,7 +1222,7 @@
    "unique-id": "agent-worker",
    "node-type": "service",
    "name": "agent-worker",
-   "description": "spawned isolated workspace-agent worker; selectable Claude Code, Codex app-server, or Antigravity CLI (agy) harness; every dispatch mounts the ordered [_global, active workspaces, _system] stack, fails closed without _global, and loads its authoritative entry context. Groq mode reuses Codex against the fixed Groq Responses endpoint for chat and OpenAI-compatible Chat Completions for meeting summaries. A per-turn Groq model profile disables unsupported freeform patch tools and namespace delegation at the CLI source, with provider-neutral TINA instructions and file edits through the existing sandboxed function tools. DeepSeek mode reuses Claude Code against DeepSeek's Anthropic-compatible endpoint for chat and its Chat Completions endpoint for summaries. Gemini mode selects agy's Gemini API-key provider for chat and the Gemini OpenAI-compatible endpoint for summaries, without consumer/OAuth credentials or a synthetic Terms acknowledgment. Dispatch selects each effective per-user/platform key for both paths and clears other providers' credentials. A temporary authenticated loopback proxy inside the worker strips unsupported Responses fields and non-function tools, maps developer instructions to system messages for non-GPT-OSS chat templates without changing tool history, rejects known non-tool chat models, serializes function calls and preserves streamed events and HTTP errors; it never executes tools or expands the harness grants. Codex pins explicit named per-turn filesystem profiles to TINA write grants, protects agent/Git metadata and excludes temporary write roots. Trusted chat/routine turns map WebSearch/WebFetch grants to cached/live hosted web tools; untrusted event/transcription turns disable web tools and remain read-only/offline. Shell networking requires Bash plus WebFetch and a root-owned exclusive GitHub-domain proxy policy, with private addresses, upstream proxies, Unix-socket forwarding and direct-network bypass blocked. Managed networking is not globally forced so offline turns remain isolated. Codex loads workspace instructions and skills, maps TINA auto/gate MCP grants to Codex approval modes, streams tool lifecycle events, pauses gate calls for owner-scoped, one-call decisions over chat streams using tool-approval.v1, and participates in the shared transcript-size resume cap. A private per-TINA-session provider-thread index preserves display history across provider restarts; reset removes this index, and legacy recovery uses only same-subject, same-session Redis events newer than session creation. Codex user-message events define visible human messages, excluding injected environment and developer context; restored tool names remain descriptive. Antigravity maps TINA mount grants to read_file/write_file permissions, sandboxes commands, loads governed skills, exposes only auto-granted non-secret MCP servers in headless mode, and normalizes streamed events and conversation ids. The legacy Antigravity model selection requires a persisted Terms warning acknowledgment; consumer OAuth access through third-party software is prohibited by Google's terms. The Gemini API-key provider has independent credential preflight. Harness-written kg/entities files are workspace.v1-validated before commit. Post-meeting summary uses a tool-less CompletionPort and a deterministic writer with a local generated-content fingerprint, inference-time compare-and-swap, workspace locking and atomic publication; user-edited or unmarked existing documents are preserved, and only the meeting entity path is committed. Meeting Q&A uses a private short-lived, tool-less CompletionPort job with read-only mounts and no public chat history. Web-enabled Codex turns render explicit source metadata as final Markdown links and persist bounded per-turn source records in private continuity; missing citation mappings are never guessed. Explicit Knowledge research instructions create a new private Markdown note with meeting/repo/web source rows, evidence versions and verification dates, preserving other files and canonical transcript/audio.",
+   "description": "spawned isolated workspace-agent worker; selectable Claude Code, Codex app-server, or Antigravity CLI (agy) harness; every dispatch mounts the ordered [_global, active workspaces, _system] stack, fails closed without _global, and loads its authoritative entry context. Groq mode reuses Codex against the fixed Groq Responses endpoint for chat and OpenAI-compatible Chat Completions for meeting summaries. A per-turn Groq model profile disables unsupported freeform patch tools and namespace delegation at the CLI source, with provider-neutral TINA instructions and file edits through the existing sandboxed function tools. DeepSeek mode reuses Claude Code against DeepSeek's Anthropic-compatible endpoint for chat and its Chat Completions endpoint for summaries. Gemini mode selects agy's Gemini API-key provider for chat and the Gemini OpenAI-compatible endpoint for summaries, without consumer/OAuth credentials or a synthetic Terms acknowledgment. Dispatch selects each effective per-user/platform key for both paths and clears other providers' credentials. A temporary authenticated loopback proxy inside the worker strips unsupported Responses fields and non-function tools, maps developer instructions to system messages for non-GPT-OSS chat templates without changing tool history, rejects known non-tool chat models, serializes function calls and preserves streamed events and HTTP errors; it never executes tools or expands the harness grants. Codex pins explicit named per-turn filesystem profiles to TINA write grants, protects agent/Git metadata and excludes temporary write roots. Trusted chat/routine turns map WebSearch/WebFetch grants to cached/live hosted web tools; untrusted event/transcription turns disable web tools and remain read-only/offline. Shell networking requires Bash plus WebFetch and a root-owned exclusive GitHub-domain proxy policy, with private addresses, upstream proxies, Unix-socket forwarding and direct-network bypass blocked. Managed networking is not globally forced so offline turns remain isolated. Codex loads workspace instructions and skills, maps TINA auto/gate MCP grants to Codex approval modes, streams tool lifecycle events, pauses gate calls for owner-scoped, one-call decisions over chat streams using tool-approval.v1, and participates in the shared transcript-size resume cap. A private per-TINA-session provider-thread index preserves display history across provider restarts; reset removes this index, and legacy recovery uses only same-subject, same-session Redis events newer than session creation. Codex user-message events define visible human messages, excluding injected environment and developer context; restored tool names remain descriptive. Antigravity maps TINA mount grants to read_file/write_file permissions, sandboxes commands, loads governed skills, exposes only auto-granted non-secret MCP servers in headless mode, and normalizes streamed events and conversation ids. The legacy Antigravity model selection requires a persisted Terms warning acknowledgment; consumer OAuth access through third-party software is prohibited by Google's terms. The Gemini API-key provider has independent credential preflight. Harness-written kg/entities files are workspace.v1-validated before commit. Post-meeting summary uses a tool-less CompletionPort and a deterministic writer with a local generated-content fingerprint, inference-time compare-and-swap, workspace locking and atomic publication; user-edited or unmarked existing documents are preserved, and only the meeting entity path is committed. Meeting Q&A uses a private short-lived, tool-less CompletionPort job with read-only mounts and no public chat history. Web-enabled Codex turns render explicit source metadata as final Markdown links and persist bounded per-turn source records in private continuity; missing citation mappings are never guessed. Explicit Knowledge research instructions create a new private Markdown note with meeting/repo/web source rows, evidence versions and verification dates, preserving other files and canonical transcript/audio. Voice jobs optionally request provider-side JSON Schema for answers/plans/review, restricted to authorized source IDs; explicit unsupported-format responses alone use the validated legacy path. Retrieval sets above eight excerpts get one optional four-second HTTP-timeout selected-model rerank, selecting up to 12 IDs plus recent/heard-history references within 32 excerpts/24000 characters. Invalid/empty rankings and oversized pinned context retain the original retrieval; verification and repair always receive the full original evidence. Ranking consumes the existing voice scheduling deadline. Content-free UUID-correlated stage logs cover selection, model calls, review and repair.",
    "metadata": [
     {
      "path": "core/agent/worker"
@@ -1388,7 +1388,7 @@
    "unique-id": "flows-engine",
    "node-type": "module",
    "name": "flows-engine",
-   "description": "the engine: stdlib-only at module scope — step implementations and flow definitions are values it receives, never imports",
+   "description": "the engine: stdlib-only at module scope \u2014 step implementations and flow definitions are values it receives, never imports",
    "metadata": [
     {
      "path": "core/flows/src/flows"
@@ -1416,7 +1416,7 @@
    "unique-id": "flows-worker",
    "node-type": "service",
    "name": "flows-worker",
-   "description": "the one leased loop; a SKIP LOCKED poll over next_run_at is the only clock consumer — time is a column, not a scheduler",
+   "description": "the one leased loop; a SKIP LOCKED poll over next_run_at is the only clock consumer \u2014 time is a column, not a scheduler",
    "metadata": [
     {
      "path": "core/flows/src/flows_worker"
@@ -1438,7 +1438,7 @@
    "unique-id": "flows-steps",
    "node-type": "module",
    "name": "flows-steps",
-   "description": "the step implementations a flow names — one function per capability, registered by __name__; the real adapters call domain HTTP surfaces and sit OUTSIDE the engine's import graph, and fakes.py mirrors the same names so every fixture runs with zero domains attached",
+   "description": "the step implementations a flow names \u2014 one function per capability, registered by __name__; the real adapters call domain HTTP surfaces and sit OUTSIDE the engine's import graph, and fakes.py mirrors the same names so every fixture runs with zero domains attached",
    "metadata": [
     {
      "path": "core/flows/src/flows_steps"
@@ -1460,7 +1460,7 @@
    "unique-id": "flows-timeline",
    "node-type": "module",
    "name": "flows-timeline",
-   "description": "one person's day in order: the READ back over reactions and effect receipts along the time axis. It admits nothing, claims nothing and writes nothing — the read model for the timeline and queue surfaces",
+   "description": "one person's day in order: the READ back over reactions and effect receipts along the time axis. It admits nothing, claims nothing and writes nothing \u2014 the read model for the timeline and queue surfaces",
    "metadata": [
     {
      "path": "core/flows/src/flows_timeline"
@@ -1471,13 +1471,13 @@
    "unique-id": "flows-rows",
    "node-type": "data-asset",
    "name": "flows-rows",
-   "description": "the reaction + effect_receipt tables (core/flows/schema.sql); a retry consults the receipt before touching the outside world again. TWO writers: flows-worker runs the steps and stamps the receipts, and flows-api admits facts (POST /events → admit() → INSERT INTO reaction) and registers flow versions (INSERT INTO flow_version) in its own process"
+   "description": "the reaction + effect_receipt tables (core/flows/schema.sql); a retry consults the receipt before touching the outside world again. TWO writers: flows-worker runs the steps and stamps the receipts, and flows-api admits facts (POST /events \u2192 admit() \u2192 INSERT INTO reaction) and registers flow versions (INSERT INTO flow_version) in its own process"
   },
   {
    "unique-id": "flows.v1",
    "node-type": "contract",
    "name": "flows.v1",
-   "description": "flows.v1 — the carrier census (flows): one producing domain per event type, with the refs a consumer may rely on and the cardinality it may assume. Read by gate:config-contract (a publish-edge key's carriers must be registered here, owned by that service's domain), by gate:schema and by the flows suite. Unsealed by intent — see the contract's README",
+   "description": "flows.v1 \u2014 the carrier census (flows): one producing domain per event type, with the refs a consumer may rely on and the cardinality it may assume. Read by gate:config-contract (a publish-edge key's carriers must be registered here, owned by that service's domain), by gate:schema and by the flows suite. Unsealed by intent \u2014 see the contract's README",
    "metadata": [
     {
      "path": "core/flows/contracts/flows.v1",
@@ -1794,7 +1794,7 @@
    "unique-id": "tts-sidecar",
    "node-type": "service",
    "name": "Optional Vietnamese TTS sidecar",
-   "description": "Optional separate Compose service under deploy/tts: one preset VieNeu v3 Turbo ONNX CPU voice. Authenticated OpenAI-compatible /v1/audio/speech consumes bounded text and returns headerless mono PCM16 at 24 kHz. Pinned model/codec snapshots are operator-downloaded, hash-verified and read-only; runtime hub access is offline. One synthesis at a time; no transcript writes, agent imports or speech text logging. Native synthesis is not preemptible; existing bot Stop cancels its HTTP request/playback. Shared env stores a Dotenvx-encrypted token; a host runner loads only that token with a separate private key. Model cache paths are per-host; TTS keys are not injected into inference.",
+   "description": "Optional separate Compose service under deploy/tts: one preset VieNeu v3 Turbo ONNX CPU voice. Authenticated OpenAI-compatible /v1/audio/speech consumes bounded text and returns headerless mono PCM16 at 24 kHz. Pinned model/codec snapshots are operator-downloaded, hash-verified and read-only; runtime hub access is offline. One synthesis at a time; no transcript writes, agent imports or speech text logging. Native synthesis is not preemptible; existing bot Stop cancels its HTTP request/playback. Shared env stores a Dotenvx-encrypted token; a host runner loads only that token with a separate private key. Model cache paths are per-host; TTS keys are not injected into inference. Also available in main Compose speech profile. FIFO synthesis queue has at most three waiters, 15s queue timeout and drops disconnected queued clients. Exactly one fixed source-free acknowledgment is prewarmed/cached; private meeting answers are never cached. TTS derives a bounded spoken copy from unchanged display input using the pinned normalizer for selected numeric spans and an operator-owned image-packaged pronunciation dictionary. Explicit invocation meeting IDs map to projects; default-only preview and unknown meetings do not inherit another project. Clients cannot supply dictionaries. Custom preprocessing excludes code/URLs/email; no speech text is logged or saved over canonical text. Bot serializes validated answer sentences and checks policy before each sentence. Native infer_stream yields chunked PCM24 with stateful soxr resampling and one final flush. HTTP failure after headers omits the chunk terminator; cancellation closes the generator between native calls while retaining bounded FIFO admission and absolute deadlines. Bot buffers 150ms and keeps at most current plus one lookahead stream, bounded by PassThrough backpressure. Lookahead never opens mic; its failure cannot mute current audio. Stop, source-policy changes and departure cancel both handles; completed requires normal HTTP end and player/mic cleanup. Three-meeting operation keeps one native synthesis, six FIFO waiters, 30-second queue timeout and sixteen bounded connections. Authenticated prewarmed public clips alone bypass native synthesis/queue; private replies are never cached. Disconnect is checked before and after each native chunk; cancelled output is discarded before HTTP headers/audio and the generator closes without producing further chunks. An in-progress ONNX call is not forcibly preempted; the serialized slot releases when it returns.",
    "metadata": [
     {
      "path": "deploy/tts"
@@ -1943,6 +1943,126 @@
      "type": "api"
     }
    ]
+  },
+  {
+   "unique-id": "voice-engine",
+   "node-type": "module",
+   "name": "Shared CPU meeting voice engine",
+   "description": "Shared local speech primitives. Bot mode retains per-channel Silero VAD for endpoint/quiet events over bounded PCM IPC; a separate CPU LiveKit WakeWord 2.1.1 child verifies two retained local ONNX hashes (hey TINA and TINA \u01a1i), shares sessions across independent channel streams and buffers 64 ms packets into 80 ms steps. KWS alone authorizes a caller; existing ASR supplies question text without rewriting transcript. Source/session/channel fences, bounded ASR history and same-caller continuation handle asynchronous delivery. Distinct known IDs on fresh independent channels can overlap without cancelling the selected caller; unknown/stale/duplicate identities still refuse ambiguous overlap. Fresh identified KWS can replace an idle post-answer follow-up slot with a new caller and conversation key, never preempt pending capture, thinking, playback or quiet. Successful playback opens an absolute 15-second same-channel known-participant follow-up window; unknown identity, Stop, source-policy change, expiry or playback failure never authorize it. Fast replies speak directly; only slow new requests receive a delayed 900 ms acknowledgment, never repeated on follow-ups. Local lexical pause cues extend incomplete utterances to a bounded two-second source-clock wait without an extra model. Busy VAD/ASR continues for explicit same-channel known-caller interruptions only; agreed/final fresh ASR rejects backchannels, other speakers and command phrases contained in played text. KWS stays locked. Stop cancels local playback and stale generation work; captured corrections survive quiet rearm. Monotonic sentence-completion receipts separate played prefixes from full generated proposals; stopped conversation history and cards use only confirmed completed sentences, never the in-progress sentence. Completed clarification history is context-only and source-fingerprint validated, enabling short clarification replies without inventing evidence. Missing participant metadata preserves continuous channel history; conflicting known IDs or source discontinuities reset it, without granting account identity or additional source permissions. Settings reads owner-only current-session KWS heartbeats; no heartbeat or old bot is not ready. Busy/quiet/Stop gate and clear KWS; missing assets, errors or backpressure refuse voice activation without interrupting transcript ASR. Weights are operator-provisioned in the existing read-only cache and never downloaded on join. Optional legacy host pilot retains its independent KWS path. Optional pinned WebRTC 0.3.1 CPU NS Low uses one state per capture channel, 10 ms FIFO processing and measured 96-sample delay compensation. AEC/HPF/AGC are verified off; original packet counts and source timestamps survive flush.",
+   "metadata": [
+    {
+     "path": "core/meetings/modules/voice-engine"
+    }
+   ]
+  },
+  {
+   "unique-id": "meeting-voice.v1",
+   "node-type": "data-asset",
+   "name": "meeting-voice.v1 policy and turn protocol",
+   "description": "Owner-approved room-shared sources and revision-checked policy; active meeting/session-bound bot capability. No participant account is inferred from voice or display names. Owner-approved ASR name variants are optional, revision-bound, and cannot use greeting prefixes; fixed base names are TINA/Tina/TINA \u01a1i. Generic human-call alias anh \u01a1i is rejected; suggested specific variants require owner approval. Optional bounded owner diagnostics carry original observation/heard timestamps and reason codes, independently expiring within 30s; legacy state messages remain valid. Revision-bound noise_suppression is boolean/default false, separate from room sharing; optional audio snapshot reports off/starting/low/failed. Owner-requested defaults are seeded on new capable transcribing Google Meet spawns: voice on, NS on, own transcript allowed, no documents. Existing saved policies survive continuation; absent policies are initialized. tin \u01a1i is a fixed anchored case-insensitive invocation. ti na \u01a1i, ti\u00ean na \u01a1i, tinh anh \u01a1i and tin anh \u01a1i are also built-in anchored case-insensitive names by owner request, with no per-room Save. Custom alias records remain unchanged; raw ASR is never rewritten. After rearm, stale channel-onset windows admit only complete, ordered, text-aligned timed ASR speech intervals starting after the fence; wholly fresh source windows remain valid. Voice-only projection preserves raw ASR and request count. A confirmed name-only utterance receives the cached source-free acknowledgment without an LLM call, then after quiet rearm permits one same-channel fresh question before the five-second caller window expires. Known transport participant identity must match; missing identity remains channel-only. Acknowledgment, completed-answer and resumable-interruption caller continuation expire after 5s; later questions require a fresh wake. Stop/failure/policy change fences continuation and late ASR; follow-up answer omits a duplicate acknowledgment. During post-ack quiet gating, at most eight same-channel ASR hypotheses are retained and VAD continues endpoint tracking; quiet rearm replays only through existing source/participant fences. Pure acknowledgment echo is ignored. Voice answer completion uses a dedicated concise/clarifying prompt with BM25 relevance, recent 120-second transcript and adjacent evidence, bounded to 32 sources/24000 characters; long approved transcript/document sources are projected into deterministic <=1200-character chunks with 200-character overlap before ranking, with parent key/fingerprint, exact character offsets, speaker and unchanged parent time intervals. Owner/meeting/policy/key/fingerprint-scoped CPU-local multilingual-E5-small INT8 embeddings rank only the authorized chunks and fuse with BM25 via reciprocal ranks. A bounded 8192-vector/15-minute RAM cache and three-second cold indexing budget preserve voice latency; busy/failing semantic encoding retains BM25, with no private text sent to an embedding provider. Pinned ONNX/tokenizer assets and MIT notice are baked into Agent API. Whole-meeting recap intent separately covers every approved transcript chunk in chronological <=12-source/12000-character parts. Verified map facts are reduced in bounded groups, then final claims are checked against original plus related evidence. A 512-job/15-minute owner/meeting/policy/input-scoped RAM cache with three in-flight completions supports resumable summary_pending responses; incomplete preparation never claims whole-meeting coverage. All jobs recheck current source permissions before dispatch and final release fences changes to the complete input snapshot. Recaps are read-only derived output and do not edit canonical notes/transcript. Neighbor chunks supply context under the existing budgets; final source checks regenerate the same projection and parent changes revoke every affected chunk; no embeddings or external tools. Voice drafts receive an exact digit/date citation guard and a separate selected-model entailment/contradiction review. Identity, basic social/capability requests and unsupported external actions use fixed server-owned assistant responses with no meeting fact generation. Compound/ambiguous questions remain evidence-scoped and public web stays explicit. One rejected draft may be repaired using the same approved sources and must pass both checks again; supported partial answers may ask a short follow-up. Content-free verification codes (at most two) are stored with the owner-visible reply, never drafts or reviewer prose. Provider budgets share a 50-second scheduling deadline: generation up to 25s, each review/repair up to 10s; rejected/unavailable review never releases the unchecked draft. Optional owner-selected engine=tina|livekit defaults to tina. The three-meeting self-hosted Agents runtime uses confirmed ASR questions over custom HTTP I/O and sends PCM back through the existing bot playback; raw meeting audio and canonical transcripts stay on their original path. New bots advertise bridge support; legacy bots refuse the pilot instead of silently using native voice. VoiceTurnPermit is an internal boolean reply bound to the exact current request and active bot session, requiring both owner identity and the service secret. The 360-second exclusive reservation covers the bot total 330-second wait/playback budget. The bot announces a slow whole-meeting recap once using fixed cached local TTS, waits for the background result and automatically plays only its verified final answer. Transcript capture continues and existing Stop/caller/policy/generation fences refuse late results. The 120-second recap deadline returns a source-free summary_pending failure when exhausted, with no promise of later automatic speech. Public fixed speech has three independently rotating groups per bot/meeting: name-only acknowledgments, generic question waiting and recap waiting (four phrases each). All twelve phrases are prewarmed by shared TTS and bypass the busy Agents session. Normalized exact notice echoes cannot consume caller continuation. Fast answers, including those arriving during notice authorization, omit filler; at most one waiting phrase is spoken and no LLM or unobserved web/Wiki/tool activity is invented. Capability-only GET /bots/voice/{meeting}/{session}/turn/{request}?revision confirms the exact current Redis reservation for SDK PCM. /ready replaces /health for cross-service voice admission; TTS auth/audio format must pass before a bot claims readiness. New capable Google Meet rooms now seed engine=livekit and enabled/include_transcript/allow_general_knowledge/allow_web_search=true, with NS Low on and no document grants. Manual and calendar joins resolve account preparation preferences; explicit account opt-out and saved room choices survive. Legacy model defaults remain off/native, and web still requires an explicit public query. New Compose templates configure the local Agents URL.",
+   "metadata": [
+    {
+     "path": "core/meetings/contracts/meeting-voice.v1"
+    }
+   ]
+  },
+  {
+   "unique-id": "meeting-voice-state",
+   "node-type": "data-asset",
+   "name": "Ephemeral per-meeting voice turn and runtime state",
+   "description": "Meeting API is the sole Redis writer of per-session voice reservations/status/results. Optional hashed transport participant identity scopes at most three completed-playback QAs to meeting/session/policy revision; private Redis history expires in 900 seconds. Unknown identity disables personal history; Agent checks source fingerprints before reuse. History is context only and never enters transcripts or public projections. Separate owner-only diagnostic snapshots contain allowlisted reason codes and at most three prefix words (64 characters); absolute expiry is within 30s of heard/observed time. Heartbeats cannot renew text; stale/old-session data is hidden and no diagnostic changes original transcript/meeting JSONB. Optional audio snapshot holds at most 16 numeric channel rows for frame/sample continuity, RMS, frame-end transport delay and request-correlated ASR timings. Backend queue time comes only from Server-Timing. No PCM/name/text enters audio snapshots; status observation age, active session and 15-second expiry fence visibility. Terminal transcript toolbar and Extension footer beside Open Terminal show a compact read-only voice activity indicator (listening, capturing, thinking, speaking, quiet, off, error or ended). Missing/expired heartbeat or stale KWS readiness never implies listening. Extension reuses its voice-history snapshot request and resets on source/meeting changes. Terminal also expires runtime visibility after 15 seconds without a successful status read and on poll errors; sequential five-second reads recover without discarding unsaved policy edits.",
+   "controls": {
+    "ownership": {
+     "description": "Meeting API alone owns voice turn state",
+     "requirements": [
+      {
+       "requirement-url": "urn:tina:calm:controls:single-writer",
+       "config": {
+        "writers": [
+         "meeting-api"
+        ],
+        "match": "meeting:voice:.*",
+        "op": "set"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "unique-id": "meeting-voice-replies",
+   "node-type": "data-asset",
+   "name": "Owner-only durable TINA voice replies",
+   "description": "Validated answer text and immutable terminal playback receipts in meeting.data.voice_replies, keyed by request/session. Row-locked updates preserve ASR and source policy. Redis receipt retries reconcile durable state; missing receipts after departure are displayed as unconfirmed. Dedicated owner endpoint only: generic meeting/transcript/share projections omit this field, and artifact deletion removes it and fences late writes. Bounded answer_kind/reason, up to two read-only lookup counts and six validated public citation links distinguish source-grounded meeting answers, general knowledge, web answers and failures. Stores at most 32 verified source references without quotes. Owner-only on-demand source reads resolve current permitted transcript/document chunks and fingerprints; changed, deleted or revoked evidence returns no old quotation. Public history exposes only source count.",
+   "controls": {
+    "ownership": {
+     "description": "Meeting API alone writes voice reply history",
+     "requirements": [
+      {
+       "requirement-url": "urn:tina:calm:controls:single-writer",
+       "config": {
+        "writers": [
+         "meeting-api"
+        ],
+        "match": "voice_replies",
+        "op": "write"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "unique-id": "voice-account-defaults",
+   "node-type": "data-asset",
+   "name": "Account voice preparation defaults",
+   "description": "Identity owns users.data.voice_prefs.prepare_new_bots (null deployment default / true prepare / false disable). Existing bot-context delivers it to manual Google Meet spawn; explicit invocation choice wins. It never grants room sources or enables room Q&A. Unknown defaults on Identity outage do not prepare voice.",
+   "controls": {
+    "ownership": {
+     "description": "Identity alone writes account voice defaults",
+     "requirements": [
+      {
+       "requirement-url": "urn:tina:calm:controls:single-writer",
+       "config": {
+        "writers": [
+         "admin-api"
+        ],
+        "match": "voice_prefs",
+        "op": "write"
+       }
+      }
+     ]
+    }
+   }
+  },
+  {
+   "unique-id": "livekit-agent",
+   "node-type": "service",
+   "name": "Optional local LiveKit Agents pilot",
+   "description": "Pinned LiveKit Agents 1.8.11 worker, up to three independent rooms and AgentSessions in one process. Custom LLM adapter uses capability-scoped TINA context/plan/lookup/final-answer endpoints; Agents executes up to two native SDK batches of two read-only tools selected by the configured LLM through TINA's credential boundary; custom TTS adapter calls shared VieNeu. No owner/provider API keys or workspace mounts. Whole-meeting recap requests skip keyword tool planning and use the source-authorized TINA map/reduce/verify recap flow; raw media ownership remains in the meeting bot. Supplemental tool planning sees prior results and may rewrite a private retrieval query or read surrounding original text using a per-turn opaque handle. The core limits two plans/four attempted tools to a shared 30-second retrieval phase; timeouts skip work and retain successful queries. Context handles are current-source fingerprint-bound, source permissions are rechecked, and Stop/final dispatch fence late results. SDK ChatContext is scoped by meeting/session/policy and hashed caller (32 callers, three turns, 15-minute expiry), refreshed from TINA's source-valid actual playback receipts before every turn. Generated but unheard text is discarded. TINA matches SDK context to heard history, controls source permissions, and verifies the final reply. PCM HTTP output is bounded and carries no microphone playback receipt. Stop UUID fences, disconnect cancellation, policy reaping and 90s idle cleanup apply. Raw room audio/text inputs, room transcript outputs and recording are disabled. LLM planning/tool/final failures release the core reservation and retire the SDK runtime for a fresh next turn. Per-request synthesis completion is tracked independently of SpeechHandle; partial TTS failure aborts the HTTP PCM stream without a success terminator. Header guards use pure ASGI to preserve transport errors. Cleanup claims the exact registry generation under the opening lock and each generation has a unique room name, preventing stale/delayed deletion of a replacement. Configuration distinguishes permission/session rejection from transient service errors: 401/403/404 deny, 409 invalidates, and other non-200 responses become 503. Transient errors preserve busy/recent rooms without authorizing new requests or bypassing source checks. The TINA background recap pool retains one exclusive voice turn while SDK LLM work waits up to 160 seconds and the HTTP answer route up to 165 seconds; progress announcements bypass the busy SDK session using shared fixed-message TTS. No new audio/RAG runtime or simultaneous room question is introduced. Capacity is three meetings in one replica/process; a fourth is refused. Authenticated /ready validates local TTS token and PCM metadata without inference; full capacity is not unhealthy. SDK PCM revalidates the current Redis turn via the capability-only Meeting API before synthesis, while streaming and at completion, including after SDK runtime recreation. Automated qualification opens three actual local rooms and fifteen uncached TTS streams over TCP with explicit synthetic meeting/LLM/receipt authority. Live meeting and actual model-provider acceptance remain separate. PCM admission belongs to the complete ASGI response lifetime; header-send and early disconnect failures close the iterator and release reserved lookahead credits, preventing a room from becoming permanently audio-busy. The TTS adapter explicitly closes upstream PCM iterators on success, failure and cancellation, unwinding shared TTS HTTP connections; tests cover Stop before first audio and buffered-output cleanup.",
+   "metadata": [
+    {
+     "path": "deploy/livekit"
+    }
+   ],
+   "interfaces": [
+    {
+     "unique-id": "livekit-agent-http",
+     "type": "api"
+    }
+   ]
+  },
+  {
+   "unique-id": "livekit-server",
+   "node-type": "service",
+   "name": "Self-hosted LiveKit server",
+   "description": "Pinned LiveKit server 1.13.11 on the private Compose network, opt-in livekit profile. Authenticated per-meeting rooms scope AgentSession lifecycle; custom HTTP I/O handles confirmed text/PCM in this pilot. No public ports or Cloud Inference. API secrets are domain-separated HMAC derivatives of the existing encrypted control-plane secret.",
+   "interfaces": [
+    {
+     "unique-id": "livekit-server-ws",
+     "type": "api"
+    }
+   ]
   }
  ],
  "relationships": [
@@ -2066,7 +2186,10 @@
       "speech.v1",
       "speech-playback",
       "speech-room.v1",
-      "asr-control"
+      "asr-control",
+      "voice-engine",
+      "meeting-voice.v1",
+      "meeting-voice-state"
      ]
     }
    }
@@ -3020,7 +3143,7 @@
      }
     }
    },
-   "description": "proxy /mcp — POST buffered, GET relayed unbuffered (SSE stream)",
+   "description": "proxy /mcp \u2014 POST buffered, GET relayed unbuffered (SSE stream)",
    "protocol": "HTTPS"
   },
   {
@@ -3168,7 +3291,7 @@
   },
   {
    "unique-id": "dash-gw-rest",
-   "description": "dashboard → gateway REST (hosted-compat aliases; the hosted-proven wiring)",
+   "description": "dashboard \u2192 gateway REST (hosted-compat aliases; the hosted-proven wiring)",
    "relationship-type": {
     "connects": {
      "source": {
@@ -3183,7 +3306,7 @@
   },
   {
    "unique-id": "dash-gw-ws",
-   "description": "dashboard → gateway /ws (live transcript view)",
+   "description": "dashboard \u2192 gateway /ws (live transcript view)",
    "relationship-type": {
     "connects": {
      "source": {
@@ -3316,7 +3439,7 @@
   },
   {
    "unique-id": "flows-api-writes-rows",
-   "description": "the second writer, recorded because it is real: POST /events admits a fact in the API process (flows_integrations/flows_api.py → flows.admit → INSERT INTO reaction) and the registry writes flow_version there too. The chart carried only flows-worker, so the one shared carrier in this domain read as single-writer",
+   "description": "the second writer, recorded because it is real: POST /events admits a fact in the API process (flows_integrations/flows_api.py \u2192 flows.admit \u2192 INSERT INTO reaction) and the registry writes flow_version there too. The chart carried only flows-worker, so the one shared carrier in this domain read as single-writer",
    "relationship-type": {
     "connects": {
      "source": {
@@ -3353,7 +3476,7 @@
   },
   {
    "unique-id": "flows-worker-calls-agent-api",
-   "description": "steps reach domains only over their published HTTP surfaces (core/flows/src/flows_steps/common.py) — a domain never knows flows exists",
+   "description": "steps reach domains only over their published HTTP surfaces (core/flows/src/flows_steps/common.py) \u2014 a domain never knows flows exists",
    "relationship-type": {
     "connects": {
      "source": {
@@ -4166,7 +4289,11 @@
     }
    },
    "description": "Meeting API alone owns the ephemeral Redis playback state.",
-   "metadata": [{ "access": "write" }]
+   "metadata": [
+    {
+     "access": "write"
+    }
+   ]
   },
   {
    "unique-id": "translation-cache-write",
@@ -4287,6 +4414,266 @@
      "access": "call"
     }
    ]
+  },
+  {
+   "unique-id": "bot-native-kws",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "bot"
+     },
+     "destination": {
+      "node": "voice-engine"
+     }
+    }
+   },
+   "description": "Bounded PCM IPC supplies per-channel Silero VAD activity/endpoint events and a separate local LiveKit ONNX activation child. The bot controller accepts acoustic evidence for a single caller and dispatches existing owner-scoped question/LLM/TTS flow; IPC carries transient participant identity, logs are content-free. Sessions load once per bot with bounded per-speaker state; busy/quiet/Stop and source discontinuities reset KWS. KWS failure disables voice with a visible reason while transcript continues; VAD overflow/error retains its existing disarm behavior without affecting transcript.",
+   "protocol": "IPC"
+  },
+  {
+   "unique-id": "bot-room-voice",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "bot"
+     },
+     "destination": {
+      "node": "meeting-api"
+     }
+    }
+   },
+   "description": "Meeting/session capability-authenticated preflight, bounded ASR-derived text question and content-free state. Voice reuses the existing selected ASR request; no duplicate question transcription. Optional validated KWS engine/readiness snapshots are session-bound and expire after 15 seconds; Settings services exposes them only for active owned meetings. Owner-approved name variants are revision-bound. Optional diagnostics are capability-authenticated, truncated to three prefix words, age/session-fenced and owner-visible for 30 seconds only.",
+   "protocol": "HTTP"
+  },
+  {
+   "unique-id": "meeting-room-voice-knowledge",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "meeting-api"
+     },
+     "destination": {
+      "node": "agent-api"
+     }
+    }
+   },
+   "description": "Server-authenticated owner identity, current room policy and current approved sources; source fingerprints and policy rechecked after inference. One read-only lookup round (at most two calls) searches recent transcript, the full authorized transcript snapshot, or explicitly shared documents. Per-room opt-ins separately permit isolated general-knowledge and explicit public-web question modes; every result rechecks the policy revision.",
+   "protocol": "HTTP"
+  },
+  {
+   "unique-id": "meeting-room-voice-state",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "meeting-api"
+     },
+     "destination": {
+      "node": "meeting-voice-state"
+     }
+    }
+   },
+   "description": "Single writer: bounded turn reservation, revision and cancellation state. Redis Stop fences and room lock release are independent of durable reply-history availability; storage failure cannot leave a stopped turn blocking a new question.",
+   "protocol": "Redis",
+   "metadata": [
+    {
+     "access": "write"
+    }
+   ]
+  },
+  {
+   "unique-id": "meeting-api-to-meeting-voice-replies",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "meeting-api"
+     },
+     "destination": {
+      "node": "meeting-voice-replies"
+     }
+    }
+   },
+   "description": "Persist verified text and playback receipts independently of ASR transcript rows.",
+   "protocol": "PostgreSQL JSONB",
+   "metadata": [
+    {
+     "access": "write"
+    }
+   ]
+  },
+  {
+   "unique-id": "meeting-voice-replies-to-terminal",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "meeting-voice-replies"
+     },
+     "destination": {
+      "node": "terminal"
+     }
+    }
+   },
+   "description": "Owner-scoped voice assistant history rendered as TINA reply cards with playback state. Collapsed source evidence loads fresh owner-authorized quotes on demand and removes them on revalidation failure; links retain meeting and reply identity.",
+   "protocol": "HTTP",
+   "metadata": [
+    {
+     "access": "read"
+    }
+   ]
+  },
+  {
+   "unique-id": "meeting-voice-replies-to-extension",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "meeting-voice-replies"
+     },
+     "destination": {
+      "node": "extension"
+     }
+    }
+   },
+   "description": "Owner-scoped history polled independently from transcript snapshots; account/meeting abort fences prevent stale replies. Collapsed source evidence loads fresh owner-authorized quotes on demand and removes them on revalidation failure; links retain meeting and reply identity.",
+   "protocol": "HTTP",
+   "metadata": [
+    {
+     "access": "read"
+    }
+   ]
+  },
+  {
+   "unique-id": "admin-api-voice-account-defaults-voice-settings",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "admin-api"
+     },
+     "destination": {
+      "node": "voice-account-defaults"
+     }
+    }
+   },
+   "description": "Row-locked authenticated self-serve voice preference; no ASR or sharing changes.",
+   "protocol": "PostgreSQL JSONB",
+   "metadata": [
+    {
+     "access": "write"
+    }
+   ]
+  },
+  {
+   "unique-id": "voice-account-defaults-meeting-api-voice-settings",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "voice-account-defaults"
+     },
+     "destination": {
+      "node": "meeting-api"
+     }
+    }
+   },
+   "description": "Reuse existing internal bot-context to resolve new manual Google Meet voice capability.",
+   "protocol": "HTTP",
+   "metadata": [
+    {
+     "access": "read"
+    }
+   ]
+  },
+  {
+   "unique-id": "terminal-tts-sidecar-voice-settings",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "terminal"
+     },
+     "destination": {
+      "node": "tts-sidecar"
+     }
+    }
+   },
+   "description": "Authenticated readiness and fixed preview: server-held TTS credentials; bounded WAV returned only to the account browser, no meeting command.",
+   "protocol": "HTTP via gateway and meeting-api",
+   "metadata": [
+    {
+     "access": "invoke"
+    }
+   ]
+  },
+  {
+   "unique-id": "bot-livekit-agent",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "bot"
+     },
+     "destination": {
+      "node": "livekit-agent"
+     }
+    }
+   },
+   "protocol": "HTTP",
+   "description": "Selected pilot only: meeting/session capability, revision, request UUID and hashed transport speaker key. Confirmed question in, bounded answer metadata and PCM out. Stop cancels the matching request. Bot owns actual microphone receipts. The fixed source-free acknowledgment stays on direct prewarmed local TTS so it does not wait behind pending LLM generation."
+  },
+  {
+   "unique-id": "livekit-agent-meeting-api",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "livekit-agent"
+     },
+     "destination": {
+      "node": "meeting-api"
+     }
+    }
+   },
+   "protocol": "HTTP",
+   "description": "Revalidate active meeting, engine and owner policy before every context/plan/lookup/final operation. Context reserves the original room turn, SDK tools retrieve only approved transcript/linked Wiki sources (web requires the exact explicit public query and owner opt-in), and finalization matches heard context and executed tool queries before source verification. Stop and policy/session changes fence late tools/results. No full owner credential or direct workspace access. The internal endpoint is http://meeting-api:8080, matching the gateway; readiness checks that API as well as the LiveKit server."
+  },
+  {
+   "unique-id": "meeting-api-livekit-health",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "meeting-api"
+     },
+     "destination": {
+      "node": "livekit-agent"
+     }
+    }
+   },
+   "protocol": "HTTP",
+   "description": "Optional ready probe; unavailable pilot disarms voice without stopping ASR. Only bridge-capable bots can select this path."
+  },
+  {
+   "unique-id": "livekit-agent-local-tts",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "livekit-agent"
+     },
+     "destination": {
+      "node": "tts-sidecar"
+     }
+    }
+   },
+   "protocol": "HTTP",
+   "description": "Bounded text to existing shared local VieNeu-TTS; PCM16 mono 24 kHz. Shared TTS token stays inside the worker; bot uses only its scoped capability for pilot I/O."
+  },
+  {
+   "unique-id": "livekit-agent-server",
+   "relationship-type": {
+    "connects": {
+     "source": {
+      "node": "livekit-agent"
+     },
+     "destination": {
+      "node": "livekit-server"
+     }
+    }
+   },
+   "protocol": "WebSocket",
+   "description": "Agent joins only its named per-meeting room, without publish/subscribe/data grants. SDK RoomIO inputs/outputs and session hosting are disabled in this custom-I/O pilot; no raw meeting audio or private transcripts are published."
   }
  ],
  "flows": [

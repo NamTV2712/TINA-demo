@@ -213,6 +213,22 @@ class InMemoryMeetingRepo:
             else:
                 m["data"][k] = v
 
+    async def save_voice_reply(self, meeting_id, session_uid, reply):
+        from ..lifecycle.voice_replies import merge_reply
+        row = self._meetings[meeting_id]
+        row['data'] = merge_reply(row.get('data'), session_uid, reply)
+
+    async def set_voice_policy(self, meeting_id, user_id, expected_revision, policy):
+        row = self._meetings.get(meeting_id)
+        if row is None or row['user_id'] != user_id:
+            raise ValueError('Meeting unavailable')
+        current = (row.get('data') or {}).get('voice_assistant') or {}
+        if current.get('revision', 0) != expected_revision:
+            raise ValueError('Policy changed')
+        saved = dict(policy, revision=expected_revision + 1)
+        row.setdefault('data', {})['voice_assistant'] = saved
+        return saved
+
     async def get_meeting(self, meeting_id) -> Optional[dict]:
         row = self._meetings.get(meeting_id)
         # A COPY, like every other read: the spawn fence must observe committed row state, never

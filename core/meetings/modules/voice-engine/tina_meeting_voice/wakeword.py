@@ -32,17 +32,20 @@ class CaptureQueue:
 
 
 class SherpaKws:
-    def __init__(self, directory):
-        from .assets import verify
-        verify(directory)
-        import sherpa_onnx
-        files = {name.split("-")[0]: str(directory / name) for name in (
-            "encoder-epoch-12-avg-2-chunk-16-left-64.int8.onnx",
-            "decoder-epoch-12-avg-2-chunk-16-left-64.int8.onnx",
-            "joiner-epoch-12-avg-2-chunk-16-left-64.int8.onnx")}
-        self.spotter = sherpa_onnx.KeywordSpotter(
-            **files, tokens=str(directory / "tokens.txt"), keywords_file=str(directory / "keywords.txt"),
-            sample_rate=SAMPLE_RATE, num_threads=1, provider="cpu", keywords_threshold=0.25)
+    def __init__(self, directory, *, spotter=None):
+        if spotter is not None:
+            self.spotter = spotter
+        else:
+            from .assets import verify
+            verify(directory)
+            import sherpa_onnx
+            files = {name.split("-")[0]: str(directory / name) for name in (
+                "encoder-epoch-12-avg-2-chunk-16-left-64.int8.onnx",
+                "decoder-epoch-12-avg-2-chunk-16-left-64.int8.onnx",
+                "joiner-epoch-12-avg-2-chunk-16-left-64.int8.onnx")}
+            self.spotter = sherpa_onnx.KeywordSpotter(
+                **files, tokens=str(directory / "tokens.txt"), keywords_file=str(directory / "keywords.txt"),
+                sample_rate=SAMPLE_RATE, num_threads=1, provider="cpu", keywords_threshold=0.25)
         self.stream = self.spotter.create_stream()
 
     def accept(self, samples):

@@ -25,7 +25,7 @@ from typing import Any, Dict, List, Optional
 
 from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request, Response, Security, status
 from fastapi.security import APIKeyHeader
-from pydantic import BaseModel, Field, field_serializer, model_validator
+from pydantic import BaseModel, Field, StrictBool, field_serializer, model_validator
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.future import select
@@ -329,6 +329,11 @@ def global_setup_state(value: dict) -> str:
     if isinstance(value, dict) and str(value.get("state", "")).strip() == GLOBAL_SETUP_COMPLETED:
         return GLOBAL_SETUP_COMPLETED
     return GLOBAL_SETUP_MISSING
+
+
+class VoicePrefsUpdate(BaseModel):
+    model_config = {'extra': 'forbid'}
+    prepare_new_bots: StrictBool | None = None
 
 
 class ModelPrefsUpdate(BaseModel):
@@ -969,6 +974,23 @@ def create_app() -> FastAPI:
     # `bot_name` is NOT here on purpose: a bot default is a fact about the bot, and meetings already
     # resolves one through /internal/users/{id}/bot-context.
 
+    @app.get('/user/voice')
+    async def get_user_voice(user: User = Depends(get_current_user)):
+        value = (user.data or {}).get('voice_prefs') or {}
+        return VoicePrefsUpdate.model_validate(value).model_dump()
+
+    @app.put('/user/voice')
+    async def set_user_voice(update: VoicePrefsUpdate, user: User = Depends(get_current_user_for_update),
+                             db: AsyncSession = Depends(get_db)):
+        from sqlalchemy.orm import attributes
+        data = dict(user.data or {})
+        data['voice_prefs'] = update.model_dump()
+        user.data = data
+        attributes.flag_modified(user, 'data')
+        db.add(user)
+        await db.commit()
+        return update.model_dump()
+
     @app.put("/user/models")
     async def set_user_models(update: ModelPrefsUpdate,
                               user: User = Depends(get_current_user_for_update),
@@ -1422,6 +1444,7 @@ def create_app() -> FastAPI:
         resp: dict = {
             "max_concurrent": user.max_concurrent_bots,
             "bot_name": data.get("calendar_bot_name") or "TINA",
+            "voice": VoicePrefsUpdate.model_validate(data.get('voice_prefs') or {}).model_dump(),
         }
         # Fixture collection (O-TEL-1): whether this spawn tapes its raw captured-signal stream.
         # ALWAYS present in the response — a missing key downstream is indistinguishable from an

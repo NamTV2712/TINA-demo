@@ -9,6 +9,97 @@ name: tina-v012
 # mounted /var/run/docker.sock. That published ~3.6GB image is a REFERENCE here, never built.
 
 services:
+  livekit:
+    profiles: ["livekit"]
+    image: livekit/livekit-server:v1.13.11
+    environment:
+      LIVEKIT_KEYS: ${LIVEKIT_KEYS:-}
+      LIVEKIT_CONFIG: |
+        port: 7880
+        bind_addresses: ["0.0.0.0"]
+        rtc:
+          use_external_ip: false
+          tcp_port: 7881
+          port_range_start: 50000
+          port_range_end: 50100
+        logging:
+          level: warn
+    networks: [tina]
+    read_only: true
+    tmpfs: [/tmp]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:7880/"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+  livekit-agent:
+    profiles: ["livekit"]
+    image: tina/livekit-agent:${IMAGE_TAG:-dev}
+    build: {context: ../livekit}
+    environment:
+      LIVEKIT_URL: ws://livekit:7880
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:-}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:-}
+      MEETING_API_URL: http://meeting-api:8080
+      TTS_SERVICE_URL: ${TTS_SERVICE_URL:-http://tts:8000}
+      TTS_API_TOKEN: ${TTS_API_TOKEN:-}
+    networks: [tina]
+    depends_on:
+      livekit: {condition: service_healthy}
+    read_only: true
+    tmpfs: [/tmp]
+    init: true
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/ready',timeout=12)"]
+      interval: 10s
+      timeout: 15s
+      retries: 12
+      start_period: 120s
+  # Optional room voice inference. Models persist once and are never downloaded by a bot.
+  meeting-voice-models:
+    profiles: ["speech"]
+    image: ${BROWSER_IMAGE:-tina/tina-bot:dev}
+    entrypoint: ["/opt/tina-voice/bin/python", "-m", "tina_meeting_voice.bot"]
+    command: ["/models/meeting-voice", "--vad-only", "--setup"]
+    volumes: ["meeting-voice-models:/models/meeting-voice"]
+    networks: [tina]
+    restart: "no"
+  tts-models:
+    profiles: ["speech"]
+    image: tina/tts:dev
+    user: "0:0"
+    command: ["python", "install_models.py"]
+    environment:
+      HF_HUB_OFFLINE: "0"
+      HF_HUB_DISABLE_XET: "1"
+    volumes: ["tts-models:/models"]
+    networks: [tina]
+    restart: "no"
+  tts:
+    profiles: ["speech"]
+    image: tina/tts:dev
+    build:
+      context: ../tts
+    environment:
+      TTS_API_TOKEN: ${TTS_API_TOKEN:-}
+    volumes: ["tts-models:/models:ro"]
+    networks: [tina]
+    read_only: true
+    tmpfs: [/tmp]
+    init: true
+    restart: unless-stopped
+    depends_on:
+      tts-models: {condition: service_completed_successfully}
+      meeting-voice-models: {condition: service_completed_successfully}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health',timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 120s
+
   # ─── Infrastructure ───────────────────────────────────────────────────────────────────────────
   redis:
     # Valkey (Linux Foundation BSD-3 fork of Redis 7.2.4): parity with the Lite witness surface
@@ -205,6 +296,7 @@ services:
       # Spawn the bot onto THIS compose network so it resolves meeting-api:8080 (lifecycle callback)
       # + redis. Must equal the project-prefixed network name (DockerBackend → HostConfig.NetworkMode).
       - DOCKER_NETWORK=${COMPOSE_PROJECT_NAME:-tina-v012}_tina
+      - TINA_MEETING_VOICE_MODELS_VOLUME=${COMPOSE_PROJECT_NAME:-tina-v012}_meeting-voice-models
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       # Mirror of HOST_CLAUDE_CREDENTIALS (a DOCKER-HOST path — see .env.example) into THIS container,
@@ -257,6 +349,7 @@ services:
         required: false
     environment:
       - TINA_AGENT_API_PORT=8100
+      - TINA_VOICE_EMBED_DIR=${TINA_VOICE_EMBED_DIR:-/opt/tina/voice-retrieval}
       - TINA_RUNTIME_API_URL=http://runtime:8090
       # P0 SSE ownership: agent-api verifies meeting-row ownership before opening /api/meeting/stream (owner-scoped like /ws).
       - TINA_MEETING_API_URL=http://meeting-api:8080
@@ -412,6 +505,9 @@ services:
       - TRANSCRIPTION_MODEL=${TRANSCRIPTION_MODEL:-}
       # Optional OpenAI-compatible TTS endpoint for the bot's Speak acts. These stay server-side;
       # meeting-api forwards them only into voice-enabled bot workloads.
+      - TINA_MEETING_VOICE=${TINA_MEETING_VOICE:-0}
+      - LIVEKIT_AGENT_URL=${LIVEKIT_AGENT_URL:-}
+      - AGENT_API_URL=${AGENT_API_URL:-http://agent-api:8100}
       - TTS_SERVICE_URL=${TTS_SERVICE_URL:-}
       - TTS_API_TOKEN=${TTS_API_TOKEN:-}
       - DIARIZATION_SERVICE_URL=${DIARIZATION_SERVICE_URL:-}
@@ -541,6 +637,9 @@ services:
       - TINA_VIEGEM_HOST=0.0.0.0
       - TINA_VIEGEM_PORT=8000
       - TINA_VIEGEM_DEVICE=cpu
+      - TINA_VIEGEM_NAME_BIAS=${TINA_VIEGEM_NAME_BIAS:-0}
+      - TINA_VIEGEM_CUSTOM_WEIGHT=${TINA_VIEGEM_CUSTOM_WEIGHT:-1.0}
+      - TINA_VIEGEM_CUSTOM_WORDS_FILE=${TINA_VIEGEM_CUSTOM_WORDS_FILE:-}
       - TINA_VIEGEM_DRAIN_KEY=${TINA_VIEGEM_DRAIN_KEY:-}
       - TINA_VIEGEM_MODEL_DIR=/app/models/viegem-fsmn
       - TINA_VIEGEM_TOKEN=${TINA_VIEGEM_TOKEN:-}
@@ -1170,6 +1269,8 @@ services:
     restart: unless-stopped
 
 volumes:
+  meeting-voice-models:
+  tts-models:
   redis-data:
   postgres-data:
   storage-data:

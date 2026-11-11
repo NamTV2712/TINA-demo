@@ -34,6 +34,8 @@ flowchart LR
     speech_coordinator["Optional single-room speech coordinator"]
     meeting_translation_cache["Private meeting translation SQLite cache"]
     asr_control["ASR host controller"]
+    livekit_agent["Optional local LiveKit Agents pilot"]
+    livekit_server["Self-hosted LiveKit server"]
   end
   transcription["transcription"]
   bot ==>|"audio -> tenant-hosted"| transcription

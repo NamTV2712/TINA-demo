@@ -20,13 +20,19 @@ from server import SpeechServer
 TOKEN = "test-only-" + "x" * 40
 
 
+class TestEngine:
+    def __init__(self, synthesize): self.synthesize = synthesize
+    def stream(self, text, **kwargs): yield self.synthesize(text, **kwargs)
+    def cached_public(self, text): return None
+
+
 class ServerTests(unittest.TestCase):
     def setUp(self):
         self.calls = []
         def synthesize(text):
             self.calls.append(text)
             return b"\x01\x00" * 2400
-        self.engine = SimpleNamespace(synthesize=synthesize)
+        self.engine = TestEngine(synthesize)
         self.server = SpeechServer(("127.0.0.1", 0), self.engine, TOKEN)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
         self.thread.start()
@@ -55,6 +61,16 @@ class ServerTests(unittest.TestCase):
                 self.assertEqual(json.load(r)["sample_rate"], 24000)
         self.assertEqual(self.calls, [])
 
+    def test_authenticated_readiness_does_not_synthesize(self):
+        self.assertEqual(self.call(path='/ready', raw=b'', token='bad')[0], 404)  # POST is not a readiness route.
+        with self.assertRaises(urllib.error.HTTPError) as error:
+            self.opener.open(self.url + '/ready')
+        self.assertEqual(error.exception.code, 401)
+        req = urllib.request.Request(self.url + '/ready', headers={'X-API-Key': TOKEN})
+        with self.opener.open(req) as response:
+            self.assertEqual(response.status, 200)
+        self.assertEqual(self.calls, [])
+
     def test_bot_request_returns_raw_pcm_and_no_text_logs(self):
         output = io.StringIO()
         with redirect_stderr(output):
@@ -71,6 +87,17 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(self.call(token="bad", raw=b"not JSON")[0], 401)
         self.assertEqual(self.calls, [])
 
+    def test_meeting_scope_is_validated_and_clients_cannot_inject_pronunciation_rules(self):
+        def synthesize(text, meeting_id=None):
+            self.calls.append((text, meeting_id)); return b'\x01\x00' * 100
+        self.server.engine = TestEngine(synthesize)
+        self.assertEqual(self.call({'input': 'Original API', 'meeting_id': 14})[0], 200)
+        self.assertEqual(self.calls, [('Original API', 14)])
+        for mid in [True, 0, -1, '14', 1.5, 9007199254740992]:
+            self.assertEqual(self.call({'input': 'Original API', 'meeting_id': mid})[0], 422)
+        self.assertEqual(self.call({'input':'Original API','pronunciations':{'API':'wrong'}})[0],422)
+        self.assertEqual(len(self.calls), 1)
+
     def test_rejects_invalid_text_format_voice_and_oversize(self):
         for body in ({"input": " "}, {"input": 123}, {"input": "x" * 4001},
                      {"input": "x", "response_format": "wav"},
@@ -81,7 +108,94 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(self.call(raw=b"bad JSON")[0], 400)
         self.assertEqual(self.calls, [])
 
-    def test_concurrent_request_is_bounded_without_second_inference(self):
+    def test_two_rooms_are_served_sequentially_after_queueing(self):
+        entered, release = threading.Event(), threading.Event()
+        calls = []
+        def blocked(text):
+            calls.append(text)
+            if len(calls) == 1:
+                entered.set()
+                release.wait(2)
+            return b"\x01\x00" * 10
+        self.engine.synthesize = blocked
+        result = []
+        first = threading.Thread(target=lambda: result.append(self.call({'input': 'room one'})[0]))
+        second = threading.Thread(target=lambda: result.append(self.call({'input': 'room two'})[0]))
+        first.start()
+        self.assertTrue(entered.wait(1))
+        second.start()
+        deadline = time.monotonic() + 1
+        while not self.server.queue and time.monotonic() < deadline:
+            time.sleep(.01)
+        self.assertEqual(calls, ['room one'])
+        self.assertEqual(len(self.server.queue), 1)
+        release.set()
+        first.join(3); second.join(3)
+        self.assertEqual(result, [200, 200])
+        self.assertEqual(calls, ['room one', 'room two'])
+
+    def test_three_rooms_and_their_lookahead_fit_the_bounded_fifo(self):
+        entered, release = threading.Event(), threading.Event()
+        calls, result = [], []
+        def blocked(text):
+            calls.append(text)
+            if len(calls) == 1: entered.set(); release.wait(4)
+            return b'\x01\x00' * 10
+        self.engine.synthesize = blocked
+        threads = [threading.Thread(target=lambda i=i: result.append(self.call({'input': f'room sentence {i}'})[0])) for i in range(6)]
+        try:
+            threads[0].start(); self.assertTrue(entered.wait(1))
+            for thread in threads[1:]: thread.start()
+            deadline = time.monotonic() + 2
+            while len(self.server.queue) < 5 and time.monotonic() < deadline: time.sleep(.01)
+            self.assertEqual(len(self.server.queue), 5)
+            self.assertEqual(len(calls), 1)
+        finally:
+            release.set()
+            for thread in threads:
+                if thread.ident is not None: thread.join(3)
+        self.assertEqual(result, [200] * 6)
+        self.assertEqual(len(calls), 6)
+
+    def test_cached_public_notice_is_immediate_while_private_inference_is_busy(self):
+        from engine import ACK_TEXT
+        entered, release = threading.Event(), threading.Event()
+        def blocked(text):
+            entered.set(); release.wait(3)
+            return b'\x01\x00' * 10
+        self.engine.synthesize = blocked
+        self.engine.cached_public = lambda text: b'\x01\x00' * 10 if text == ACK_TEXT else None
+        first = threading.Thread(target=self.call)
+        try:
+            first.start(); self.assertTrue(entered.wait(1))
+            self.assertEqual(self.call({'input': ACK_TEXT})[0], 200)
+            self.assertTrue(self.server.busy.locked())
+            self.assertEqual(len(self.server.queue), 0)
+            self.assertEqual(self.call({'input': ACK_TEXT},token='wrong')[0], 401)
+        finally:
+            release.set(); first.join(3)
+
+    def test_cancelled_queued_request_never_enters_inference(self):
+        entered, release = threading.Event(), threading.Event()
+        calls = []
+        def blocked(text):
+            calls.append(text); entered.set(); release.wait(2)
+            return b"\x01\x00" * 10
+        self.engine.synthesize = blocked
+        first = threading.Thread(target=lambda: self.call({'input': 'room one'}))
+        first.start(); self.assertTrue(entered.wait(1))
+        connection = socket.create_connection(self.server.server_address)
+        data = json.dumps({'input': 'cancel me'}).encode()
+        connection.sendall(f'POST /v1/audio/speech HTTP/1.1\r\nHost: localhost\r\nX-API-Key: {TOKEN}\r\nContent-Type: application/json\r\nContent-Length: {len(data)}\r\n\r\n'.encode() + data)
+        deadline = time.monotonic() + 1
+        while not self.server.queue and time.monotonic() < deadline: time.sleep(.01)
+        connection.close()
+        time.sleep(.15)
+        release.set(); first.join(3)
+        self.assertEqual(calls, ['room one'])
+
+    def test_queued_request_times_out_without_second_inference(self):
+        self.server.queue_timeout = .05
         entered, release = threading.Event(), threading.Event()
         def blocked(text):
             entered.set()
@@ -118,7 +232,7 @@ class ServerTests(unittest.TestCase):
 
 class ConnectionLimitTests(unittest.TestCase):
     def test_slow_headers_have_total_deadline_and_excess_connections_are_refused(self):
-        engine = SimpleNamespace(synthesize=lambda _: b"\x01\x00")
+        engine = TestEngine(lambda _: b"\x01\x00")
         server = SpeechServer(("127.0.0.1", 0), engine, TOKEN,
                               max_connections=1, request_timeout=.4)
         entered, finished = threading.Event(), threading.Event()
@@ -172,12 +286,30 @@ class AudioTests(unittest.TestCase):
         original = "Xin chào, tôi là TINA. Tina giúp bạn dùng API."
         self.assertTrue(engine.synthesize(original))
         engine.tts.infer.assert_called_once_with(
-            "Xin chào, tôi là ti na. ti na giúp bạn dùng API.",
+            "Xin chào, tôi là ti na. ti na giúp bạn dùng ây pi ai.",
             voice="Trúc Ly", apply_watermark=False)
         self.assertIn("TINA", original)
-        unchanged = "retina Latina TINA_API Tina123 đTINA API"
+        unchanged = "retina Latina TINA_API Tina123 đTINA"
         self.assertEqual(spoken_text(unchanged), unchanged)
         self.assertEqual(spoken_text("(TINA), tina!"), "(ti na), ti na!")
+
+    def test_only_fixed_public_notices_are_cached(self):
+        import numpy as np
+        from engine import Engine, FIXED_TEXTS
+        from unittest.mock import Mock
+        engine = Engine.__new__(Engine)
+        engine.tts = SimpleNamespace(sample_rate=24000, infer=Mock(return_value=np.ones(240)))
+        self.assertEqual(len(FIXED_TEXTS), len(set(FIXED_TEXTS)))
+        for text in FIXED_TEXTS:
+            notice = engine.synthesize(text)
+            self.assertEqual(engine.synthesize(text), notice)
+            self.assertEqual(list(engine.stream(text)), [notice])
+        self.assertEqual(engine.tts.infer.call_count, len(FIXED_TEXTS))
+        engine.synthesize('Private meeting response')
+        engine.synthesize('Private meeting response')
+        self.assertEqual(engine.tts.infer.call_count, len(FIXED_TEXTS) + 2)
+        engine._fixed_pcm['Private meeting response'] = b'not public'
+        self.assertIsNone(engine.cached_public('Private meeting response'))
 
     def test_real_resampler_outputs_24k_little_endian_mono(self):
         import numpy as np

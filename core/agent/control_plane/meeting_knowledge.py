@@ -1,21 +1,31 @@
 """Owner-scoped meeting questions and explicitly reviewed, create-only Wiki pages."""
 import json
+import hmac
 import os
 import re
 import tempfile
 import urllib.error
 import urllib.request
 import uuid
+import time
 import yaml
 from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import HTTPException, Request
-from pydantic import BaseModel, Field, PositiveInt
+from pydantic import BaseModel, Field, PositiveInt, field_validator
+from typing import Literal
 
 from shared.meeting_knowledge import digest, select_sources, sources_for, stale, validate_answer, wiki_page
 from shared.adapters import WorkspaceBusyError, parse_entity, workspace_write_lock
 from shared.document_links import wikilink_paths
+from shared.voice_knowledge import (voice_sources, current_history, validate_voice_answer, voice_route,
+    voice_failure, FAILURES, voice_tool_calls, lookup_voice_sources, assistant_reply, voice_chunks, context_handle)
+from llm import safe_web_source
+from control_plane.voice_retrieval import semantic_rank
+from control_plane.voice_summary import recap
+from shared.voice_summary import wants_summary
+from shared.voice_trace import trace_voice_request, voice_span
 
 
 class Question(BaseModel):
@@ -34,10 +44,71 @@ class FactReview(BaseModel):
     text: str = Field(min_length=1, max_length=4000)
 
 
+class VoiceSourceRef(BaseModel):
+    model_config = {'extra': 'forbid'}
+    key: str = Field(min_length=1, max_length=1024)
+    fingerprint: str = Field(pattern=r'^[0-9a-f]{64}$')
+
+
+class VoiceHistoryTurn(BaseModel):
+    model_config = {'extra': 'forbid'}
+    question: str = Field(min_length=1, max_length=2000)
+    answer: str = Field(min_length=1, max_length=4000)
+    created_at_ms: int = Field(ge=0)
+    sources: list[VoiceSourceRef] = Field(max_length=32)
+    clarification: bool = False
+
+
+class VoiceSourcesQuery(BaseModel):
+    model_config = {'extra': 'forbid'}
+    sources: list[VoiceSourceRef] = Field(max_length=32)
+
+
+class VoiceQuestion(BaseModel):
+    model_config = {'extra': 'forbid'}
+    question: str = Field(min_length=1, max_length=2000)
+    revision: int = Field(ge=0)
+    history: list[VoiceHistoryTurn] = Field(default_factory=list, max_length=3)
+    lookups: list['VoiceLookupQuery'] | None = Field(default=None,max_length=4)
+    web_result: dict | None = None
+
+
+class VoiceLookupQuery(BaseModel):
+    model_config = {'extra':'forbid'}
+    name: Literal['get_recent_transcript','search_meeting','search_shared_documents','search_web','read_source_context']
+    query: str = Field(default='',max_length=200)
+
+    @field_validator('query')
+    @classmethod
+    def query_text(cls,value,info):
+        if info.data.get('name')!='get_recent_transcript' and not value.strip():
+            raise ValueError('Search query is empty')
+        if info.data.get('name')=='read_source_context' and not re.fullmatch(r'ctx-[0-9a-f]{64}',value.strip()):
+            raise ValueError('Invalid context handle')
+        return value.strip()
+
+
+class VoiceAgentQuery(VoiceQuestion):
+    operation: Literal['context','plan','lookup']
+    lookup: VoiceLookupQuery | None = None
+    context_handles: list[str] = Field(default_factory=list,max_length=128)
+
+    @field_validator('context_handles')
+    @classmethod
+    def valid_handles(cls,values):
+        if any(not re.fullmatch(r'ctx-[0-9a-f]{64}',v) for v in values): raise ValueError('Invalid context handle')
+        return values
+
+
 def meeting_get(base, subject, meeting_id, suffix):
     if not base:
         raise HTTPException(503, 'Meeting service is not configured')
-    req = urllib.request.Request(base.rstrip('/') + suffix, headers={'X-User-Id': subject})
+    headers = {'X-User-Id': subject}
+    if suffix.startswith('/internal/meeting-voice/'):
+        secret = os.environ.get('TINA_INTERNAL_API_SECRET', '')
+        if not secret: raise HTTPException(503, 'Internal voice credential is missing')
+        headers['X-Internal-Secret'] = secret
+    req = urllib.request.Request(base.rstrip('/') + suffix, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=15) as response:
             data = response.read(4_000_001)
@@ -125,10 +196,11 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete):
                           'stale': fact_id not in current or bool(review and review['fingerprint'] != fingerprint)})
         return items
 
-    def load(request, meeting_id, slug=None):
+    def load(request, meeting_id, slug=None, *, with_canonical=True):
         subject = subject_of(request)
         row = meeting_get(meeting_api_url, subject, meeting_id, f'/meetings/{meeting_id}')
-        canonical = meeting_get(meeting_api_url, subject, meeting_id, f'/transcripts/by-id/{meeting_id}/canonical')
+        canonical = (meeting_get(meeting_api_url, subject, meeting_id, f'/transcripts/by-id/{meeting_id}/canonical')
+                     if with_canonical else {'segments': []})
         base = read_target(request, slug)
         native = str(row.get('native_meeting_id') or row.get('platform_specific_id') or '')
         paths = set()
@@ -241,6 +313,266 @@ def register(app, subject_of, read_target, reader, meeting_api_url, complete):
             return answer | {'claims': [], 'sources': [], 'stale': True, 'saved_path': None}
         return answer | {'stale': stale(answer, current),
                          'saved_path': saved_page(request, base, meeting_id, answer['id'])}
+
+    def voice_context(request, meeting_id, *, with_canonical=True):
+        expected = os.environ.get('TINA_INTERNAL_API_SECRET', '')
+        supplied = request.headers.get('x-internal-secret', '')
+        if not expected or not hmac.compare_digest(expected.encode(), supplied.encode()):
+            raise HTTPException(401, 'Internal voice authentication required')
+        subject = request.headers.get('x-user-id', '')
+        if not subject.isdecimal():
+            raise HTTPException(401, 'Missing voice owner identity')
+        # Only this authenticated internal edge may create the identity marker.
+        headers = [(k, v) for k, v in request.scope['headers'] if k != b'x-gateway-verified']
+        request.scope['headers'] = headers + [(b'x-gateway-verified', b'meeting-voice-internal')]
+        # Starlette's cached Headers is reconstructed by a fresh Request.
+        request = Request(request.scope)
+        row = meeting_get(meeting_api_url, subject, meeting_id, f'/meetings/{meeting_id}')
+        if str(row.get('user_id')) != subject:
+            raise HTTPException(404, 'Meeting unavailable')
+        base, canonical, documents = load(request, meeting_id, with_canonical=with_canonical)
+        return request, row, base, canonical, documents
+
+    @app.get('/api/internal/meeting-voice/{meeting_id}/ready', include_in_schema=False)
+    def voice_ready(request: Request, meeting_id: int):
+        _, row, _, _, documents = voice_context(request, meeting_id, with_canonical=False)
+        if row.get('platform') != 'google_meet':
+            raise HTTPException(422, 'Voice assistant requires Google Meet')
+        return {'documents': list(documents)}
+
+    @app.post('/api/internal/meeting-voice/{meeting_id}/sources', include_in_schema=False)
+    def voice_sources_view(request: Request, meeting_id: int, body: VoiceSourcesQuery):
+        request, row, base, canonical, documents = voice_context(request, meeting_id)
+        policy = (row.get('data') or {}).get('voice_assistant') or {}
+        if (row.get('data') or {}).get('artifact_deletion'):
+            raise HTTPException(404, 'Meeting artifacts were deleted')
+        def approved(canonical, documents):
+            return voice_chunks(sources_for(canonical if policy.get('include_transcript') else {'segments': []},
+                {path: documents[path] for path in policy.get('documents', []) if path in documents}))
+        candidates = {s['key']: s for s in approved(canonical, documents)}
+        selected = [candidates[r.key] for r in body.sources
+                    if r.key in candidates and candidates[r.key]['fingerprint'] == r.fingerprint]
+        _, fresh_row, fresh_base, fresh, fresh_docs = voice_context(request, meeting_id)
+        if (fresh_base != base or (fresh_row.get('data') or {}).get('voice_assistant') != policy
+                or (fresh_row.get('data') or {}).get('artifact_deletion')):
+            raise HTTPException(409, 'Voice sources changed')
+        latest = {s['key']: s['fingerprint'] for s in approved(fresh, fresh_docs)}
+        selected = [s for s in selected if latest.get(s['key']) == s['fingerprint']]
+        fields = ('kind', 'quote', 'segment_id', 'speaker_name', 'start_ms', 'end_ms', 'path', 'paragraph')
+        return {'sources': [dict({k:s[k] for k in fields if k in s}, id=context_handle(s)) for s in selected],
+                'unavailable': len(body.sources) - len(selected)}
+
+    def authorized_voice(request,meeting_id,body):
+        request, row, base, canonical, documents = voice_context(request, meeting_id)
+        policy = (row.get('data') or {}).get('voice_assistant') or {}
+        if (row.get('status') != 'active' or row.get('platform') != 'google_meet'
+                or not policy.get('enabled') or policy.get('revision') != body.revision):
+            raise HTTPException(409, 'Voice sharing policy changed')
+        paths = policy.get('documents', [])
+        if any(path not in documents for path in paths):
+            raise HTTPException(409, 'A shared source is no longer linked')
+        candidates=voice_chunks(sources_for(canonical if policy.get('include_transcript') else {'segments':[]},
+                               {path:documents[path] for path in paths}))
+        return request,row,base,policy,candidates
+
+    def semantic_for(row, policy):
+        def rank(question, sources):
+            with voice_span('semantic_retrieval') as metrics:
+                result = semantic_rank(f"{row['user_id']}:{row['id']}:{policy['revision']}", question, sources)
+                metrics.update(input_sources=len(sources), output_sources=len(result))
+                return result
+        return rank
+
+    @app.post('/api/internal/meeting-voice/{meeting_id}/agent',include_in_schema=False)
+    @trace_voice_request('agent')
+    def voice_agent(request:Request,meeting_id:int,body:VoiceAgentQuery):
+        request,row,base,policy,candidates=authorized_voice(request,meeting_id,body)
+        if policy.get('engine')!='livekit': raise HTTPException(409,'LiveKit room policy required')
+        now_ms=int(time.time()*1000)
+        history=current_history([t.model_dump() for t in body.history],candidates,now_ms)
+        kind,public_query=voice_route(body.question)
+        tools=[]
+        if policy.get('include_transcript'):tools+=['get_recent_transcript','search_meeting']
+        if policy.get('documents'):tools.append('search_shared_documents')
+        if kind=='web':tools=['search_web'] if policy.get('allow_web_search') else []
+        if kind in ('general','assistant') or kind=='meeting' and wants_summary(body.question):tools=[]
+        if kind=='meeting' and tools and (body.lookups or body.operation=='lookup'):
+            tools.append('read_source_context')
+        selected=[]
+        if body.operation=='context':
+            result={'history':[{k:t[k] for k in ('question','answer','created_at_ms')} for t in history],
+                    'available_tools':tools}
+        elif body.operation=='plan':
+            if kind=='web':
+                if tools and len(public_query)>200: raise HTTPException(422,'Public tool query exceeds 200 characters')
+                calls=[{'name':'search_web','query':public_query}] if tools and len(public_query)<=200 and not body.lookups else []
+            elif not tools:
+                calls=[]
+            else:
+                if body.lookups:
+                    selected,_=lookup_voice_sources(candidates,[],[c.model_dump() for c in body.lookups],now_ms,semantic=semantic_for(row,policy))
+                else:
+                    selected,_=voice_sources(candidates,body.question,history,now_ms,semantic=semantic_for(row,policy))
+                selected=[s|({'context_handle':context_handle(s)} if context_handle(s) in body.context_handles else {}) for s in selected]
+                raw=complete(request,json.dumps({'mode':'voice_plan','question':body.question,
+                    'available_tools':tools,'sources':selected,
+                    'previous_lookups':[c.model_dump() for c in body.lookups or []],
+                    'history':[{k:t[k] for k in ('question','answer','created_at_ms')} for t in history]},ensure_ascii=False))
+                try:
+                    calls=voice_tool_calls(raw,allowed_tools=tools)
+                except (ValueError, TypeError):
+                    raise HTTPException(502,'Invalid voice tool plan') from None
+                if calls is None: raise HTTPException(502,'Invalid voice tool plan')
+                calls=[c|{'query':c['query'].strip()} for c in calls]
+                previous=[c.model_dump() for c in body.lookups or []]
+                calls=[c for c in calls if c not in previous and (c['name']!='read_source_context' or c['query'] in body.context_handles)]
+                calls=list({(c['name'],c['query']):c for c in calls}.values())
+            result={'tool_calls':calls}
+        else:
+            if body.lookup is None or body.lookup.name not in tools:
+                raise HTTPException(403,'This room has not authorized the requested tool')
+            lookup=body.lookup.model_dump()
+            if lookup['name']=='search_web':
+                if lookup['query']!=public_query: raise HTTPException(403,'Only the explicit public query may be searched')
+                answer=voice_answer(request,meeting_id,VoiceQuestion(question=body.question,revision=body.revision))
+                result={'tool':'search_web','source_count':len(answer.get('links',[])),
+                        'web_result':{'text':answer['text'].removeprefix('Theo thông tin trên web: '),
+                                      'links':answer.get('links',[]),'reason':answer.get('reason')}}
+            else:
+                selected,trace=lookup_voice_sources(candidates,[],[lookup],now_ms,semantic=semantic_for(row,policy))
+                result={'tool':lookup['name'],'source_count':trace[0]['source_count'],
+                        'sources':[s|{'context_handle':context_handle(s)} for s in selected],
+                        'context_handles':[context_handle(s) for s in selected]}
+        _,fresh_row,fresh_base,_,_=voice_context(request,meeting_id,with_canonical=False)
+        if fresh_base!=base or (fresh_row.get('data') or {}).get('voice_assistant')!=policy:
+            raise HTTPException(409,'Voice sharing policy changed')
+        return result
+
+    @app.post('/api/internal/meeting-voice/{meeting_id}/answer', include_in_schema=False)
+    @trace_voice_request('answer')
+    def voice_answer(request: Request, meeting_id: int, body: VoiceQuestion):
+        request,row,base,policy,candidates=authorized_voice(request,meeting_id,body)
+        paths=policy.get('documents',[])
+        kind, question = voice_route(body.question)
+        trace, selected, conversation = [], [], []
+        summary_sources = None
+        answer = None
+        if kind == 'assistant':
+            answer = {'text':assistant_reply(body.question,policy),'sources':[], 'answer_kind':'assistant','reason':'answered'}
+        elif kind != 'meeting':
+            if not policy.get('allow_' + ('web_search' if kind == 'web' else 'general_knowledge')):
+                answer = voice_failure('web_disabled' if kind == 'web' else 'general_disabled', kind=kind)
+            else:
+                # Public routes never receive the room's transcript, documents or conversation history.
+                try:
+                    public = body.web_result if kind=='web' and body.web_result is not None else json.loads(complete(request, json.dumps({'mode': 'voice_' + kind, 'question': question}, ensure_ascii=False)))
+                    text = public.get('text')
+                    links = [safe_web_source(link) for link in public.get('links', [])[:6]] if kind == 'web' else []
+                    links = [{k: link[k] for k in ('url', 'title')} for link in links if link]
+                    if public.get('reason') == 'web_unavailable':
+                        answer = voice_failure('web_unavailable', kind=kind)
+                    elif kind == 'web' and not links:
+                        answer = voice_failure('web_no_sources', kind=kind)
+                    elif not isinstance(text, str) or not text.strip() or len(text) > 2000:
+                        answer = voice_failure('llm_unavailable', kind=kind)
+                    else:
+                        text = re.sub(r'cite[^]*|【[^】]*】', '', text)
+                        text = re.sub(r'\[([^\]]+)\]\(https?://[^)]+\)', r'\1', text).strip()
+                        answer = {'text': ('Theo thông tin trên web: ' if kind == 'web' else 'Về kiến thức chung: ') + text,
+                                  'sources': [], 'links': links, 'answer_kind': kind, 'reason': 'answered'}
+                except (HTTPException, ValueError, TypeError, AttributeError):
+                    answer = voice_failure('web_unavailable' if kind == 'web' else 'llm_unavailable', kind=kind)
+        now_ms = int(time.time() * 1000)
+        if kind == 'meeting' and wants_summary(body.question):
+            summary_sources = [s for s in candidates if s['kind']=='transcript']
+            turn_id = request.headers.get('x-tina-voice-request-id')
+            if turn_id:
+                try: turn_id = str(uuid.UUID(turn_id))
+                except ValueError: raise HTTPException(409, 'Invalid summary turn') from None
+            def current_turn():
+                if turn_id:
+                    value = meeting_get(meeting_api_url, str(row['user_id']), meeting_id,
+                        f'/internal/meeting-voice/{meeting_id}/turn/{turn_id}')
+                    if value.get('current') is not True: raise HTTPException(409, 'Summary turn was stopped')
+            def summary_complete(payload):
+                scoped_request = Request({**request.scope, 'state': {}})
+                _,fresh_row,fresh_base,fresh_policy,fresh_sources = authorized_voice(scoped_request,meeting_id,body)
+                if fresh_base!=base or fresh_policy!=policy or stale({'sources':summary_sources},fresh_sources):
+                    raise HTTPException(409,'Summary sources changed')
+                current_turn()
+                result = complete(scoped_request,json.dumps(payload,ensure_ascii=False))
+                current_turn()
+                return result
+            answer = recap(body.question,candidates,f"{row['user_id']}:{meeting_id}:{policy['revision']}:{turn_id or 'legacy'}",summary_complete)
+        elif kind == 'meeting':
+            history = current_history([t.model_dump() for t in body.history], candidates, now_ms)
+            selected, recent_ids = voice_sources(candidates, body.question, history, now_ms,semantic=semantic_for(row,policy))
+            recent_keys = {s['key'] for s in selected if s['id'] in recent_ids}
+            indices = {s['key']: i for i, s in enumerate(candidates)}
+            selected = [s | {'id': f"s{indices[s['key']]}"} for s in selected]
+            if body.lookups is not None:
+                requested=[c.model_dump() for c in body.lookups]
+                if any(c['name']=='search_web' or c['name']=='search_shared_documents' and not paths
+                       or c['name'] in ('search_meeting','get_recent_transcript') and not policy.get('include_transcript') for c in requested):
+                    raise HTTPException(403,'Lookup is not authorized for this room')
+                selected,trace=lookup_voice_sources(candidates,selected,requested,now_ms,semantic=semantic_for(row,policy))
+            def conversation_for(rows):
+                ids = {s['key']: s['id'] for s in rows}
+                return [{'question': t['question'], 'answer': t['answer'],
+                         'clarification': t.get('clarification', False) and now_ms - t['created_at_ms'] <= 30000,
+                         'source_ids': [ids[r['key']] for r in t['sources']]}
+                        for t in history if all(r['key'] in ids for r in t['sources'])]
+            if not candidates:
+                answer = voice_failure('no_shared_sources')
+            else:
+                try:
+                    # One lookup round (at most two tools), then a verified final answer.
+                    for remaining in ((1,0) if body.lookups is None else (0,)):
+                        conversation = conversation_for(selected)
+                        raw = complete(request, json.dumps({'mode': 'voice', 'question': body.question, 'sources': selected,
+                            'recent_source_ids': [s['id'] for s in selected if s['key'] in recent_keys],
+                            'history': conversation, 'tools_remaining': remaining}, ensure_ascii=False))
+                        calls = voice_tool_calls(raw)
+                        if calls is not None:
+                            if not remaining: raise ValueError('Voice lookup budget exhausted')
+                            selected, trace = lookup_voice_sources(candidates, selected, calls, now_ms,semantic=semantic_for(row,policy))
+                            continue
+                        validated = validate_voice_answer(raw, selected)
+                        reason = json.loads(raw).get('reason')
+                        verification = json.loads(raw).get('verification', [])
+                        if not isinstance(verification,list) or len(verification)>2 or any(c not in (
+                            'approved','numeric_mismatch','unsupported_claim','contradiction','ambiguous','unavailable','repair_failed'
+                        ) for c in verification): raise ValueError('Invalid verification metadata')
+                        text = validated.get('clarification') or ' '.join(c['text'] for c in validated['claims'])
+                        if validated.get('follow_up'): text += ' ' + validated['follow_up']
+                        if text:
+                            answer = {'text': text, 'sources': validated['sources'], 'answer_kind': 'meeting',
+                                      'reason': 'clarification' if validated.get('clarification') else 'answered',
+                                      'clarification': bool(validated.get('clarification'))}
+                        else:
+                            answer = voice_failure(reason if reason in FAILURES else 'retrieval_empty' if not selected else 'insufficient_evidence')
+                        answer['verification'] = verification
+                        break
+                except HTTPException as exc:
+                    if exc.status_code not in (502, 503, 504): raise
+                    answer = voice_failure('llm_unavailable')
+                except (ValueError, TypeError, AttributeError):
+                    answer = voice_failure('llm_unavailable')
+        _, fresh_row, fresh_base, fresh, fresh_docs = voice_context(request, meeting_id)
+        if fresh_base != base or (fresh_row.get('data') or {}).get('voice_assistant') != policy:
+            raise HTTPException(409, 'Voice sharing policy changed')
+        latest_sources = voice_chunks(sources_for(fresh if policy.get('include_transcript') else {'segments': []},
+                                    {path: fresh_docs[path] for path in paths if path in fresh_docs}))
+        history_ids = {identifier for turn in conversation for identifier in turn['source_ids']}
+        checked = selected if answer.get('clarification') else answer['sources'] + [s for s in selected if s['id'] in history_ids]
+        if summary_sources is not None: checked = summary_sources
+        if stale({'sources': checked}, latest_sources):
+            raise HTTPException(409, 'Shared evidence changed during the answer')
+        if kind=='web' and body.lookups:
+            trace=[{'tool':'search_web','source_count':len(answer.get('links',[]))}]
+        return answer | {'lookups': trace,
+                'context_refs': [{'key': s['key'], 'fingerprint': s['fingerprint']} for s in selected[:32]]
+                                if answer.get('clarification') else []}
 
     @app.get('/api/workspace/meeting-knowledge/{meeting_id}')
     def knowledge(request: Request, meeting_id: int):

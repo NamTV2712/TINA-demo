@@ -1,0 +1,30 @@
+"""Provider-side voice shapes; source and entailment checks remain mandatory after generation."""
+
+
+def object_schema(properties):
+    return {'type': 'object', 'properties': properties, 'required': list(properties),
+            'additionalProperties': False}
+
+
+def voice_schema(mode, sources=(), *, tools=()):
+    ids = list(dict.fromkeys(s['id'] for s in sources))
+    source_id = {'type': 'string', **({'enum': ids} if ids else {})}
+    if mode == 'verify':
+        return object_schema({'approved': {'type': 'boolean'},
+            'reason': {'type': ['string', 'null'], 'enum': [None, 'unsupported_claim', 'contradiction', 'ambiguous']},
+            'claim_indexes': {'type': ['array', 'null'], 'maxItems': 3, 'items': {'type': 'integer', 'minimum': 0}}})
+    if mode == 'rerank':
+        return object_schema({'source_ids': {'type': 'array', 'maxItems': 12, 'items': source_id}})
+    calls = {'type': 'array', 'maxItems': 2 if tools else 0, 'items': object_schema({
+        'name': {'type': 'string', **({'enum': list(tools)} if tools else {})},
+        'query': {'type': 'string', 'maxLength': 200}})}
+    if mode == 'plan':
+        return object_schema({'tool_calls': calls})
+    return object_schema({
+        'claims': {'type': 'array', 'maxItems': 3 if ids else 0, 'items': object_schema({
+            'text': {'type': 'string', 'maxLength': 800},
+            'source_ids': {'type': 'array', 'minItems': 1, 'maxItems': 6, 'items': source_id}})},
+        'clarification': {'type': ['string', 'null'], 'maxLength': 200},
+        'follow_up': {'type': ['string', 'null'], 'maxLength': 200},
+        'tool_calls': calls | {'type': ['array', 'null']} if tools else {'type': 'null'},
+    })

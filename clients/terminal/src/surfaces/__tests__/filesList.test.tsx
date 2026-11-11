@@ -54,7 +54,7 @@ afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 describe("FilesList — workspaces-first Knowledge rail", () => {
   it("leads with the WORKSPACES section, open by default", async () => {
     renderList();
-    expect(screen.getByText("workspaces")).toBeTruthy();
+    expect(screen.getByText("Workspaces")).toBeTruthy();
     await screen.findByText("leo");           // the workspace row is visible without any toggle
     expect(screen.getByText(/Attach repo…/)).toBeTruthy();
   });
@@ -62,9 +62,9 @@ describe("FilesList — workspaces-first Knowledge rail", () => {
   it("keeps FILES collapsed by default — Find-file visible, tree hidden — and expands on the caret", async () => {
     renderList();
     expect(screen.getByPlaceholderText("Find file…")).toBeTruthy();
-    await screen.findByText(/files · leo/);   // header carries the home workspace label
+    const filesToggle = await screen.findByRole("button", { name: "Files" });
     expect(screen.queryByText("kg")).toBeNull();          // tree hidden while collapsed
-    fireEvent.click(screen.getByText(/files · leo/));
+    fireEvent.click(filesToggle);
     await screen.findByText("kg");                        // caret expands the home tree
     expect(sessionStorage.getItem("ws.files.open")).toBe("1");
   });
@@ -86,7 +86,7 @@ describe("FilesList — workspaces-first Knowledge rail", () => {
         <FilesList />
       </ServicesProvider>,
     );
-    await screen.findByText(/files · leo/);
+    await screen.findByRole("button", { name: "Files" });
     expect(layout.openPreview).not.toHaveBeenCalled();
   });
 });
