@@ -280,7 +280,7 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
     def keys(mid, session, request):
         return f'meeting:voice:{mid}:lock', f'meeting:voice:{mid}:{session}:{request}'
 
-    async def progress(mid, session, body, stage):
+    async def progress(mid, session: str, body, stage):
         value = VoiceProgress(request_id=body.request_id, session_uid=session,
                               revision=body.revision, stage=stage, observed_at_ms=int(time.time()*1000))
         await redis.set(f'meeting:voice:{mid}:progress', value.model_dump_json(), ex=180)
@@ -625,7 +625,7 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
                 history.append(turn | {'answer': reply['played_text'], 'clarification': False})
         return key, stored, [{k: v for k, v in t.items() if k != 'request_id'} for t in history]
 
-    async def prepare_source_navigation(mid,session,policy,speaker,row,question):
+    async def prepare_source_navigation(mid, session: str, policy, speaker, row, question):
         _,stored,_=await heard_history(mid,session,policy,speaker,row)
         previous=next((t for t in reversed(stored) if t.get('sources')),None)
         reply=((row.get('data') or {}).get('voice_replies') or {}).get(previous['request_id'],{}) if previous else {}
