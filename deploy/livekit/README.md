@@ -141,3 +141,13 @@ including interruption before the first PCM chunk. SDK interruption also clears 
 This unwinds the HTTP streaming context so the shared TTS worker observes the closed connection.
 Tests cover Stop before first audio and with already buffered PCM; the native ONNX chunk already
 executing can finish, but the sidecar discards its late output and starts no further chunks.
+
+Explicit task/decision requests can invoke draft_task/draft_decision through the existing authorized tool loop. These propose owner-reviewed drafts only; no SDK tool can approve, assign an account, or publish an entity. See ../../docs/tina-voice-action-drafts.md.
+
+DELETE /turn now acknowledges after the exact current SpeechHandle has been interrupted and its request cleanup has finished (bounded wait). Late old Stop requests cannot interrupt another handle. See ../../docs/tina-voice-task-refinement.md.
+
+Read-only search_approved_actions and calculate extend the existing SDK function tools. Owner policy, returned-handle authorization, deterministic calculation and source verification stay in the TINA API. See ../../docs/tina-voice-read-calculate.md.
+
+search_shared_meetings compares explicitly selected owned meeting transcripts via the existing TINA authority bridge; it cannot select or grant a meeting itself. See ../../docs/tina-voice-shared-meetings.md.
+
+open_source executes a server-selected citation handle through the same bounded tool loop; it does not accept paths/URLs. Owner Terminal navigation is claimed through Meeting API after actual playback, not SDK delivery. See ../../docs/tina-voice-open-source.md.

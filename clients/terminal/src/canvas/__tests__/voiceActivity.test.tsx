@@ -2,8 +2,23 @@ import React from 'react';
 import { cleanup, render, screen, act } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { VoiceActivity } from '../VoiceActivity';
+import { createVoiceActivity } from '../../../../extension/src/voice-activity-view';
 afterEach(()=>{cleanup();vi.useRealTimers();vi.unstubAllGlobals();});
 const body=(state='LISTENING')=>({available:true,policy:{enabled:true},runtime:{state,session_active:true,heartbeat_fresh:true,kws:{status:'ready',observed_at_ms:Date.now()}}});
+it('updates the tool label within THINKING in Terminal and Extension and clears it on failure',async()=>{
+  const value = {...body('THINKING'),policy:{enabled:true,revision:1},runtime:{...body('THINKING').runtime,
+    request_id:'turn',session_uid:'session',progress:{request_id:'turn',session_uid:'session',revision:1,
+      stage:'reading_documents',observed_at_ms:Date.now()}}};
+  vi.stubGlobal('fetch',vi.fn(async()=>Response.json(value)));
+  render(<VoiceActivity meetingId="42"/>);
+  expect(await screen.findByRole('status',{name:'TINA · Đang đọc tài liệu'})).toBeTruthy();
+  const root=document.createElement('div'), extension=createVoiceActivity(root);
+  extension.update(value);
+  expect(root.textContent).toContain('Đang đọc tài liệu');
+  value.runtime.progress.stage='searching_transcript'; extension.update(value);
+  expect(root.textContent).toContain('Đang tìm transcript');
+  extension.update(null);expect(root.textContent).toContain('Mất kết nối voice');extension.reset();
+});
 it('scopes requests to the selected meeting and expires readiness while a request hangs',async()=>{
   vi.useFakeTimers();let calls=0;
   vi.stubGlobal('fetch',vi.fn(async()=>{calls++;return calls===1?Response.json(body()):new Promise(()=>{});}));

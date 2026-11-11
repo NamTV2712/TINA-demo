@@ -30,8 +30,10 @@ export function voiceReplies(value: unknown): VoiceReply[] {
 }
 
 export interface VoiceSource {
-  id: string; kind: 'transcript' | 'document'; quote: string; segment_id?: string; speaker_name?: string | null;
+  id: string; kind: 'transcript' | 'document' | 'calculation'; quote: string; segment_id?: string; speaker_name?: string | null;
   start_ms?: number | null; end_ms?: number | null; path?: string; paragraph?: number;
+  calculation_query?: string;
+  meeting_id?: number; meeting_title?: string | null; meeting_start_time?: string | null;
 }
 export interface VoiceSources { sources: VoiceSource[]; unavailable: number }
 export function voiceSources(value: unknown): VoiceSources {
@@ -40,14 +42,18 @@ export function voiceSources(value: unknown): VoiceSources {
   if (!Array.isArray(body.sources) || body.sources.length > 32 || !Number.isSafeInteger(body.unavailable)
       || (body.unavailable as number) < 0 || (body.unavailable as number) > 32) throw new Error('Unsupported voice sources.');
   for (const row of body.sources) {
-    if (!row || typeof row.id !== 'string' || !/^ctx-[0-9a-f]{64}$/.test(row.id) || !['transcript', 'document'].includes(row.kind) || typeof row.quote !== 'string' || !row.quote || row.quote.length > 1200
+    if (!row || typeof row.id !== 'string' || !/^ctx-[0-9a-f]{64}$/.test(row.id) || !['transcript', 'document', 'calculation'].includes(row.kind) || typeof row.quote !== 'string' || !row.quote || row.quote.length > 1200
         || row.speaker_name != null && (typeof row.speaker_name !== 'string' || row.speaker_name.length > 512)
+        || row.meeting_id != null && (!Number.isSafeInteger(row.meeting_id)||row.meeting_id<=0)
+        || row.meeting_title != null && (typeof row.meeting_title!=='string'||row.meeting_title.length>300)
+        || row.meeting_start_time != null && (typeof row.meeting_start_time!=='string'||row.meeting_start_time.length>64)
         || ['start_ms', 'end_ms'].some(key => row[key] != null && (typeof row[key] !== 'number' || !Number.isFinite(row[key]) || row[key] < 0)))
       throw new Error('Unsupported voice source.');
     if (row.kind === 'document' && (typeof row.path !== 'string' || row.path.length > 512 || !row.path.endsWith('.md')
         || row.path.startsWith('/') || row.path.split('/').includes('..')
         || row.paragraph != null && (!Number.isSafeInteger(row.paragraph) || row.paragraph < 0))
-        || row.kind === 'transcript' && (typeof row.segment_id !== 'string' || !row.segment_id || row.segment_id.length > 512))
+        || row.kind === 'transcript' && (typeof row.segment_id !== 'string' || !row.segment_id || row.segment_id.length > 512)
+        || row.kind === 'calculation' && (typeof row.calculation_query !== 'string' || !row.calculation_query || row.calculation_query.length > 200))
       throw new Error('Unsupported voice source identity.');
   }
   return body as unknown as VoiceSources;

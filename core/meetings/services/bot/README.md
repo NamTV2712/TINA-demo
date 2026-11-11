@@ -117,3 +117,5 @@ original playback/replay path, but cannot claim exact sample-index recovery thro
 Voice audio uses separate PulseAudio sinks: meeting_rx receives browser playback, while tts_sink
 feeds virtual_mic. The source stays unmuted so Meet sees a usable device; TTS sink mute plus the
 verified meeting UI gate speech. This does not change captured PCM or either ASR backend.
+
+VoiceInterruption uses caller identity, source-clock/ASR agreement, final soft-correction timing and a bounded recent-playback text echo fence. MeetingVoice mutes locally and persists the completed-sentence prefix before remote cancellation; failed receipt/release prevents automatic continuation. See docs/tina-voice-speaking-interruption.md.

@@ -69,7 +69,7 @@ def test_stopped_summary_turn_cannot_dispatch_more_work(voice, monkeypatch):
     monkeypatch.setattr(api, 'meeting_get', fetch)
     response = client.post(URL, headers=HEADERS | {'X-Tina-Voice-Request-Id': '00000000-0000-4000-8000-000000000123'},
                            json={'question': 'Tổng hợp toàn bộ quyết định trong cuộc họp.', 'revision': 1})
-    assert response.status_code == 200 and response.json()['reason'] == 'verification_unavailable'
+    assert response.status_code == 409
     assert permits and not prompts
 
 
@@ -144,9 +144,11 @@ def test_short_answer_to_a_recent_clarification_keeps_its_topic_but_expired_ques
     r=client.post(URL,headers=HEADERS,json={'question':'Production.', 'revision':1,'history':history})
     assert r.status_code==200 and prompts[-1]['history'][0]['clarification'] is True
     assert prompts[-1]['history'][0]['question']=='Budget?'
+    assert prompts[-1]['pending_clarification']=={'question':'Budget?', 'asked':'Demo or production?', 'replies':[]}
     history[0]['created_at_ms']=now-31000
     r=client.post(URL,headers=HEADERS,json={'question':'Budget?', 'revision':1,'history':history})
     assert r.status_code==200 and prompts[-1]['history'][0]['clarification'] is False
+    assert prompts[-1]['pending_clarification'] is None
 
 
 def test_clarification_is_spoken_but_rechecks_all_context_sources(voice, monkeypatch):
@@ -262,7 +264,7 @@ def test_agents_plan_and_lookup_use_only_approved_sources_and_no_nested_tool_loo
     plan=client.post(path,headers=HEADERS,json=base|{'operation':'plan'})
     assert plan.status_code==200,plan.text
     assert plan.json()['tool_calls']==[{'name':'search_shared_documents','query':'budget'}]
-    assert prompts[0]['mode']=='voice_plan' and prompts[0]['available_tools']==['search_shared_documents']
+    assert prompts[0]['mode']=='voice_plan' and prompts[0]['available_tools']==['search_shared_documents','calculate']
     assert 'PRIVATE TRANSCRIPT' not in json.dumps(prompts) and 'PRIVATE WORKSPACE SECRET' not in json.dumps(prompts)
     lookup=client.post(path,headers=HEADERS,json=base|{'operation':'lookup','lookup':plan.json()['tool_calls'][0]})
     assert lookup.status_code==200 and lookup.json()['source_count']==1

@@ -62,3 +62,5 @@ Invalid/empty rankings, oversized protected context and provider failures retain
 The verifier and repair still see every originally retrieved excerpt, including contradictions.
 `voice_trace.py` records only UUIDs, fixed stages/statuses, elapsed milliseconds and source counts.
 Its request context is reset after each call; questions, excerpts, tokens and provider output are omitted.
+
+voice_calculate.py evaluates bounded Decimal arithmetic and signed calendar-day differences using explicit question inputs or returned authorized source handles. Derived proofs bind source fingerprints; there is no eval, external execution or vector-store write.

@@ -4,6 +4,25 @@ import { VoiceReplySources } from '../VoiceReplySources';
 
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
+it('shows a calculation proof without inventing a document or transcript target',async()=>{
+  vi.stubGlobal('fetch',vi.fn(async()=>Response.json({sources:[{id:'ctx-'+'c'.repeat(64),kind:'calculation',
+    quote:'Phép tính: 100+200. Kết quả: 300.',calculation_query:'{"expression":"100+200"}'}],unavailable:0})));
+  render(<VoiceReplySources base="/api/meetings/1/voice-assistant" requestId="reply"/>);
+  expect(await screen.findByText('Phép tính được kiểm tra')).toBeTruthy();
+  expect(screen.getByText('Phép tính: 100+200. Kết quả: 300.')).toBeTruthy();
+  expect(screen.queryByRole('button')).toBeNull();
+});
+
+it('attributes another meeting and opens its source room rather than a same-ID segment here',async()=>{
+  vi.stubGlobal('fetch',vi.fn(async()=>Response.json({sources:[{id:'ctx-'+'d'.repeat(64),kind:'transcript',
+    segment_id:'same-id',quote:'Deadline cũ là thứ Hai.',meeting_id:2,meeting_title:'Sprint trước',
+    meeting_start_time:'2026-11-04T08:00:00Z',speaker_name:'An',start_ms:1000}],unavailable:0})));
+  render(<VoiceReplySources base="/api/meetings/1/voice-assistant" requestId="reply"/>);
+  expect(await screen.findByText('Sprint trước · 2026-11-04T08:00:00Z')).toBeTruthy();
+  expect(screen.getByRole('link',{name:'Mở cuộc họp nguồn ↗'}).getAttribute('href')).toBe('/meetings/2');
+  expect(screen.queryByRole('button',{name:'Xem trong transcript ↑'})).toBeNull();
+});
+
 it('removes revoked source quotes and aborts the old meeting request on unmount', async () => {
   vi.useFakeTimers(); let allowed = true; const signals: AbortSignal[] = [];
   vi.stubGlobal('fetch', vi.fn(async (_url, init) => {

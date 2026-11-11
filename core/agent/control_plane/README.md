@@ -120,3 +120,5 @@ Whole-meeting voice recaps map every approved transcript chunk through verified 
 A LiveKit second plan sees prior successful queries and bounded original excerpts, can stop or target a missing detail, and can read context only with supplied per-turn handles. Private meeting queries are never converted into web queries.
 
 The internal voice sources endpoint resolves saved key/fingerprint references against current owner-linked, room-approved transcript and document chunks, including ended meetings. It returns no old quote after edits, deletion or revocation and rechecks sources/policy before release.
+
+voice_actions.py stores private meeting voice proposals and publishes task/decision entities only after owner-authenticated review, matching revision and completed readback. Existing files are preserved and paths are server-generated.

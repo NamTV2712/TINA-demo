@@ -1,4 +1,4 @@
-import { voiceActivity, voiceActivities, VOICE_ACTIVITY_TTL } from './voice-activity';
+import { voiceActivity, voiceActivityStatus, VOICE_ACTIVITY_TTL } from './voice-activity';
 
 export function createVoiceActivity(root: HTMLElement) {
   root.className = 'voice-activity'; root.hidden = true;
@@ -16,9 +16,9 @@ export function createVoiceActivity(root: HTMLElement) {
   let expiry: ReturnType<typeof setTimeout> | undefined;
   function update(value: unknown, ended = false) {
     clearTimeout(expiry);
-    const phase = voiceActivity(value, Date.now(), ended), status = voiceActivities[phase];
+    const phase = voiceActivity(value, Date.now(), ended), status = voiceActivityStatus(value, Date.now(), ended);
     root.hidden = false;
-    if (root.dataset.phase !== phase) {
+    if (root.dataset.phase !== phase || label.textContent !== status.label) {
       root.dataset.phase = phase; root.title = status.title; label.textContent = status.label;
       root.setAttribute('aria-label', `TINA · ${status.label}`);
     }

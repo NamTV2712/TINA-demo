@@ -23,6 +23,10 @@ def rerank_voice_sources(question, sources, history, recent_ids, complete):
             raise ValueError('Invalid rerank IDs')
         # Keep current speech and heard-history references even if the ranker overlooked them.
         pinned = set(recent_ids) | {i for turn in history for i in turn.get('source_ids', [])}
+        meetings={s.get('meeting_id') for s in sources if s.get('meeting_id') is not None}
+        if len(meetings)>1:
+            for mid in meetings:
+                pinned.update(s['id'] for s in [s for s in sources if s.get('meeting_id')==mid][:2])
         ordered = list(dict.fromkeys(ids + [s['id'] for s in sources if s['id'] in pinned]))
         selected = [by_id[i] for i in ordered]
         if len(selected) > 32 or sum(len(s['quote']) for s in selected) > 24000:

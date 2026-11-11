@@ -1,9 +1,9 @@
 "use client";
 import { useEffect, useState } from 'react';
-import { voiceActivity, voiceActivities, VOICE_ACTIVITY_TTL } from '../lib/voiceActivity';
+import { voiceActivity, voiceActivityStatus, VOICE_ACTIVITY_TTL } from '../lib/voiceActivity';
 import styles from './VoiceActivity.module.css';
 
-export function VoiceActivity({ meetingId, ended = false }: { meetingId: string; ended?: boolean }) {
+export function VoiceActivity({ meetingId, ended = false, onSnapshot }: { meetingId: string; ended?: boolean; onSnapshot?:(value:unknown)=>void }) {
   const [snapshot, setSnapshot] = useState<{ id: string; value: unknown }>({ id: '', value: undefined });
   useEffect(() => {
     if (ended || !/^\d+$/.test(meetingId)) return;
@@ -20,6 +20,7 @@ export function VoiceActivity({ meetingId, ended = false }: { meetingId: string;
         const value = await response.json();
         if (abort.signal.aborted) return;
         setSnapshot({ id: meetingId, value });
+        onSnapshot?.(value);
         clearTimeout(expiry);
         const observed = value?.runtime?.kws?.observed_at_ms ?? Date.now();
         expiry = setTimeout(stale, Math.max(0, Math.min(VOICE_ACTIVITY_TTL, (typeof observed === 'number' ? observed : 0) + VOICE_ACTIVITY_TTL - Date.now())));
@@ -28,10 +29,10 @@ export function VoiceActivity({ meetingId, ended = false }: { meetingId: string;
     }
     void refresh();
     return () => { abort.abort(); clearTimeout(poll); clearTimeout(expiry); };
-  }, [meetingId, ended]);
+  }, [meetingId, ended, onSnapshot]);
   if (!/^\d+$/.test(meetingId)) return null;
   const phase = voiceActivity(snapshot.id === meetingId ? snapshot.value : undefined, Date.now(), ended);
-  const status = voiceActivities[phase];
+  const status = voiceActivityStatus(snapshot.id === meetingId ? snapshot.value : undefined, Date.now(), ended);
   return <span className={styles.indicator} data-phase={phase} data-meeting-id={meetingId}
     role="status" aria-live="polite" aria-atomic="true" aria-label={`TINA · ${status.label}`} title={status.title}>
     <svg className={styles.wave} width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">

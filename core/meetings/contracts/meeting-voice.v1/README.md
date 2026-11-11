@@ -145,3 +145,17 @@ returning the same VoiceTurnPermit. No internal service secret or owner/provider
 It confirms the exact Redis reservation, active session and current LiveKit policy revision before
 PCM synthesis, periodically while streaming and at completion. SDK Stop-cache loss after restart
 cannot authorize an old or another meeting's request.
+
+`VoiceProgress` is optional owner-only runtime metadata: allowlisted stage, request/session IDs, policy revision and observation timestamp. It is returned only during THINKING for the exact live room lease, with a 180-second TTL. Bot VoiceState payloads remain unchanged. Clarification intent can retain source-free, completed questions for the same caller; pending state expires 30 seconds after the latest clarification and never grants factual source authority. See docs/tina-voice-clarification-progress.md.
+
+VoiceActionDraft/VoiceActionReview describe owner-reviewed task and decision proposals. The existing LiveKit tool names additionally allow draft_task/draft_decision, with the same query and turn budgets. Only explicit spoken action requests offer those tools. Finalization records a private draft; owner GET/review requires the completed readback and current policy. Approval writes one create-only workspace entity; voice has no approval tool. VoiceProgress.stage also accepts drafting. See docs/tina-voice-action-drafts.md.
+
+Question/state shapes remain unchanged for task refinement. A same-caller explicit update during THINKING is combined with the original user intent only after cancellation acknowledgment and gets a fresh request UUID. Old request-bound state cannot overwrite a replacement lease/capture. Public queries need explicit restatement; see docs/tina-voice-task-refinement.md.
+
+Speaking interruption keeps existing contracts: only confirmed completed-sentence played_text enters stopped history. The bot reports this prefix before core cancellation, and does not resume automatically if receipt delivery fails. Same-caller final soft corrections extend recognition without changing source permissions or canonical ASR. See docs/tina-voice-speaking-interruption.md.
+
+VoicePolicy.include_approved_actions is optional/default false and shares only owner-approved voice task/decision entities from this meeting. VoiceLookupQuery/VoiceLookup additionally allow search_approved_actions and calculate. VoiceSource.kind also accepts calculation with required calculation_query and no fake document/transcript identity. Derived inputs/results are re-evaluated against current authorized operand fingerprints. See docs/tina-voice-read-calculate.md.
+
+VoicePolicy.shared_meeting_ids defaults empty (max four distinct positive other-owned IDs). Saving and querying recheck ownership/artifact deletion. search_shared_meetings is an additional read-only tool; current-only tool semantics remain unchanged. VoiceSource optionally carries meeting_id, meeting_title and meeting_start_time for attributed evidence. See docs/tina-voice-shared-meetings.md.
+
+open_source is a server-selected cited-handle tool for same-caller recently completed answers. VoiceNavigationHint is optional owner runtime metadata and VoiceNavigation is the once-claimed, freshly reauthorized target; claims require owner auth and completed acknowledgment. See docs/tina-voice-open-source.md.

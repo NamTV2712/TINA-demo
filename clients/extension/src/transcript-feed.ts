@@ -46,9 +46,11 @@ export function createTranscriptFeed(feed: HTMLElement, root: HTMLElement, lates
             const card = element('div', 'voice-source-quote'), label = element('div', 'turn-time');
             const ms = source.start_ms;
             const time = ms == null ? '' : ms > 1e12 ? new Date(ms).toLocaleTimeString('vi-VN') : `${Math.floor(ms / 60000)}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}`;
-            text(label, source.kind === 'transcript' ? `${source.speaker_name || 'Người nói'} · ${time}` : `${source.path} · đoạn ${(source.paragraph ?? 0) + 1}`);
+            text(label, source.kind === 'calculation' ? 'Phép tính được kiểm tra' : source.kind === 'transcript' ? `${source.speaker_name || 'Người nói'} · ${time}` : `${source.path} · đoạn ${(source.paragraph ?? 0) + 1}`);
+            if(source.meeting_id)text(label,`${source.meeting_title||`Cuộc họp ${source.meeting_id}`} · ${source.meeting_start_time||''} · ${label.textContent}`);
             const quote = element('blockquote', 'turn-copy'); text(quote, source.quote);
             const link = element('a', 'voice-source'); link.href = evidence!.url(reply.request_id, source.id); link.target = '_blank'; link.rel = 'noopener noreferrer'; text(link, 'Mở nguồn trong Terminal ↗');
+            if(source.kind==='transcript'&&source.meeting_id){const url=new URL(link.href);url.pathname=`/meetings/${source.meeting_id}`;url.search='';url.hash='';link.href=url.href;text(link,'Mở cuộc họp nguồn trong Terminal ↗');}
             card.append(label, quote, link); children.push(card);
           }
           if (!children.length) { const empty = element('p', 'turn-time'); text(empty, 'Câu trả lời này chưa lưu nguồn trích dẫn.'); children.push(empty); }

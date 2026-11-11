@@ -19,7 +19,7 @@ URL=f'/bots/1/{SESSION}'
 async def service(monkeypatch):
     monkeypatch.delenv('MEETING_API_URL',raising=False)
     monkeypatch.setenv('TTS_API_TOKEN', 'synthetic-tts-' + 'x' * 40)
-    calls=[];blocked=[None];entered=asyncio.Event();connect_gate=[None];connect_entered=asyncio.Event()
+    calls=[];blocked=[None];entered=asyncio.Event();connect_gate=[None];connect_entered=asyncio.Event();context_gate=[None]
     broken_tts=[False];config_hook=[None];config_status=[200]
     class PartialTTS(httpx.AsyncByteStream):
         async def __aiter__(self):
@@ -43,6 +43,7 @@ async def service(monkeypatch):
             if body['operation']=='plan' and state.get('planning_unavailable'):
                 return httpx.Response(503,json={'detail':'Synthetic planner outage'})
             if body['operation']=='context':
+                if context_gate[0]:entered.set();await context_gate[0].wait()
                 mid=int(request.url.path.split('/')[3]);speaker=request.headers.get('X-Voice-Speaker-Key')
                 return httpx.Response(200,json={'history':heard.get((mid,speaker),heard.get(speaker,[])),'available_tools':['search_meeting']})
             if body['operation']=='plan':
@@ -57,6 +58,8 @@ async def service(monkeypatch):
             if blocked[0]: await blocked[0].wait()
             mid=int(request.url.path.split('/')[3])
             return httpx.Response(200,json={'text':state.get('answers_by_mid',{}).get(mid,'Lan phụ trách demo.'),'reason':'answered','sources':[{'id':'s0'}]})
+        if request.url.path.endswith('/state'):
+            return httpx.Response(state.get('cancel_status',200),json={'accepted':state.get('cancel_ack',True)})
         if broken_tts[0]: return httpx.Response(200,stream=PartialTTS())
         return httpx.Response(200,content=b'\0\0'*2400,headers={'x-audio-sample-rate':'24000','x-audio-channels':'1'})
     original_start=AgentSession.start
@@ -72,7 +75,7 @@ async def service(monkeypatch):
     monkeypatch.setattr(server,'delete_room',delete)
     async with httpx.AsyncClient(transport=httpx.MockTransport(upstream)) as upstream_client:
         app=server.create_app(client=upstream_client,room_connector=connect)
-        app.state.blocked=blocked;app.state.entered=entered
+        app.state.blocked=blocked;app.state.entered=entered;app.state.context_gate=context_gate
         app.state.connect_gate=connect_gate;app.state.connect_entered=connect_entered
         app.state.broken_tts=broken_tts
         app.state.config_hook=config_hook
@@ -253,6 +256,53 @@ async def test_stop_during_real_agents_llm_cancels_the_deferred_backend_and_cann
         assert len([r for r in calls if r.url.path.endswith('/answer')])==2
     finally:
         gate.set();task.cancel()
+
+
+async def test_replacement_starts_immediately_after_stop_ack_and_a_late_old_stop_cannot_interrupt_it(service):
+    client,calls,state,app=service
+    first_gate,second_gate=asyncio.Event(),asyncio.Event()
+    app.state.blocked[0]=first_gate
+    first=question();old=asyncio.create_task(client.post(URL+'/answer',headers=HEADERS,json=first))
+    new=None
+    try:
+        await asyncio.wait_for(app.state.entered.wait(),2)
+        assert (await client.request('DELETE',URL+'/turn',headers=HEADERS,json={'request_id':first['request_id']})).status_code==200
+        app.state.blocked[0]=second_gate;app.state.entered.clear()
+        replacement=question();replacement['question']='Tổng hợp cuộc họp. Chỉ lấy phần backend.'
+        new=asyncio.create_task(client.post(URL+'/answer',headers=HEADERS,json=replacement))
+        await asyncio.wait_for(app.state.entered.wait(),2)
+        assert (await client.request('DELETE',URL+'/turn',headers=HEADERS,json={'request_id':first['request_id']})).status_code==200
+        assert not new.done()
+        second_gate.set()
+        assert (await asyncio.wait_for(new,2)).status_code==200
+        assert (await old).status_code==409
+    finally:
+        first_gate.set();second_gate.set();old.cancel()
+        if new and not new.done():new.cancel()
+
+
+async def test_stop_does_not_acknowledge_a_failed_core_release(service):
+    client,calls,state,app=service
+    state['cancel_status']=503
+    response=await client.request('DELETE',URL+'/turn',headers=HEADERS,json={'request_id':str(uuid4())})
+    assert response.status_code==503
+    state['cancel_status']=200;state['cancel_ack']=False
+    response=await client.request('DELETE',URL+'/turn',headers=HEADERS,json={'request_id':str(uuid4())})
+    assert response.status_code==503
+
+
+async def test_context_loading_is_cancellable_before_a_speech_handle_exists(service):
+    client,calls,state,app=service
+    gate=asyncio.Event();app.state.context_gate[0]=gate
+    body=question();task=asyncio.create_task(client.post(URL+'/answer',headers=HEADERS,json=body))
+    try:
+        await asyncio.wait_for(app.state.entered.wait(),2)
+        response=await client.request('DELETE',URL+'/turn',headers=HEADERS,json={'request_id':body['request_id']})
+        assert response.status_code==200
+        assert (await asyncio.wait_for(task,2)).status_code==409
+        app.state.context_gate[0]=None
+        assert (await client.post(URL+'/answer',headers=HEADERS,json=question())).status_code==200
+    finally:gate.set();task.cancel()
 
 
 async def test_stop_while_room_is_connecting_fences_the_future_turn_before_llm_dispatch(service):

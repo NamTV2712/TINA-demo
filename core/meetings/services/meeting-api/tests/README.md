@@ -85,3 +85,5 @@ The former direct seek produced a 208-sample (13 ms) short full decode on the
 signal/timing checks, not a claim that every recognized word is now correct.
 
 Prepared-audio Apply tests validate transcript-document.v1 and retain the prepared-input provenance through Restore and a new check-only job.
+
+test_voice_navigation.py covers source-open intent/ambiguity, heard caller scope, owner claims and late/revoked/stopped navigation fences.

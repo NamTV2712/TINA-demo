@@ -6,6 +6,28 @@ from livekit.agents.types import APIConnectOptions
 from adapters import TinaLLM, VieNeuTTS, HttpAudioOutput
 
 
+@pytest.mark.parametrize('tool_name', ['draft_task', 'draft_decision', 'search_approved_actions', 'calculate', 'search_shared_meetings','open_source'])
+async def test_actual_agents_function_tools_propose_drafts_without_an_approval_tool(tool_name):
+    operations=[]
+    async def agent(request, operation, lookup=None):
+        operations.append((operation,lookup))
+        if operation=='plan':return {'tool_calls':[{'name':tool_name,'query':'Owner-reviewed proposal'}] if len(operations)==1 else []}
+        assert lookup=={'name':tool_name,'query':'Owner-reviewed proposal'}
+        return {'tool':tool_name,'source_count':0,'draft':{'title':lookup['query']}}
+    async def answer(request):return {'text':'Em đã chuẩn bị bản nháp; chủ meeting xác nhận trong Terminal.','reason':'answered'}
+    model=TinaLLM(answer,agent);model.request={'body':{},'speaker':None}
+    tools=model.tools()
+    session=AgentSession(llm=model,vad=None,turn_detection='manual',user_away_timeout=None,max_tool_steps=3)
+    try:
+        await session.start(Agent(instructions='Use authorized TINA tools.',tools=tools))
+        handle=session.generate_reply(user_input='Tạo bản nháp',chat_ctx=llm.ChatContext.empty())
+        await asyncio.wait_for(handle.wait_for_playout(),5)
+        assert handle.exception() is None and model.result['reason']=='answered'
+        assert [op for op,_ in operations]==['plan','lookup','plan']
+        assert not any(tool.info.name.startswith(('approve','publish','confirm')) for tool in tools)
+    finally:await session.aclose()
+
+
 @pytest.mark.parametrize('buffered', [False, True])
 async def test_stop_closes_the_upstream_pcm_iterator_and_clears_unplayed_audio(buffered):
     entered, closed = asyncio.Event(), asyncio.Event()

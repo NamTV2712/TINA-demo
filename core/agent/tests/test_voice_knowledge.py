@@ -3,9 +3,29 @@ import json
 import pytest
 
 from shared.meeting_knowledge import sources_for
-from shared.voice_knowledge import voice_sources, current_history, validate_voice_answer
+from shared.voice_knowledge import voice_sources, current_history, validate_voice_answer, pending_clarification
 
 NOW = 1800000000000
+
+
+def test_pending_clarification_keeps_original_goal_and_corrections_but_expires():
+    first = {'question': 'Tóm tắt phần đó.', 'answer': 'Bạn muốn tóm tắt chủ đề nào?',
+             'clarification': True, 'created_at_ms': NOW - 2000, 'sources': []}
+    second = first | {'question': 'Backend.', 'answer': 'Backend của dự án nào?', 'created_at_ms': NOW - 1000}
+    history = current_history([first, second], [], NOW)
+    assert pending_clarification(history, NOW) == {
+        'question': first['question'], 'asked': second['answer'], 'replies': ['Backend.']}
+    assert pending_clarification(current_history([first | {'created_at_ms': NOW - 35000}, second], [], NOW), NOW)['question'] == first['question']
+    assert not current_history([first], [], NOW + 30001)
+    assert pending_clarification(history, NOW + 30001) is None
+    assert pending_clarification(history + [second | {'clarification': False}], NOW) is None
+    changed = second | {'sources': [{'key': 'removed', 'fingerprint': 'a' * 64}]}
+    assert not current_history([changed], [], NOW)
+    assert pending_clarification(current_history([first, changed], [], NOW), NOW) is None
+    sources = sources_for({'segments': [segment('goal', 'Tóm tắt backend của dự án A.', NOW - 500000)]}, {})
+    queries = []
+    voice_sources(sources, 'Không, dự án A.', history, NOW, semantic=lambda q, _: queries.append(q) or [])
+    assert first['question'] in queries[0] and 'Backend.' in queries[0] and 'Không, dự án A.' in queries[0]
 
 
 def segment(identifier, text, end):

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { voiceActivity } from '../voiceActivity';
-import { voiceActivity as extensionActivity } from '../../../../extension/src/voice-activity';
+import { voiceActivity, voiceActivityStatus } from '../voiceActivity';
+import { voiceActivity as extensionActivity, voiceActivityStatus as extensionStatus } from '../../../../extension/src/voice-activity';
 const now = 1800000000000;
 const snapshot = (state: string) => ({ available:true, policy:{enabled:true}, runtime:{state,session_active:true,heartbeat_fresh:true,kws:{status:'ready',observed_at_ms:now}} });
 
@@ -19,5 +19,20 @@ describe.each([['Terminal',voiceActivity],['Extension',extensionActivity]] as co
     expect(project(undefined,now)).toBe('CHECKING');
     for (const value of [null,{},[],true,{runtime:{state:'LISTENING'}},{segments:[{text:'Speech'}]}]) expect(project(value,now)).toBe('UNAVAILABLE');
     expect(project(snapshot('LISTENING'),now,true)).toBe('ENDED');
+  });
+});
+
+describe.each([['Terminal',voiceActivityStatus],['Extension',extensionStatus]] as const)('%s tool progress',(_name,status)=>{
+  it('only presents allowlisted progress for the active request/session/revision',()=>{
+    const value = {...snapshot('THINKING'), policy:{enabled:true,revision:2},runtime:{...snapshot('THINKING').runtime,
+      request_id:'turn',session_uid:'session',progress:{request_id:'turn',session_uid:'session',revision:2,
+        stage:'reading_documents',observed_at_ms:now}}};
+    expect(status(value,now).label).toBe('Đang đọc tài liệu');
+    for (const patch of [{stage:'private text'}, {request_id:'old'}, {session_uid:'old'}, {revision:1},
+      {observed_at_ms:now-180001}, {observed_at_ms:now+1000}]) {
+      expect(status({...value,runtime:{...value.runtime,progress:{...value.runtime.progress,...patch}}},now).label).toBe('Đang xử lý');
+    }
+    expect(status({...value,runtime:{...value.runtime,state:'SPEAKING'}},now).label).toBe('Đang trả lời');
+    expect(status(value,now,true).label).toBe('Đã kết thúc');
   });
 });

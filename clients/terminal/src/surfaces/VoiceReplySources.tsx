@@ -3,8 +3,9 @@ import { useEffect, useRef, useState } from 'react';
 import { useOpenEntity } from '../ui-kit/docLinks';
 
 interface Source {
-  id: string; kind: 'transcript' | 'document'; quote: string; segment_id?: string; speaker_name?: string;
+  id: string; kind: 'transcript' | 'document' | 'calculation'; quote: string; segment_id?: string; speaker_name?: string;
   start_ms?: number; path?: string; paragraph?: number;
+  meeting_id?: number; meeting_title?: string; meeting_start_time?: string;
 }
 const clock = (ms?: number) => ms == null ? '' : ms > 1e12 ? new Date(ms).toLocaleTimeString('vi-VN')
   : `${Math.floor(ms / 60000)}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}`;
@@ -51,16 +52,20 @@ export function VoiceReplySources({ base, requestId }: { base: string; requestId
   }
   return <div aria-label="Nguồn câu trả lời" style={{ display: 'grid', gap: 8, marginTop: 10, fontSize: 12 }}>
     {status && <p role="status" style={{ margin: 0, color: 'var(--t3)' }}>{status}</p>}
-    {sources.map(source => <div key={source.id} id={`voice-source-${requestId}-${source.id}`}
+    {sources.map((source,index) => <div key={source.id} id={`voice-source-${requestId}-${source.id}`}
       style={{ borderLeft: '2px solid var(--accent)', padding: '4px 10px', minWidth: 0, overflowWrap: 'anywhere' }}>
-      <div style={{ color: 'var(--t2)' }}>{source.kind === 'transcript'
+      <div style={{color:'var(--t3)'}}>Nguồn số {index+1}</div>
+      <div style={{ color: 'var(--t2)' }}>{source.kind === 'calculation' ? 'Phép tính được kiểm tra' : source.kind === 'transcript'
         ? `${source.speaker_name || 'Người nói'} · ${clock(source.start_ms)}`
         : `${source.path} · đoạn ${(source.paragraph ?? 0) + 1}`}</div>
+      {source.meeting_id&&<div style={{color:'var(--t3)'}}>{source.meeting_title||`Cuộc họp ${source.meeting_id}`}{source.meeting_start_time?` · ${source.meeting_start_time}`:''}</div>}
       <blockquote style={{ margin: '5px 0', whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>{source.quote}</blockquote>
-      <button type="button" onClick={() => source.kind === 'document' ? openDoc({ path: source.path! }) : reveal(source.segment_id!)}
+      {source.kind==='transcript'&&source.meeting_id&&String(source.meeting_id)!==/\/meetings\/(\d+)\//.exec(base)?.[1]
+        ? <a href={`/meetings/${source.meeting_id}`} style={{color:'var(--accent)'}}>Mở cuộc họp nguồn ↗</a>
+        : source.kind !== 'calculation' && <button type="button" onClick={() => source.kind === 'document' ? openDoc({ path: source.path! }) : reveal(source.segment_id!)}
         style={{ border: 0, padding: '3px 0', background: 'transparent', color: 'var(--accent)', cursor: 'pointer', font: 'inherit' }}>
         {source.kind === 'document' ? 'Mở tài liệu nguồn ↗' : 'Xem trong transcript ↑'}
-      </button>
+      </button>}
     </div>)}
   </div>;
 }

@@ -10,7 +10,7 @@ import re
 import asyncio
 import time
 from uuid import UUID
-from typing import Literal
+from typing import Literal, Annotated
 
 import httpx
 from fastapi import APIRouter, Header, HTTPException
@@ -20,6 +20,7 @@ from .stop_router import _resolve_user_id
 from .stop import leave_command_channel
 from .speech_status import SpeechConflict
 from .voice_replies import VoiceReply, VoiceSourceRef, VoiceSources, public_replies
+from .voice_navigation import VoiceNavigationHint,VoiceNavigation,open_source_intent,select_open_source,navigation_reply
 from redis.exceptions import WatchError
 
 STATES = '^(LISTENING|CAPTURING|THINKING|SPEAKING|QUIET|ERROR|OFF)$'
@@ -33,6 +34,16 @@ class VoiceTurnPermit(BaseModel):
     current: StrictBool
 
 
+class VoiceProgress(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    request_id: UUID
+    session_uid: str = Field(max_length=128)
+    revision: int = Field(ge=0)
+    stage: Literal['planning', 'searching_transcript', 'reading_documents', 'searching_web',
+                   'reading_context', 'answering', 'preparing_speech', 'drafting']
+    observed_at_ms: int = Field(ge=0, strict=True)
+
+
 def voice_token(secret, meeting, session):
     secret = secret if secret is not None else os.environ.get('ADMIN_TOKEN', '')
     if not secret:
@@ -44,6 +55,8 @@ class VoicePolicy(BaseModel):
     model_config = ConfigDict(extra='forbid')
     enabled: StrictBool = False
     include_transcript: StrictBool = False
+    include_approved_actions: StrictBool = False
+    shared_meeting_ids: list[Annotated[int,Field(gt=0,strict=True)]] = Field(default_factory=list,max_length=4)
     documents: list[str] = Field(default_factory=list, max_length=8)
     revision: int = Field(default=0, ge=0)
     wake_variants: list[str] = Field(default_factory=list, max_length=8)
@@ -51,6 +64,12 @@ class VoicePolicy(BaseModel):
     allow_general_knowledge: StrictBool = False
     allow_web_search: StrictBool = False
     engine: Literal['tina', 'livekit'] = 'tina'
+
+    @field_validator('shared_meeting_ids')
+    @classmethod
+    def unique_shared_meetings(cls, values):
+        if len(set(values))!=len(values): raise ValueError('Choose distinct meetings')
+        return values
 
     @field_validator('wake_variants')
     @classmethod
@@ -97,7 +116,7 @@ class VoiceQuestion(BaseModel):
 
 class VoiceLookupQuery(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    name: Literal['get_recent_transcript', 'search_meeting', 'search_shared_documents', 'search_web', 'read_source_context']
+    name: Literal['get_recent_transcript', 'search_meeting', 'search_shared_documents', 'search_web', 'read_source_context', 'draft_task', 'draft_decision', 'search_approved_actions', 'calculate', 'search_shared_meetings', 'open_source']
     query: str = Field(default='', max_length=200)
 
     @field_validator('query')
@@ -105,7 +124,7 @@ class VoiceLookupQuery(BaseModel):
     def nonblank(cls, value, info):
         if info.data.get('name') != 'get_recent_transcript' and not value.strip():
             raise ValueError('Search query is empty')
-        if info.data.get('name')=='read_source_context' and not re.fullmatch(r'ctx-[0-9a-f]{64}',value.strip()):
+        if info.data.get('name') in ('read_source_context','open_source') and not re.fullmatch(r'ctx-[0-9a-f]{64}',value.strip()):
             raise ValueError('Invalid context handle')
         return value.strip()
 
@@ -261,6 +280,11 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
     def keys(mid, session, request):
         return f'meeting:voice:{mid}:lock', f'meeting:voice:{mid}:{session}:{request}'
 
+    async def progress(mid, session, body, stage):
+        value = VoiceProgress(request_id=body.request_id, session_uid=session,
+                              revision=body.revision, stage=stage, observed_at_ms=int(time.time()*1000))
+        await redis.set(f'meeting:voice:{mid}:progress', value.model_dump_json(), ex=180)
+
     async def reserve(mid, session: str, request):
         lock, _ = keys(mid, session, request)
         for _ in range(4):
@@ -340,7 +364,8 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
         row = await meeting(mid, _resolve_user_id(x_user_id))
         sessions = await repo.list_sessions(meeting_id=mid) if row.get('status') == 'active' else []
         active_session = sessions[-1] if row.get('status') == 'active' and sessions else None
-        state, diagnostic = await redis.mget(f'meeting:voice:{mid}:state', f'meeting:voice:{mid}:diagnostic')
+        state, diagnostic, raw_progress, held = await redis.mget(f'meeting:voice:{mid}:state',
+            f'meeting:voice:{mid}:diagnostic', f'meeting:voice:{mid}:progress', f'meeting:voice:{mid}:lock')
         runtime = json.loads(state) if state else {}
         if not active_session or runtime.get('session_uid') != active_session:
             runtime = {}
@@ -351,12 +376,70 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
         if (not active_session or not detail or detail.get('session_uid') != active_session
                 or detail.get('expires_at_ms', 0) <= int(time.time() * 1000)):
             detail = None
+        current_progress = json.loads(raw_progress) if raw_progress else None
+        if isinstance(held, bytes): held = held.decode()
+        policy = policy_of(row)
+        if not (current_progress and policy.enabled and runtime.get('state') == 'THINKING'
+                and current_progress['session_uid'] == active_session
+                and current_progress['revision'] == policy.revision
+                and current_progress['request_id'] == runtime.get('request_id')
+                and held == f"{active_session}:{current_progress['request_id']}"
+                and 0 <= int(time.time()*1000) - current_progress['observed_at_ms'] < 180000):
+            current_progress = None
         return {'replies': public_replies(row, active_session, bool(runtime)),
                 'livekit_available': bool(os.environ.get('LIVEKIT_AGENT_URL', '').strip()),
                 'available': bool((row.get('data') or {}).get('voice_assistant_capable')),
                 'policy': policy_of(row).model_dump(), 'runtime': {
                     **runtime, 'state': runtime.get('state', 'OFF'), 'session_active': bool(active_session),
-                    'heartbeat_fresh': bool(runtime), 'diagnostic': detail}}
+                    'heartbeat_fresh': bool(runtime), 'diagnostic': detail, 'progress': current_progress,
+                    'navigation':await navigation_hint(mid,row,runtime)}}
+
+    async def navigation_hint(mid,row,runtime=None):
+        raw=await redis.get(f'meeting:voice:{mid}:navigation')
+        if not raw:return None
+        value=json.loads(raw);policy=policy_of(row)
+        sessions=await repo.list_sessions(meeting_id=mid) if row.get('status')=='active' else []
+        if runtime is None:runtime=json.loads(await redis.get(f'meeting:voice:{mid}:state') or '{}')
+        held=await redis.get(f'meeting:voice:{mid}:lock')
+        if isinstance(held,bytes):held=held.decode()
+        reply=((row.get('data') or {}).get('voice_replies') or {}).get(value['request_id'],{})
+        if (not sessions or not policy.enabled or policy.revision!=value['revision']
+                or (row.get('data') or {}).get('artifact_deletion') or value['session_uid']!=sessions[-1]
+                or runtime.get('session_uid')!=sessions[-1] or runtime.get('state') in ('OFF','ERROR')
+                or runtime.get('request_id') not in (None,value['request_id'])
+                or held not in (None,f"{value['session_uid']}:{value['request_id']}")
+                or reply.get('session_uid')!=sessions[-1] or reply.get('state')!='completed'
+                or not value['created_at_ms']<=int(time.time()*1000)<value['expires_at_ms']):return None
+        return {k:value[k] for k in VoiceNavigationHint.model_fields}
+
+    @router.post('/meetings/{meeting_id}/voice-assistant/navigation/{request_id}',response_model=VoiceNavigation)
+    async def claim_navigation(meeting_id:int,request_id:UUID,x_user_id:str|None=Header(default=None)):
+        mid=meeting_id;user=_resolve_user_id(x_user_id)
+        row=await meeting(mid,user);hint=await navigation_hint(mid,row)
+        if not hint or hint['request_id']!=str(request_id):raise HTTPException(409,'Source navigation expired or changed')
+        key=f'meeting:voice:{mid}:navigation';raw=await redis.get(key);value=json.loads(raw or '{}')
+        if value.get('request_id')!=str(request_id):raise HTTPException(409,'Source navigation changed')
+        sources=VoiceSources.model_validate(await agent(row,'sources',{'sources':value['source_refs']}))
+        target=next((s for s in sources.sources if s.id==value['target_id'] and s.kind!='calculation'),None)
+        fresh=await meeting(mid,user)
+        if target is None or policy_of(fresh)!=policy_of(row) or await navigation_hint(mid,fresh)!=hint:
+            raise HTTPException(409,'Source is no longer shared')
+        async with redis.pipeline(transaction=True) as pipe:
+            try:
+                await pipe.watch(key,f'meeting:voice:{mid}:state',f'meeting:voice:{mid}:lock')
+                current,state,held=await pipe.mget(key,f'meeting:voice:{mid}:state',f'meeting:voice:{mid}:lock')
+                if isinstance(held,bytes):held=held.decode()
+                state=json.loads(state or '{}')
+                if (current!=raw or state.get('state') in ('OFF','ERROR') or state.get('session_uid')!=hint['session_uid']
+                        or state.get('request_id') not in (None,str(request_id))
+                        or held not in (None,f"{hint['session_uid']}:{request_id}")):
+                    raise HTTPException(409,'Source navigation changed')
+                claim=key+':claimed:'+str(request_id)
+                await pipe.watch(claim)
+                if await pipe.get(claim):raise HTTPException(409,'Source navigation already claimed')
+                pipe.multi();pipe.set(claim,'1',ex=60);await pipe.execute()
+            except WatchError:raise HTTPException(409,'Source navigation changed') from None
+        return VoiceNavigation(**hint,source=target)
 
     @router.get('/meetings/{meeting_id}/voice-assistant/sources/{request_id}', response_model=VoiceSources)
     async def reply_sources(meeting_id: int, request_id: UUID, x_user_id: str | None = Header(default=None)):
@@ -378,6 +461,11 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
         mid = meeting_id
         user = _resolve_user_id(x_user_id)
         row = await meeting(mid, user)
+        if mid in body.shared_meeting_ids: raise HTTPException(422,'The current meeting already has its own transcript option')
+        for shared_id in body.shared_meeting_ids:
+            shared=await meeting(shared_id,user)
+            if (shared.get('data') or {}).get('artifact_deletion'):
+                raise HTTPException(409,'A selected meeting has deleted artifacts')
         if body.noise_suppression and (row.get('platform') != 'google_meet' or not (row.get('data') or {}).get('voice_assistant_capable')):
             raise HTTPException(409, 'Start a new voice-capable Google Meet bot before testing noise suppression')
         if body.enabled:
@@ -391,7 +479,7 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
                 raise HTTPException(409, 'Start a new voice-enabled bot before enabling the assistant')
             if (row.get('data') or {}).get('transcribe_enabled') is False:
                 raise HTTPException(409, 'Enable transcription for the bot before enabling voice questions')
-            if not body.include_transcript and not body.documents and not body.allow_general_knowledge and not body.allow_web_search:
+            if not body.include_transcript and not body.include_approved_actions and not body.shared_meeting_ids and not body.documents and not body.allow_general_knowledge and not body.allow_web_search:
                 raise HTTPException(422, 'Choose sources that may be spoken to this room')
             available = await agent(row, 'ready')
             if any(path not in available['documents'] for path in body.documents):
@@ -467,9 +555,26 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
         if body.audio and (body.audio.observed_at_ms > now_ms + 5000
                 or any(r.last_frame_ms > body.audio.observed_at_ms + 5000 or (r.asr_at_ms or 0) > body.audio.observed_at_ms + 5000 for r in body.audio.channels)):
             raise HTTPException(422, 'Invalid audio observation clock')
-        await redis.set(f'meeting:voice:{mid}:state', json.dumps(body.model_dump(mode='json', exclude={'diagnostic'})
-                        | {'session_uid': session}), ex=15)
-        detail = body.diagnostic
+        state_key,lock = f'meeting:voice:{mid}:state',f'meeting:voice:{mid}:lock'
+        accepted = False
+        for attempt in range(3):
+            try:
+                async with redis.pipeline(transaction=True) as pipe:
+                    await pipe.watch(state_key,lock)
+                    held,current = await pipe.mget(lock,state_key)
+                    if isinstance(held,bytes): held=held.decode()
+                    current=json.loads(current) if current else {}
+                    if body.request_id and (held and held != f'{session}:{body.request_id}'
+                            or not held and current.get('session_uid')==session
+                            and current.get('state') in ('CAPTURING','THINKING','SPEAKING')
+                            and current.get('request_id') not in (None,str(body.request_id))):
+                        break
+                    pipe.multi()
+                    pipe.set(state_key,json.dumps(body.model_dump(mode='json',exclude={'diagnostic'})
+                             | {'session_uid':session}),ex=15)
+                    await pipe.execute();accepted=True;break
+            except WatchError: continue
+        detail = body.diagnostic if accepted else None
         if detail:
             heard_at = detail.heard_at_ms if detail.heard_prefix and detail.heard_at_ms is not None else detail.observed_at_ms
             born = min(detail.observed_at_ms, heard_at)
@@ -520,6 +625,19 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
                 history.append(turn | {'answer': reply['played_text'], 'clarification': False})
         return key, stored, [{k: v for k, v in t.items() if k != 'request_id'} for t in history]
 
+    async def prepare_source_navigation(mid,session,policy,speaker,row,question):
+        _,stored,_=await heard_history(mid,session,policy,speaker,row)
+        previous=next((t for t in reversed(stored) if t.get('sources')),None)
+        reply=((row.get('data') or {}).get('voice_replies') or {}).get(previous['request_id'],{}) if previous else {}
+        heard_at=reply.get('ended_at_ms') or reply.get('updated_at_ms') or (previous or {}).get('created_at_ms',0)
+        if (not previous or reply.get('state')!='completed' or reply.get('session_uid')!=session
+                or not 0<=int(time.time()*1000)-heard_at<=120000):
+            return {'status':'missing'}
+        sources=VoiceSources.model_validate(await agent(row,'sources',{'sources':previous['sources']}))
+        if sources.unavailable:return {'status':'revoked'}
+        target,status=select_open_source(question,sources.sources)
+        return {'status':status,'target_id':target.id if target else None,'source_refs':previous['sources']}
+
     def turn_fingerprint(body, speaker):
         return hashlib.sha256(json.dumps({'question': body.question, 'revision': body.revision,
             'request_id': str(body.request_id), 'speaker': speaker}, sort_keys=True).encode()).hexdigest()
@@ -561,9 +679,15 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
             if playback is not None and await playback.get(mid, str(body.request_id)):
                 raise HTTPException(409, 'Voice request already stopped or played')
             await reserve(mid, session, body.request_id)
-            await redis.set(key + ':agent', json.dumps({'fingerprint': turn_fingerprint(body, x_voice_speaker_key),
-                'lookups': [], 'completed': [], 'executed': [], 'planned': [], 'context_handles': [],
-                'plan_round':0, 'retrieval_deadline_ms':int(time.time()*1000)+30000}), ex=240)
+            await redis.delete(f'meeting:voice:{mid}:navigation')
+            try:
+                navigation=({'navigation':await prepare_source_navigation(mid,session,policy,x_voice_speaker_key,row,body.question)}
+                    if open_source_intent(body.question) else {})
+                await redis.set(key + ':agent', json.dumps({'fingerprint': turn_fingerprint(body, x_voice_speaker_key),
+                    'lookups': [], 'completed': [], 'executed': [], 'planned': [], 'context_handles': [],
+                    'plan_round':0, 'retrieval_deadline_ms':int(time.time()*1000)+30000,**navigation}),ex=240)
+            except BaseException:
+                await release(mid,session,body.request_id);raise
         lock, key, saved = await livekit_reservation(mid, session, body, x_voice_speaker_key, policy)
         if body.operation!='context' and await redis.get(key+':final'):
             raise HTTPException(409,'Agent answer already dispatched')
@@ -599,8 +723,26 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
                         except WatchError:
                             if attempt == 3: raise HTTPException(409, 'Agent tool reservation changed') from None
                 payload['lookup'] = lookup
-            if body.operation=='context':
+                payload['context_handles'] = saved['context_handles']
+            stage = {'get_recent_transcript':'searching_transcript', 'search_meeting':'searching_transcript',
+                     'search_shared_documents':'reading_documents', 'search_web':'searching_web',
+                     'read_source_context':'reading_context', 'draft_task':'drafting',
+                     'draft_decision':'drafting', 'search_approved_actions':'reading_documents',
+                     'calculate':'planning','search_shared_meetings':'searching_transcript','open_source':'reading_context'}[body.lookup.name] if body.operation == 'lookup' else 'planning'
+            await progress(mid, session, body, stage)
+            if 'navigation' in saved and body.operation!='context':
+                nav=saved['navigation'];call={'name':'open_source','query':nav.get('target_id') or ''}
+                if body.operation=='plan':
+                    result={'tool_calls':[call] if nav['status']=='ready' and not saved['lookups'] else []}
+                else:
+                    if body.lookup.model_dump()!=call or nav['status']!='ready':raise HTTPException(403,'Source was not selected in this turn')
+                    fresh_sources=VoiceSources.model_validate(await agent(row,'sources',{'sources':nav['source_refs']}))
+                    if fresh_sources.unavailable or not any(s.id==nav['target_id'] for s in fresh_sources.sources):
+                        raise HTTPException(409,'Source is no longer shared')
+                    result={'tool':'open_source','source_count':1,'sources':[]}
+            elif body.operation=='context':
                 result=await agent(row,'agent',payload,request_id=body.request_id)
+                if 'navigation' in saved:result['available_tools']=['open_source'] if saved['navigation']['status']=='ready' else []
             else:
                 remaining=(saved['retrieval_deadline_ms']-int(time.time()*1000))/1000
                 try:
@@ -682,6 +824,7 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
             await reserve(mid, session, body.request_id)
         try:
             history_key, stored, history = await heard_history(mid, session, policy, x_voice_speaker_key, row)
+            await redis.delete(f'meeting:voice:{mid}:navigation')
             payload = {'question': body.question, 'revision': body.revision, 'history': history}
             if saved is not None:
                 if not saved.get('plan_round') or sorted(saved['completed'], key=lambda c:(c['name'],c['query'])) != sorted(saved['planned'], key=lambda c:(c['name'],c['query'])):
@@ -690,7 +833,18 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
                 if 'web_result' in saved: payload['web_result'] = saved['web_result']
                 if not await redis.set(key + ':final', '1', nx=True, ex=240):
                     raise HTTPException(409, 'Agent answer already dispatched')
-            result = await agent(row, 'answer', payload, request_id=body.request_id)
+            await progress(mid, session, body, 'answering')
+            if saved is not None and 'navigation' in saved:
+                nav=saved['navigation'];status=nav['status']
+                if status=='ready':
+                    if {'name':'open_source','query':nav['target_id']} not in saved['executed']:
+                        raise HTTPException(409,'Source navigation tool has not completed')
+                    current_sources=VoiceSources.model_validate(await agent(row,'sources',{'sources':nav['source_refs']}))
+                    if current_sources.unavailable or not any(s.id==nav['target_id'] for s in current_sources.sources):
+                        raise HTTPException(409,'Source is no longer shared')
+                result=navigation_reply(status)
+                result['lookups']=[{'tool':'open_source','source_count':1}] if status=='ready' else []
+            else:result = await agent(row, 'answer', payload, request_id=body.request_id)
             source_refs = [VoiceSourceRef(key=s['key'], fingerprint=s['fingerprint']).model_dump()
                            for s in result.get('sources', [])[:32]]
             fresh = await meeting(mid, session=session, authorization=authorization)
@@ -710,10 +864,17 @@ def build_voice_router(repo, redis, publisher, playback=None, client_factory=htt
                     raise HTTPException(409, 'Speech turn was stopped or another playback is active') from exc
             result['evidence_available'] = bool(result.get('sources'))
             await redis.set(key, json.dumps({'fingerprint': fingerprint, 'answer': result}), ex=240)
+            if saved is not None and saved.get('navigation',{}).get('status')=='ready':
+                now=int(time.time()*1000)
+                hint=VoiceNavigationHint(request_id=body.request_id,session_uid=session,revision=policy.revision,
+                    created_at_ms=now,expires_at_ms=now+60000).model_dump(mode='json')
+                await redis.set(f'meeting:voice:{mid}:navigation',json.dumps(hint|{
+                    'target_id':saved['navigation']['target_id'],'source_refs':saved['navigation']['source_refs']}),ex=60)
+            await progress(mid, session, body, 'preparing_speech')
             refs = result.pop('context_refs', []) if result.get('clarification') else []
             result.pop('context_refs', None)
             refs = refs or [{'key': s['key'], 'fingerprint': s['fingerprint']} for s in result.get('sources', [])]
-            if history_key and refs:
+            if history_key and (refs or result.get('clarification') is True):
                 turn = {'request_id': str(body.request_id), 'question': body.question, 'answer': result['text'],
                         'clarification': result.get('clarification') is True,
                         'created_at_ms': int(time.time() * 1000),

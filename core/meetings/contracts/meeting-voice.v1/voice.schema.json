@@ -15,6 +15,20 @@
           "title": "Include Transcript",
           "type": "boolean"
         },
+        "include_approved_actions": {
+          "default": false,
+          "title": "Include Approved Actions",
+          "type": "boolean"
+        },
+        "shared_meeting_ids": {
+          "items": {
+            "exclusiveMinimum": 0,
+            "type": "integer"
+          },
+          "maxItems": 4,
+          "title": "Shared Meeting Ids",
+          "type": "array"
+        },
         "documents": {
           "items": {
             "type": "string"
@@ -737,7 +751,13 @@
             "search_meeting",
             "search_shared_documents",
             "search_web",
-            "read_source_context"
+            "read_source_context",
+            "draft_task",
+            "draft_decision",
+            "search_approved_actions",
+            "calculate",
+            "search_shared_meetings",
+            "open_source"
           ],
           "title": "Tool",
           "type": "string"
@@ -794,7 +814,13 @@
             "search_meeting",
             "search_shared_documents",
             "search_web",
-            "read_source_context"
+            "read_source_context",
+            "draft_task",
+            "draft_decision",
+            "search_approved_actions",
+            "calculate",
+            "search_shared_meetings",
+            "open_source"
           ],
           "title": "Name",
           "type": "string"
@@ -910,7 +936,8 @@
         "kind": {
           "enum": [
             "transcript",
-            "document"
+            "document",
+            "calculation"
           ],
           "title": "Kind",
           "type": "string"
@@ -998,6 +1025,58 @@
           ],
           "default": null,
           "title": "Paragraph"
+        },
+        "calculation_query": {
+          "anyOf": [
+            {
+              "maxLength": 200,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Calculation Query"
+        },
+        "meeting_id": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Meeting Id"
+        },
+        "meeting_title": {
+          "anyOf": [
+            {
+              "maxLength": 300,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Meeting Title"
+        },
+        "meeting_start_time": {
+          "anyOf": [
+            {
+              "maxLength": 64,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Meeting Start Time"
         }
       },
       "required": [
@@ -1045,6 +1124,298 @@
         "current"
       ],
       "title": "VoiceTurnPermit",
+      "type": "object"
+    },
+    "VoiceProgress": {
+      "additionalProperties": false,
+      "properties": {
+        "request_id": {
+          "format": "uuid",
+          "title": "Request Id",
+          "type": "string"
+        },
+        "session_uid": {
+          "maxLength": 128,
+          "title": "Session Uid",
+          "type": "string"
+        },
+        "revision": {
+          "minimum": 0,
+          "title": "Revision",
+          "type": "integer"
+        },
+        "stage": {
+          "enum": [
+            "planning",
+            "searching_transcript",
+            "reading_documents",
+            "searching_web",
+            "reading_context",
+            "answering",
+            "preparing_speech",
+            "drafting"
+          ],
+          "title": "Stage",
+          "type": "string"
+        },
+        "observed_at_ms": {
+          "minimum": 0,
+          "title": "Observed At Ms",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "request_id",
+        "session_uid",
+        "revision",
+        "stage",
+        "observed_at_ms"
+      ],
+      "title": "VoiceProgress",
+      "type": "object"
+    },
+    "VoiceActionDraft": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "pattern": "^[0-9a-f]{32}$",
+          "title": "Id",
+          "type": "string"
+        },
+        "request_id": {
+          "format": "uuid",
+          "title": "Request Id",
+          "type": "string"
+        },
+        "meeting_id": {
+          "exclusiveMinimum": 0,
+          "title": "Meeting Id",
+          "type": "integer"
+        },
+        "owner": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Owner",
+          "type": "string"
+        },
+        "policy_revision": {
+          "minimum": 0,
+          "title": "Policy Revision",
+          "type": "integer"
+        },
+        "kind": {
+          "enum": [
+            "task",
+            "decision"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "details": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Details",
+          "type": "string"
+        },
+        "readback": {
+          "maxLength": 4000,
+          "minLength": 1,
+          "title": "Readback",
+          "type": "string"
+        },
+        "status": {
+          "default": "pending",
+          "enum": [
+            "pending",
+            "approved",
+            "discarded"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "revision": {
+          "default": 1,
+          "minimum": 1,
+          "title": "Revision",
+          "type": "integer"
+        },
+        "created_at": {
+          "title": "Created At",
+          "type": "string"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
+        }
+      },
+      "required": [
+        "id",
+        "request_id",
+        "meeting_id",
+        "owner",
+        "policy_revision",
+        "kind",
+        "title",
+        "details",
+        "readback",
+        "created_at"
+      ],
+      "title": "VoiceActionDraft",
+      "type": "object"
+    },
+    "VoiceActionReview": {
+      "additionalProperties": false,
+      "properties": {
+        "expected_revision": {
+          "minimum": 1,
+          "title": "Expected Revision",
+          "type": "integer"
+        },
+        "status": {
+          "enum": [
+            "approved",
+            "discarded"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 200,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "details": {
+          "maxLength": 10000,
+          "minLength": 1,
+          "title": "Details",
+          "type": "string"
+        },
+        "assignee_label": {
+          "default": "",
+          "maxLength": 128,
+          "title": "Assignee Label",
+          "type": "string"
+        },
+        "due": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Due"
+        }
+      },
+      "required": [
+        "expected_revision",
+        "status",
+        "title",
+        "details"
+      ],
+      "title": "VoiceActionReview",
+      "type": "object"
+    },
+    "VoiceNavigationHint": {
+      "additionalProperties": false,
+      "properties": {
+        "request_id": {
+          "format": "uuid",
+          "title": "Request Id",
+          "type": "string"
+        },
+        "session_uid": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Session Uid",
+          "type": "string"
+        },
+        "revision": {
+          "minimum": 0,
+          "title": "Revision",
+          "type": "integer"
+        },
+        "created_at_ms": {
+          "minimum": 0,
+          "title": "Created At Ms",
+          "type": "integer"
+        },
+        "expires_at_ms": {
+          "minimum": 0,
+          "title": "Expires At Ms",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "request_id",
+        "session_uid",
+        "revision",
+        "created_at_ms",
+        "expires_at_ms"
+      ],
+      "title": "VoiceNavigationHint",
+      "type": "object"
+    },
+    "VoiceNavigation": {
+      "additionalProperties": false,
+      "properties": {
+        "request_id": {
+          "format": "uuid",
+          "title": "Request Id",
+          "type": "string"
+        },
+        "session_uid": {
+          "maxLength": 128,
+          "minLength": 1,
+          "title": "Session Uid",
+          "type": "string"
+        },
+        "revision": {
+          "minimum": 0,
+          "title": "Revision",
+          "type": "integer"
+        },
+        "created_at_ms": {
+          "minimum": 0,
+          "title": "Created At Ms",
+          "type": "integer"
+        },
+        "expires_at_ms": {
+          "minimum": 0,
+          "title": "Expires At Ms",
+          "type": "integer"
+        },
+        "source": {
+          "$ref": "#/$defs/VoiceSource"
+        }
+      },
+      "required": [
+        "request_id",
+        "session_uid",
+        "revision",
+        "created_at_ms",
+        "expires_at_ms",
+        "source"
+      ],
+      "title": "VoiceNavigation",
       "type": "object"
     }
   }

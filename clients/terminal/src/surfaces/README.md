@@ -109,3 +109,5 @@ Legacy jobs without text/proposal checks remain readable. Apply stays explicit.
 Meeting voice labels distinguish assistant replies from meeting evidence, general knowledge and public web.
 
 VoiceReplySources displays fresh owner-authorized evidence under voice replies. Source reads revalidate every five seconds while expanded, abort on meeting changes/unmount, and clear quotes on permission/outage failures; transcript anchors and existing document navigation open originals.
+
+MeetingVoiceDrafts presents editable, owner-only voice task/decision proposals inside MeetingKnowledge. Review needs a fresh owner read and explicit confirmation; task publication refreshes the Tasks list through tina:tasks-changed.

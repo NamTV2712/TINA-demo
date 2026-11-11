@@ -71,3 +71,8 @@
   .recordingLabel { display: none; }
   .recapTools { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
+.canvas :global([data-voice-source-target="true"]) {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 5px;
+}

@@ -7,6 +7,17 @@ import { createBotPipeline, type BotPipeline } from './pipeline.js';
 import type { AudioSnapshot } from './audio-diagnostics.js';
 function deferred<T>() { let resolve!: (v: T) => void; const promise = new Promise<T>(r => { resolve = r; }); return { promise, resolve }; }
 const tick = (ms = 350) => new Promise(resolve => setTimeout(resolve, ms));
+test('native cancellation waits for core acknowledgment and rejects an invalid success response',async()=>{
+  const response=deferred<Response>();const calls:object[]=[];
+  const api=voiceApi('http://core.test/bots/voice/1/session','synthetic',async(_url,init)=>{
+    calls.push(JSON.parse(init?.body as string));return response.promise;
+  });
+  let done=false;const cancelled=Promise.resolve(api.cancelTurn!('old')).then(()=>{done=true;});
+  await tick(5);assert.equal(done,false);assert.deepEqual(calls,[{state:'QUIET',request_id:'old'}]);
+  response.resolve(Response.json({accepted:true}));await cancelled;assert(done);
+  const invalid=voiceApi('http://core.test','synthetic',async()=>Response.json({ready:true}));
+  await assert.rejects(async()=>{await invalid.cancelTurn!('old');});
+});
 function fixture(answer: () => Promise<{text: string; clarification?: boolean; evidence_available?: boolean}> = async () => ({ text: 'Lan phụ trách demo. Hạn là thứ Sáu.' }), player?: SpeakController, shadowFactory?: WorkerFactory) {
   const diagnostics: VoiceDiagnostic[] = [], logs: string[] = [];
   const audio: AudioSnapshot[] = [];
@@ -423,7 +434,7 @@ test('unknown identity and failed playback never open post-answer follow-up', as
   }
 });
 
-test('slow new requests acknowledge once, slow follow-ups do not; fast errors/Stop leave no delayed speech', async () => {
+test('new requests acknowledge once while brief follow-up waits, fast errors and Stop leave no delayed speech', async () => {
   const pending=deferred<{text:string}>(),nextPending=deferred<{text:string}>();let requests=0;
   const f=acousticFixture(()=>++requests===1?pending.promise:nextPending.promise);
   try {
@@ -468,10 +479,148 @@ test('an explicit caller correction interrupts TTS, preserves completed sentence
     assert(!f.reports.includes('completed'));
     f.emit({event:'state',state:'LISTENING',generation:1});
     await tick(450);
-    assert.deepEqual(f.questions,['ai làm?','ý tôi là tuần sau.']);
+    assert.deepEqual(f.questions,['ai làm?','ai làm?\nYêu cầu cập nhật: ý tôi là tuần sau.']);
     assert.deepEqual(f.endpoints.at(-1),{channel:2,endMs:start+200});
     assert.equal(played.at(-1),'Đã hiểu câu sửa.');
   }finally{held.resolve('stopped');await f.voice.stop();}
+});
+
+test('natural speaking correction keeps the goal and persists heard sentences before server cancellation',async()=>{
+  const held=deferred<'stopped'>(),receipt=deferred<void>();let replies=0;
+  const order:string[]=[],played:string[]=[],questions:string[]=[];
+  let emit!:(v:Record<string,unknown>)=>void;
+  const states:string[]=[];
+  const voice=new MeetingVoice({config:async()=>({enabled:true,ready:true,revision:1}),
+    answer:async(q)=>{questions.push(q);return {text:++replies===1?'Lan phụ trách demo. Hạn là thứ Sáu.':'Sprint trước: Minh phụ trách.'};},
+    state:async(s)=>{states.push(s);},cancelTurn:async()=>{order.push('server-cancel');}},
+    {speak:async(text,_,started)=>{played.push(text);started?.();return text==='Hạn là thứ Sáu.'?held.promise:'completed';},
+      stop:async()=>{order.push('mute');held.resolve('stopped');}},
+    async(_,state,prefix)=>{if(state==='stopped'){order.push('prefix:'+prefix);await receipt.promise;}},
+    onEvent=>{emit=onEvent;return {send:()=>true,close(){}};},()=>{});
+  try{
+    await voice.start();emit({event:'state',state:'LISTENING',generation:0});
+    const first=Date.now()+1;await tick(5);
+    voice.hypothesis({channel:2,participant:'p',speakerKey:'s',startMs:first,endMs:first+10,text:'TINA ơi ai phụ trách demo?',final:true});
+    emit({event:'activity',channel:2,speech:false,endMs:first+10,stamp:first+10,generation:0});await tick(450);
+    assert.deepEqual(played,['Lan phụ trách demo.','Hạn là thứ Sáu.']);
+    const start=Date.now()+1;await tick(5);
+    const update={channel:2,participant:'p',speakerKey:'s',startMs:start,endMs:start+400,text:'Không, ý tôi là sprint trước.',final:true};
+    for(const change of [{participant:'other'},{participant:undefined},{channel:3},{text:'ừ đúng rồi'},{endMs:start+80}])
+      voice.hypothesis({...update,...change});
+    assert.equal(states.at(-1),'SPEAKING');
+    voice.hypothesis(update);await tick(20);
+    assert.deepEqual(order,['mute','prefix:Lan phụ trách demo.']);
+    assert.equal(questions.length,1);
+    receipt.resolve();await tick(20);
+    assert.equal(order.at(-1),'server-cancel');
+    emit({event:'state',state:'LISTENING',generation:1});await tick(450);
+    assert.equal(questions[1],'ai phụ trách demo?\nYêu cầu cập nhật: Không, ý tôi là sprint trước.');
+    assert.equal(played.at(-1),'Sprint trước: Minh phụ trách.');
+    assert(!order.some(s=>s.includes('Hạn là thứ Sáu.')));
+  }finally{receipt.resolve();held.resolve('stopped');await voice.stop();}
+});
+
+test('a short pause collects the same caller correction even while cancellation is pending',async()=>{
+  const held=deferred<'stopped'>(),release=deferred<void>();let replies=0;
+  const f=fixture(async()=>({text:++replies===1?'Lan phụ trách demo.':'Đã hiểu sprint trước.'}),{
+    speak:async(_text,_,started)=>{started?.();return replies===1?held.promise:'completed';},stop:async()=>{held.resolve('stopped');}});
+  f.api.cancelTurn=async()=>{await release.promise;};
+  try{
+    await f.voice.start();f.emit({event:'state',state:'LISTENING'});const first=Date.now()+1;await tick(5);
+    f.voice.hypothesis({channel:2,participant:'p',speakerKey:'s',startMs:first,endMs:first+10,text:'TINA ơi ai phụ trách demo?',final:true});
+    f.emit({event:'activity',channel:2,speech:false,endMs:first+10,stamp:first+10});await tick(450);
+    const start=Date.now()+1;await tick(5);
+    f.voice.hypothesis({channel:2,participant:'p',speakerKey:'s',startMs:start,endMs:start+200,text:'Khoan đã.',final:true});
+    await tick(10);
+    f.voice.hypothesis({channel:2,participant:'other',speakerKey:'s',startMs:start+210,endMs:start+650,text:'Ý tôi là dữ liệu riêng.',final:true});
+    f.voice.hypothesis({channel:2,participant:'p',speakerKey:'s',startMs:start+210,endMs:start+650,text:'Lan phụ trách demo.',final:true});
+    f.voice.hypothesis({channel:2,participant:'p',speakerKey:'s',startMs:start+210,endMs:start+650,text:'Ý tôi là sprint trước.',final:true});
+    release.resolve();await tick(20);f.emit({event:'state',state:'LISTENING',generation:1});await tick(450);
+    assert.equal(f.questions[1],'ai phụ trách demo?\nYêu cầu cập nhật: Ý tôi là sprint trước.');
+    assert(!f.questions.join(' ').includes('dữ liệu riêng'));
+  }finally{release.resolve();held.resolve('stopped');await f.voice.stop();}
+});
+
+test('a failed heard-prefix receipt still stops remotely but cannot resume with unreliable history',async()=>{
+  const held=deferred<'stopped'>();let emit!:(v:Record<string,unknown>)=>void;
+  let cancelled=0,calls=0;const states:string[]=[];
+  const voice=new MeetingVoice({config:async()=>({enabled:true,ready:true,revision:1}),
+    answer:async()=>{calls++;return {text:'Lan phụ trách demo.'};},state:async(s)=>{states.push(s);},
+    cancelTurn:async()=>{cancelled++;}},
+    {speak:async(_text,_,started)=>{started?.();return held.promise;},stop:async()=>{held.resolve('stopped');}},
+    async(_,state)=>{if(state==='stopped')throw new Error('Receipt unavailable');},
+    onEvent=>{emit=onEvent;return {send:()=>true,close(){}};},()=>{});
+  try{
+    await voice.start();emit({event:'state',state:'LISTENING',generation:0});const first=Date.now()+1;await tick(5);
+    voice.hypothesis({channel:2,participant:'p',speakerKey:'s',startMs:first,endMs:first+10,text:'TINA ơi ai làm demo?',final:true});
+    emit({event:'activity',channel:2,speech:false,endMs:first+10,stamp:first+10,generation:0});await tick(450);
+    const next=Date.now()+1;await tick(5);
+    voice.hypothesis({channel:2,participant:'p',speakerKey:'s',startMs:next,endMs:next+400,text:'Ý mình là sprint trước.',final:true});
+    await tick(30);assert.equal(cancelled,1);assert.equal(states.at(-1),'ERROR');assert.equal(calls,1);
+  }finally{held.resolve('stopped');await voice.stop();}
+});
+
+test('same-caller task refinement waits for cancellation and preserves the original goal without replaying old answers',async()=>{
+  const old=deferred<{text:string}>(),fresh=deferred<{text:string}>(),cancelled=deferred<void>();let calls=0;
+  const f=fixture(()=>calls++===0?old.promise:fresh.promise);
+  const requests:Array<{id:string;signal:AbortSignal}>=[];
+  const original=f.api.answer;
+  f.api.answer=(q,id,rev,signal,speaker)=>{requests.push({id,signal});return original(q,id,rev,signal,speaker);};
+  f.api.cancelTurn=async()=>{await cancelled.promise;};
+  try{
+    await f.voice.start();f.emit({event:'state',state:'LISTENING'});const start=Date.now()+1;await tick(5);
+    f.voice.hypothesis({channel:2,participant:'p',speakerKey:'s',startMs:start,endMs:start+10,text:'TINA ơi tổng hợp quyết định trong cuộc họp.',final:true});
+    f.emit({event:'activity',channel:2,speech:false,endMs:start+10,stamp:start+10});await tick(450);
+    const update=Date.now()+1;await tick(5);
+    const h={channel:2,participant:'p',speakerKey:'s',startMs:update,endMs:update+200,text:'Chỉ lấy phần backend thôi.',final:true};
+    for(const patch of [{participant:'other'},{participant:undefined},{channel:3},{text:'đúng rồi'}])f.voice.hypothesis({...h,...patch});
+    assert.equal(f.states.at(-1),'THINKING');assert.equal(requests.length,1);
+    f.voice.hypothesis(h);await tick(20);
+    assert(requests[0].signal.aborted);assert.equal(requests.length,1);
+    old.resolve({text:'Câu trả lời cũ không được phát.'});await tick(20);assert.deepEqual(f.spoken,[]);
+    cancelled.resolve();await tick(20);assert.equal(f.states.at(-1),'QUIET');
+    f.emit({event:'state',state:'LISTENING',generation:1});await tick(450);
+    assert.equal(f.questions[1],'tổng hợp quyết định trong cuộc họp.\nYêu cầu cập nhật: Chỉ lấy phần backend thôi.');
+    assert.notEqual(requests[0].id,requests[1].id);assert.equal(f.speakerKeys[0],f.speakerKeys[1]);
+    assert.equal(h.text,'Chỉ lấy phần backend thôi.');
+    fresh.resolve({text:'Backend dùng PostgreSQL.'});await tick(50);
+    assert.deepEqual(f.spoken,['Backend dùng PostgreSQL.']);
+  }finally{cancelled.resolve();old.resolve({text:'old'});fresh.resolve({text:'new'});await f.voice.stop();}
+});
+
+test('successive refinements retain earlier restrictions and each late result stays fenced',async()=>{
+  const results=[deferred<{text:string}>(),deferred<{text:string}>(),deferred<{text:string}>()];let calls=0;
+  const f=fixture(()=>results[calls++].promise);
+  try{
+    await f.voice.start();f.emit({event:'state',state:'LISTENING'});const start=Date.now()+1;await tick(5);
+    f.voice.hypothesis({channel:2,participant:'p',speakerKey:'s',startMs:start,endMs:start+10,text:'TINA ơi tổng hợp quyết định cuộc họp.',final:true});
+    f.emit({event:'activity',channel:2,speech:false,endMs:start+10,stamp:start+10});await tick(450);
+    for(const [index,text] of ['Chỉ lấy phần backend thôi.','Thêm người phụ trách và thời hạn.'].entries()){
+      const stamp=Date.now()+1;await tick(5);
+      f.voice.hypothesis({channel:2,participant:'p',speakerKey:'s',startMs:stamp,endMs:stamp+200,text,final:true});
+      await tick(20);f.emit({event:'state',state:'LISTENING',generation:index+1});await tick(450);
+    }
+    assert.equal(f.questions.length,3);
+    assert.equal(f.questions[2],'tổng hợp quyết định cuộc họp.\nYêu cầu cập nhật: Chỉ lấy phần backend thôi.\nYêu cầu cập nhật: Thêm người phụ trách và thời hạn.');
+    results[2].resolve({text:'Backend: Lan phụ trách, hạn thứ Sáu.'});await tick(40);
+    results[0].resolve({text:'Old first.'});results[1].resolve({text:'Old second.'});await tick(40);
+    assert.deepEqual(f.spoken,['Backend: Lan phụ trách, hạn thứ Sáu.']);
+  }finally{for(const result of results)result.resolve({text:'done'});await f.voice.stop();}
+});
+
+test('a failed cancellation never dispatches the replacement task or plays a late old answer',async()=>{
+  const old=deferred<{text:string}>(),f=fixture(()=>old.promise);
+  try{
+    await f.voice.start();f.emit({event:'state',state:'LISTENING'});const start=Date.now()+1;await tick(5);
+    f.voice.hypothesis({channel:2,participant:'p',speakerKey:'s',startMs:start,endMs:start+10,text:'TINA ơi tổng hợp cuộc họp.',final:true});
+    f.emit({event:'activity',channel:2,speech:false,endMs:start+10,stamp:start+10});await tick(450);
+    f.api.cancelTurn=async()=>{throw new Error('Unavailable');};
+    const update=Date.now()+1;await tick(5);
+    f.voice.hypothesis({channel:2,participant:'p',speakerKey:'s',startMs:update,endMs:update+200,text:'Chỉ lấy phần backend thôi.',final:true});
+    await tick(30);assert.equal(f.states.at(-1),'ERROR');
+    old.resolve({text:'Late answer.'});await tick(30);
+    assert.equal(f.questions.length,1);assert.deepEqual(f.spoken,[]);
+  }finally{old.resolve({text:'old'});await f.voice.stop();}
 });
 
 test('explicit Stop cancels thinking; ordinary acknowledgments and late ASR cannot interrupt',async()=>{
@@ -933,6 +1082,22 @@ test('a standalone name is acknowledged, then the same caller can ask without re
     assert.deepEqual(f.questions,['ai phụ trách demo?']);
     assert.deepEqual(f.spoken,['Dạ, em nghe.','Lan phụ trách demo.','Hạn là thứ Sáu.']);
   } finally {await f.voice.stop();}
+});
+
+test('a slow follow-up gets one waiting notice even after the wake acknowledgment',async()=>{
+  const reply=deferred<{text:string}>(), f=fixture(()=>reply.promise);
+  try {
+    await f.voice.start();await f.capture('TINA ơi');
+    f.emit({event:'state',state:'LISTENING'});
+    const start=Date.now()+1;await tick(5);
+    f.voice.hypothesis({channel:0,speakerKey:'ch-0:2',startMs:start,endMs:start+10,text:'Ai phụ trách demo?',final:true});
+    f.emit({event:'activity',channel:0,speech:false,endMs:start+10,stamp:start+20});
+    await tick(1500);assert.deepEqual(f.spoken,['Dạ, em nghe.']);
+    await tick(3000);assert.deepEqual(f.spoken,['Dạ, em nghe.',VOICE_NOTICES.wait[0]]);
+    await tick(1000);assert.equal(f.spoken.length,2);
+    reply.resolve({text:'Lan phụ trách demo.'});await tick(50);
+    assert.equal(f.spoken.at(-1),'Lan phụ trách demo.');
+  } finally {reply.resolve({text:'Lan phụ trách demo.'});await f.voice.stop();}
 });
 
 test('continuation has a bounded source-clock and participant fence and preserves raw hypotheses',()=>{

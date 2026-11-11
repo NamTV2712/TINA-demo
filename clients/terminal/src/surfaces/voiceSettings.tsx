@@ -113,16 +113,17 @@ export function VoiceSettings(){
   </div>;
 }
 
-interface RoomPolicy {enabled:boolean;include_transcript:boolean;documents:string[];revision:number;wake_variants:string[];
+interface RoomPolicy {enabled:boolean;include_transcript:boolean;include_approved_actions?:boolean;shared_meeting_ids?:number[];documents:string[];revision:number;wake_variants:string[];
   noise_suppression:boolean;allow_general_knowledge?:boolean;allow_web_search?:boolean;engine?:'tina'|'livekit'}
 function RoomVoiceSettings({sessions}:{sessions:Array<{meeting_id:number;status:string}>}){
   const [meeting,setMeeting]=useState(''),[policy,setPolicy]=useState<RoomPolicy|null>(null);
   const [documents,setDocuments]=useState<Array<{path:string;title:string}>>([]),[reason,setReason]=useState('');
   const [busy,setBusy]=useState(false),[message,setMessage]=useState('');
   const [livekit,setLivekit]=useState(false);
+  const [choices,setChoices]=useState<Array<{id:number;title:string}>>([]),[choicesMessage,setChoicesMessage]=useState('');
   const identity=useRef(meeting);identity.current=meeting;
   useEffect(()=>{
-    if(!meeting)return;const abort=new AbortController();setPolicy(null);setMessage('');setDocuments([]);setReason('');
+    if(!meeting)return;const abort=new AbortController();setPolicy(null);setMessage('');setDocuments([]);setReason('');setChoices([]);setChoicesMessage('');
     void Promise.all([fetch(`/api/meetings/${meeting}/voice-assistant`,{cache:'no-store',signal:abort.signal}),
       fetch(`/api/workspace/meeting-knowledge/${meeting}`,{cache:'no-store',signal:abort.signal})]).then(async([room,docs])=>{
       if(!room.ok)throw Error();const r=await room.json(),d=docs.ok?await docs.json():{documents:[]};
@@ -131,6 +132,17 @@ function RoomVoiceSettings({sessions}:{sessions:Array<{meeting_id:number;status:
     }).catch(()=>{if(!abort.signal.aborted)setMessage('Could not load room settings.');});
     return()=>abort.abort();
   },[meeting]);
+  async function chooseMeetings(){
+    const id=meeting;setChoicesMessage('Loading meetings…');
+    try{
+      const response=await fetch('/api/meetings?limit=100',{cache:'no-store',signal:AbortSignal.timeout(7000)});
+      if(!response.ok)throw Error();const value=await response.json();
+      if(identity.current!==id)return;
+      setChoices((value.meetings||[]).filter((m:{id:number|string})=>Number(m.id)!==Number(id))
+        .map((m:{id:number|string;title?:string})=>({id:Number(m.id),title:m.title||`Meeting #${m.id}`})));
+      setChoicesMessage('Only meetings you own can be shared. The server checks ownership on Save.');
+    }catch{if(identity.current===id)setChoicesMessage('Could not load meetings. Existing selections were kept.');}
+  }
   async function save(){
     if(!policy)return;const id=meeting;setBusy(true);setMessage('');
     try{const r=await fetch(`/api/meetings/${id}/voice-assistant`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(policy)});
@@ -139,7 +151,14 @@ function RoomVoiceSettings({sessions}:{sessions:Array<{meeting_id:number;status:
     }catch(e){if(identity.current===id)setMessage((e as Error).message);}
     finally{if(identity.current===id)setBusy(false);}
   }
-  if(!sessions.length)return null;
+  if(!sessions.length)return <section style={card} aria-label="Meeting sources">
+    <strong>Meeting sources</strong>
+    <div style={{fontSize:13}}>Approved tasks and decisions</div>
+    <span style={{fontSize:12,color:'var(--t3)'}}>Read saved actions from this meeting after you allow sharing.</span>
+    <div style={{fontSize:13}}>Other meeting transcripts · up to 4</div>
+    <span style={{fontSize:12,color:'var(--t3)'}}>Compare transcripts from other meetings you own. Each answer keeps its sources.</span>
+    <p role="status" style={{margin:0,fontSize:12,color:'var(--t2)'}}>No active Google Meet bot. Start a bot, then select Refresh status to open Meeting overrides and choose its shared sources.</p>
+  </section>;
   return <details style={{...card,display:'block'}} aria-label="Room answers">
     <summary style={{cursor:'pointer'}}>Meeting overrides (optional)</summary>
     <div style={{display:'grid',gap:10,paddingTop:12}}>
@@ -155,12 +174,25 @@ function RoomVoiceSettings({sessions}:{sessions:Array<{meeting_id:number;status:
       </select>
       {policy.engine==='livekit'&&<span style={{fontSize:12,color:'var(--t3)'}}>Up to 3 concurrent meetings. Uses your selected ASR, approved sources and local voice.</span>}
       {([['enabled','Enable voice'],['include_transcript','Use this meeting’s transcript'],
+        ['include_approved_actions','Share approved tasks and decisions from this meeting'],
         ['allow_general_knowledge','Allow general knowledge'],['allow_web_search','Allow public web search']] as const).map(([key,label])=>
         <label key={key}><input type="checkbox" checked={!!policy[key]} disabled={busy} onChange={e=>setPolicy({...policy,[key]:e.target.checked})}/> {label}</label>)}
       {!!documents.length&&<details><summary>Shared documents ({policy.documents.length})</summary>
         {documents.map(doc=><label key={doc.path} style={{display:'block',marginTop:8}}><input type="checkbox" disabled={busy} checked={policy.documents.includes(doc.path)}
           onChange={e=>setPolicy({...policy,documents:e.target.checked?[...policy.documents,doc.path]:policy.documents.filter(p=>p!==doc.path)})}/> {doc.title}</label>)}
       </details>}
+      <details><summary>Other meeting transcripts ({policy.shared_meeting_ids?.length||0}/4)</summary>
+        <p style={{fontSize:12,color:'var(--t3)'}}>Selected transcripts can be read aloud to everyone in this room. Documents and tasks from those meetings are excluded.</p>
+        <button type="button" style={button} disabled={busy} onClick={()=>void chooseMeetings()}>Choose meetings</button>
+        {choicesMessage&&<p role="status" style={{fontSize:12}}>{choicesMessage}</p>}
+        {[...new Map([...(policy.shared_meeting_ids||[]).map(id=>({id,title:choices.find(m=>m.id===id)?.title||`Meeting #${id}`})),...choices].map(m=>[m.id,m])).values()].map(item=>{
+          const selected=(policy.shared_meeting_ids||[]).includes(item.id);
+          return <label key={item.id} style={{display:'block',marginTop:8}}><input type="checkbox" checked={selected}
+            disabled={busy||!selected&&(policy.shared_meeting_ids?.length||0)>=4}
+            onChange={e=>setPolicy({...policy,shared_meeting_ids:e.target.checked?[...(policy.shared_meeting_ids||[]),item.id]
+              :(policy.shared_meeting_ids||[]).filter(id=>id!==item.id)})}/> {item.title}</label>;
+        })}
+      </details>
       <span style={{fontSize:12,color:'var(--t3)',lineHeight:1.5}}>General: “ASR là gì?” or “Kiến thức chung: …”. Web: “Tìm trên web về …”. Only the spoken search query goes to web search. Requires a compatible OpenAI Responses model; provider charges may apply.</span>
       {reason&&<span role="status" style={{fontSize:12,color:'var(--t3)'}}>Last answer: {reason.replaceAll('_',' ')}</span>}
       <button type="button" disabled={busy} style={{...button,justifySelf:'start'}} onClick={save}>Save room settings</button>

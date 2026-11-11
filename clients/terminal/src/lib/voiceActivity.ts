@@ -34,3 +34,29 @@ export function voiceActivity(value: unknown, now = Date.now(), ended = false): 
   }
   return typeof state === 'string' && Object.prototype.hasOwnProperty.call(voiceActivities, state) ? state as VoiceActivity : 'UNAVAILABLE';
 }
+
+const voiceProgress = {
+  drafting: { label: 'Đang chuẩn bị bản nháp', title: 'TINA đang đề xuất bản nháp để chủ meeting xem lại.' },
+  planning: { label: 'Đang chọn nguồn', title: 'TINA đang xác định nguồn cần tra cứu.' },
+  searching_transcript: { label: 'Đang tìm transcript', title: 'TINA đang tìm nội dung trong transcript được chia sẻ.' },
+  reading_documents: { label: 'Đang đọc tài liệu', title: 'TINA đang tra Wiki và tài liệu được chia sẻ.' },
+  searching_web: { label: 'Đang tìm web', title: 'TINA đang thực hiện truy vấn web đã được cho phép.' },
+  reading_context: { label: 'Đang đọc ngữ cảnh', title: 'TINA đang đọc phần liên quan quanh nguồn vừa tìm được.' },
+  answering: { label: 'Đang soạn câu trả lời', title: 'TINA đang chuẩn bị và kiểm chứng câu trả lời.' },
+  preparing_speech: { label: 'Đang chuẩn bị giọng nói', title: 'Câu trả lời đã sẵn sàng; bot đang chuẩn bị phát.' },
+} as const;
+
+export function voiceActivityStatus(value: unknown, now = Date.now(), ended = false): { label: string; title: string } {
+  const phase = voiceActivity(value, now, ended);
+  const body = record(value), runtime = record(body.runtime), policy = record(body.policy), progress = record(runtime.progress);
+  if (phase === 'THINKING' && typeof progress.stage === 'string'
+      && Object.prototype.hasOwnProperty.call(voiceProgress, progress.stage)
+      && typeof progress.request_id === 'string' && progress.request_id === runtime.request_id
+      && typeof progress.session_uid === 'string' && progress.session_uid === runtime.session_uid
+      && typeof progress.revision === 'number' && progress.revision === policy.revision
+      && typeof progress.observed_at_ms === 'number' && Number.isFinite(progress.observed_at_ms)
+      && now - progress.observed_at_ms >= 0 && now - progress.observed_at_ms < 180_000) {
+    return voiceProgress[progress.stage as keyof typeof voiceProgress];
+  }
+  return voiceActivities[phase];
+}

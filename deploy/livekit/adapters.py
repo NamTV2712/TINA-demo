@@ -33,9 +33,15 @@ class TinaLLM(llm.LLM):
             return function_tool(lookup, name=name, description=description)
         return [tool('get_recent_transcript', 'Read the recently shared meeting transcript.'),
                 tool('search_meeting', 'Search the shared meeting transcript.'),
+                tool('search_shared_meetings', 'Compare transcripts of the current and explicitly shared owned meetings; preserve meeting attribution.'),
                 tool('search_shared_documents', 'Search Wiki and documents shared with this room.'),
                 tool('read_source_context', 'Read nearby original text using a context_handle returned in this turn.'),
-                tool('search_web', 'Search only an explicitly requested public web query authorized by TINA.')]
+                tool('search_web', 'Search only an explicitly requested public web query authorized by TINA.'),
+                tool('draft_task', 'Propose a private task draft for owner review; never assigns or publishes a task.'),
+                tool('draft_decision', 'Propose a private decision draft for owner review; never asserts meeting consensus.'),
+                tool('search_approved_actions', 'Search owner-approved tasks and decision notes shared with this meeting.'),
+                tool('calculate', 'Evaluate bounded arithmetic or calendar date differences using authorized inputs.'),
+                tool('open_source', 'Prepare a freshly authorized source from this caller’s last completed answer for the owner Terminal; never accepts a URL or path.')]
 
     @property
     def model(self): return 'tina-selected-backend'

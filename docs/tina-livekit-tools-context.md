@@ -74,3 +74,17 @@ generation. SDK calls are bound to the exact turn object/call ID, preventing a l
 attaching itself to a later question. No source or permission check is bypassed by this fallback.
 
 Voice answers now retain verified source references through playback receipts. Terminal and Extension show a collapsed Sources control, load fresh owner-authorized evidence on open, and clear quotes if validation fails or sharing changes. Source details include speaker/time or document paragraph and links to the original transcript/document via Terminal. Historical replies created without saved references are not backfilled. This is read-only evidence display; the ASR/KWS/TTS and answer verification pipelines are unchanged.
+
+Pending clarification tasks and owner-only progress labels extend this same bridge; see [clarification and progress](tina-voice-clarification-progress.md). They reuse the current SDK version, tool loop and heard-context authorization rather than adding a second task orchestrator.
+
+Explicit action requests may also propose draft_task/draft_decision through this same bounded loop. Publication requires a completed readback and the authenticated meeting owner's separate Terminal confirmation; see [voice action drafts](tina-voice-action-drafts.md).
+
+Explicit same-caller updates while THINKING replace the old task after acknowledged cancellation. See [task refinement](tina-voice-task-refinement.md) for source/caller fences, public-query restrictions and late-result behavior.
+
+Speaking interruptions also accept bounded same-caller soft corrections, retain the original question and persist completed-sentence prefixes before remote cancellation. See [speaking interruption](tina-voice-speaking-interruption.md).
+
+Approved task/decision retrieval and deterministic numeric/date tools extend the same bridge; see [approved actions and calculations](tina-voice-read-calculate.md). Action sharing defaults off and public routes remain isolated.
+
+Owner-selected other meeting transcripts can be compared through search_shared_meetings with attributed source inspection. See [shared meeting voice sources](tina-voice-shared-meetings.md).
+
+Read-only source navigation uses the same SDK loop, then a once-claimed owner Terminal hint after playback. See [voice source opening](tina-voice-open-source.md).

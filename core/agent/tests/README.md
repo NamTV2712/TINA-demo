@@ -80,3 +80,9 @@ test_llm_openai_responses_voice.py covers valid JSON generation/verdict deltas f
 Voice format-recovery tests exercise the worker boundary with a malformed first reply, valid
 recovery, repeated malformed output and contradicted recovery. Only one format regeneration is
 allowed and successful output still requires the reviewer. Test provider responses are synthetic.
+
+`test_voice_actions.py` covers private task/decision proposals, completed-readback eligibility, owner review, Stop/policy fences, duplicate/conflicting publication and symlink refusal.
+
+`test_voice_read_tools.py` checks opt-in approved-action retrieval, same owner/meeting, current entity edits and calculation revocation. `test_voice_calculate.py` checks safe decimal/date execution, missing operands and proof reconstruction.
+
+`test_voice_shared_meetings.py` covers explicit owned scope, namespaced IDs, revocation, metadata, current-only recaps/tools and balanced cross-meeting evidence.

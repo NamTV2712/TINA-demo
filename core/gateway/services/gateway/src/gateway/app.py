@@ -681,6 +681,10 @@ def create_app(
     async def voice_assistant_sources(meeting_id: int, request_id: str, request: Request):
         return await _forward('GET', _meeting(f"/meetings/{meeting_id}/voice-assistant/sources/{quote(request_id, safe='')}"), request)
 
+    @app.post('/meetings/{meeting_id}/voice-assistant/navigation/{request_id}')
+    async def claim_voice_navigation(meeting_id:int,request_id:str,request:Request):
+        return await _forward('POST',_meeting(f"/meetings/{meeting_id}/voice-assistant/navigation/{quote(request_id,safe='')}"),request)
+
     @app.put('/meetings/{meeting_id}/voice-assistant')
     async def voice_assistant_policy(meeting_id: int, request: Request):
         return await _forward('PUT', _meeting(f'/meetings/{meeting_id}/voice-assistant'), request)

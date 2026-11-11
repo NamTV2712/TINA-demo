@@ -26,7 +26,7 @@ class VoiceLink(BaseModel):
 
 class VoiceLookup(BaseModel):
     model_config = ConfigDict(extra='forbid')
-    tool: Literal['get_recent_transcript', 'search_meeting', 'search_shared_documents', 'search_web', 'read_source_context']
+    tool: Literal['get_recent_transcript', 'search_meeting', 'search_shared_documents', 'search_web', 'read_source_context', 'draft_task', 'draft_decision', 'search_approved_actions', 'calculate', 'search_shared_meetings', 'open_source']
     source_count: int = Field(ge=0, le=32, strict=True)
 
 
@@ -39,7 +39,7 @@ class VoiceSourceRef(BaseModel):
 class VoiceSource(BaseModel):
     model_config = ConfigDict(extra='forbid')
     id: str = Field(pattern=r'^ctx-[0-9a-f]{64}$')
-    kind: Literal['transcript', 'document']
+    kind: Literal['transcript', 'document', 'calculation']
     quote: str = Field(min_length=1, max_length=1200)
     segment_id: str | None = Field(default=None, max_length=512)
     speaker_name: str | None = Field(default=None, max_length=512)
@@ -47,12 +47,18 @@ class VoiceSource(BaseModel):
     end_ms: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     path: str | None = Field(default=None, max_length=512)
     paragraph: int | None = Field(default=None, ge=0)
+    calculation_query: str | None = Field(default=None,max_length=200)
+    meeting_id: int | None = Field(default=None,gt=0,strict=True)
+    meeting_title: str | None = Field(default=None,max_length=300)
+    meeting_start_time: str | None = Field(default=None,max_length=64)
 
     @model_validator(mode='after')
     def source_identity(self):
         if self.kind == 'document':
             if not self.path or not self.path.endswith('.md') or self.path.startswith('/') or '..' in self.path.split('/'):
                 raise ValueError('Invalid document source')
+        elif self.kind == 'calculation':
+            if not self.calculation_query: raise ValueError('Missing calculation input')
         elif not self.segment_id:
             raise ValueError('Missing transcript segment')
         return self

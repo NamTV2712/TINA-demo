@@ -6,6 +6,7 @@ import re
 from functools import partial
 import threading
 import time
+from fastapi import HTTPException
 
 from shared.meeting_knowledge import digest
 from shared.voice_knowledge import validate_voice_answer, voice_failure, voice_sources
@@ -18,8 +19,8 @@ _lock = threading.Lock()
 _cache = OrderedDict()
 
 
-def map_part(complete, sources):
-    raw = complete({'mode':'voice_summary_map','question':'Extract the important facts in this part.', 'sources':sources})
+def map_part(complete, sources, question):
+    raw = complete({'mode':'voice_summary_map','question':question, 'sources':sources})
     result = validate_voice_answer(raw, sources)
     if json.loads(raw).get('reason'):
         raise ValueError('A recap part could not be verified')
@@ -47,10 +48,12 @@ def _submit(key, work):
         return future
 
 
-def gather(jobs, deadline):
+def gather(jobs, deadline, current=None):
     completed, active = {}, {}
-    next_job = 0
+    next_job, checked_at = 0, -float('inf')
     while len(completed) < len(jobs):
+        if current is not None and time.monotonic()-checked_at >= .25:
+            current(); checked_at = time.monotonic()
         if time.monotonic() >= deadline: return None, len(completed)
         while next_job < len(jobs):
             key, work = jobs[next_job]
@@ -80,17 +83,19 @@ def pending(question, completed, total):
     return {'text':text,'sources':[],'answer_kind':'meeting','reason':'summary_pending'}
 
 
-def recap(question, candidates, scope, complete, *, budget=120):
+def recap(question, candidates, scope, complete, *, budget=120, current=None):
     deadline = time.monotonic() + budget
     sources = [s | {'id':f's{i}'} for i,s in enumerate(candidates)]
     parts = summary_parts(sources)
     if not parts: return voice_failure('no_shared_sources')
     def job(stage, payload, work):
         return (scope, stage, digest(payload)), work
-    jobs = [job('map',part,partial(map_part,complete,part)) for part in parts]
+    jobs = [job('map',[question,part],partial(map_part,complete,part,question)) for part in parts]
     try:
-        mapped, count = gather(jobs, deadline)
-    except Exception: return voice_failure('verification_unavailable')
+        mapped, count = gather(jobs, deadline, current)
+    except Exception as exc:
+        if isinstance(exc,HTTPException) and exc.status_code==409: raise
+        return voice_failure('verification_unavailable')
     if mapped is None: return pending(question,count,len(parts))
     facts = [claim for group in mapped for claim in group]
     if not facts: return voice_failure('insufficient_evidence')
@@ -108,8 +113,10 @@ def recap(question, candidates, scope, complete, *, budget=120):
             raw = complete({'mode':'voice_summary_select','question':question,'summary_facts':group})
             return validate_voice_answer(raw, rows)['claims']
         jobs = [job('select', [question,group], partial(select,group)) for group in groups]
-        try: results, count = gather(jobs, deadline)
-        except Exception: return voice_failure('llm_unavailable')
+        try: results, count = gather(jobs, deadline, current)
+        except Exception as exc:
+            if isinstance(exc,HTTPException) and exc.status_code==409: raise
+            return voice_failure('llm_unavailable')
         if results is None: return pending(question,count,len(groups))
         facts = [claim for result in results for claim in result]
         if len(groups)==1: break
@@ -126,8 +133,10 @@ def recap(question, candidates, scope, complete, *, budget=120):
         if source['id'] in used or len(evidence)>=32 or size+len(source['quote'])>24000: continue
         evidence.append(source); used.add(source['id']); size+=len(source['quote'])
     payload = {'mode':'voice_summary_verify','question':question,'sources':evidence,'proposed_reply':{'claims':facts}}
-    try: verified, count = gather([job('verify', payload, partial(complete,payload))], deadline)
-    except Exception: return voice_failure('verification_unavailable')
+    try: verified, count = gather([job('verify', payload, partial(complete,payload))], deadline, current)
+    except Exception as exc:
+        if isinstance(exc,HTTPException) and exc.status_code==409: raise
+        return voice_failure('verification_unavailable')
     if verified is None: return pending(question,count,1)
     raw = verified[0]
     result = validate_voice_answer(raw,evidence)

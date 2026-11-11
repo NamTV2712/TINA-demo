@@ -72,6 +72,107 @@ def headers(session='current'):
 def question(): return {'request_id': str(uuid4()), 'question': 'What is the plan?', 'revision': 1}
 
 
+async def test_shared_meeting_policy_requires_owned_non_deleted_distinct_sources_and_current_owner(setup):
+    client,repo,*_=setup
+    original=repo.get_meeting
+    shared={'id':2,'user_id':7,'status':'past','data':{}}
+    async def get(mid):return deepcopy(shared) if mid==2 else await original(mid)
+    repo.get_meeting=get
+    policy={'enabled':True,'include_transcript':True,'revision':1,'shared_meeting_ids':[2]}
+    path='/meetings/1/voice-assistant'
+    assert (await client.put(path,headers={'X-User-Id':'8'},json=policy)).status_code==404
+    for ids in [[1],[2,2],[0],[True],['2'],[2,3,4,5,6]]:
+        assert (await client.put(path,headers={'X-User-Id':'7'},json=policy|{'shared_meeting_ids':ids})).status_code==422
+    shared['user_id']=8
+    assert (await client.put(path,headers={'X-User-Id':'7'},json=policy)).status_code==404
+    shared['user_id']=7;shared['data']['artifact_deletion']=True
+    assert (await client.put(path,headers={'X-User-Id':'7'},json=policy)).status_code==409
+    shared['data']={}
+    saved=await client.put(path,headers={'X-User-Id':'7'},json=policy)
+    assert saved.status_code==200 and saved.json()['policy']['shared_meeting_ids']==[2]
+    assert saved.json()['policy']['revision']==2
+
+
+async def test_calculation_lookup_receives_only_handles_returned_by_this_reserved_turn(setup):
+    import json
+    _,repo,redis,*_=setup
+    repo.row['data']['voice_assistant'].update(engine='livekit',include_approved_actions=True)
+    handle='ctx-'+'a'*64;plans=[];calculations=[]
+    search={'name':'search_approved_actions','query':'chi phí demo'}
+    calculate={'name':'calculate','query':json.dumps({'expression':'100+200','context_handles':[handle]},separators=(',',':'))}
+    async def upstream(request):
+        body=json.loads(request.content)
+        if body['operation']=='context':return httpx.Response(200,json={'history':[]})
+        if body['operation']=='plan':
+            plans.append(body)
+            return httpx.Response(200,json={'tool_calls':[search if len(plans)==1 else calculate]})
+        if body['lookup']['name']=='calculate':
+            calculations.append(body)
+            return httpx.Response(200,json={'tool':'calculate','source_count':1,'sources':[]})
+        return httpx.Response(200,json={'tool':'search_approved_actions','source_count':1,'sources':[],
+            'context_handles':[handle]})
+    def factory(**kwargs):return httpx.AsyncClient(transport=httpx.MockTransport(upstream),**kwargs)
+    app=FastAPI();app.include_router(build_voice_router(repo,redis,redis,client_factory=factory))
+    body=question();path='/bots/voice/1/current/agent'
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),base_url='http://test') as client:
+        async def op(operation,**extra):return await client.post(path,headers=headers(),json=body|{'operation':operation}|extra)
+        assert (await op('context')).status_code==200
+        assert (await op('plan',agent_context=[])).status_code==200
+        assert (await op('lookup',agent_context=[],lookup=search)).status_code==200
+        assert (await op('plan',agent_context=[])).status_code==200
+        assert (await op('lookup',agent_context=[],lookup=calculate)).status_code==200
+    assert calculations[0]['context_handles']==[handle]
+    assert plans[0]['context_handles']==[] and plans[1]['context_handles']==[handle]
+
+
+@pytest.mark.parametrize('held',[True,False])
+@pytest.mark.parametrize('old_state',['QUIET','THINKING'])
+async def test_late_old_turn_state_cannot_overwrite_replacement_status_or_release_its_lease(setup,held,old_state):
+    import json
+    client,_,redis,*_=setup
+    old,new=str(uuid4()),str(uuid4())
+    current={'state':'THINKING' if held else 'CAPTURING','request_id':new,'session_uid':'current'}
+    await redis.set('meeting:voice:1:state',json.dumps(current))
+    if held:await redis.set('meeting:voice:1:lock','current:'+new)
+    response=await client.post('/bots/voice/1/current/state',headers=headers(),json={'state':old_state,'request_id':old})
+    assert response.status_code==200
+    assert json.loads(await redis.get('meeting:voice:1:state'))==current
+    if held:assert await redis.get('meeting:voice:1:lock')=='current:'+new
+    response=await client.post('/bots/voice/1/current/state',headers=headers(),json={'state':'QUIET','request_id':new})
+    assert response.status_code==200 and not await redis.get('meeting:voice:1:lock')
+    assert json.loads(await redis.get('meeting:voice:1:state'))['state']=='QUIET'
+
+
+async def test_tool_progress_is_owner_scoped_and_disappears_on_stop_or_request_change(setup):
+    client, repo, redis, _, entered, release, blocked = setup
+    repo.row['data']['voice_assistant']['engine'] = 'livekit'
+    body = question()
+    path = '/bots/voice/1/current/agent'
+    assert (await client.post(path, headers=headers(), json=body | {'operation':'context'})).status_code == 200
+    payload = body | {'agent_context':[]}
+    assert (await client.post(path, headers=headers(), json=payload | {'operation':'plan'})).status_code == 200
+    await client.post('/bots/voice/1/current/state', headers=headers(), json={'state':'THINKING','request_id':body['request_id']})
+    blocked[0] = True
+    task = asyncio.create_task(client.post(path, headers=headers(), json=payload | {
+        'operation':'lookup','lookup':{'name':'search_shared_documents','query':'demo'}}))
+    try:
+        await asyncio.wait_for(entered.wait(), 2)
+        snapshot = await client.get('/meetings/1/voice-assistant', headers={'X-User-Id':'7'})
+        progress = snapshot.json()['runtime']['progress']
+        assert progress['stage'] == 'reading_documents' and progress['request_id'] == body['request_id']
+        assert set(progress) == {'request_id','session_uid','revision','stage','observed_at_ms'}
+        assert (await client.get('/meetings/1/voice-assistant', headers={'X-User-Id':'8'})).status_code == 404
+        await redis.set('meeting:voice:1:lock', 'current:' + str(uuid4()))
+        assert (await client.get('/meetings/1/voice-assistant', headers={'X-User-Id':'7'})).json()['runtime']['progress'] is None
+        await redis.set('meeting:voice:1:lock', 'current:' + body['request_id'])
+        await client.post('/bots/voice/1/current/state', headers=headers(), json={'state':'QUIET','request_id':body['request_id']})
+        assert (await client.get('/meetings/1/voice-assistant', headers={'X-User-Id':'7'})).json()['runtime']['progress'] is None
+    finally:
+        release.set()
+        response = await task
+        assert response.status_code == 409
+
+
 async def test_answer_service_propagates_bot_request_uuid_and_logs_no_content(setup, caplog):
     import json
     import logging
@@ -536,14 +637,15 @@ async def test_conversation_history_requires_completed_playback_and_same_speaker
         assert bad.status_code == 422
 
 
-async def test_completed_clarification_is_context_only_and_internal_refs_are_not_returned(setup):
+@pytest.mark.parametrize('refs', [[], [{'key': 'segment:demo', 'fingerprint': 'a' * 64}]])
+async def test_completed_clarification_is_context_only_and_internal_refs_are_not_returned(setup, refs):
     import json
     _, repo, redis, *_ = setup
     seen = []
     async def upstream(request):
         seen.append(json.loads(request.content))
         return httpx.Response(200, json={'text': 'Bạn hỏi bản demo hay bản chính thức?', 'sources': [],
-            'clarification': True, 'context_refs': [{'key': 'segment:demo', 'fingerprint': 'a' * 64}]})
+            'clarification': True, 'context_refs': refs})
     def factory(**kwargs): return httpx.AsyncClient(transport=httpx.MockTransport(upstream), **kwargs)
     store = PlaybackStore(redis, repo.save_voice_reply)
     app = FastAPI(); app.include_router(build_voice_router(repo, redis, redis, store, client_factory=factory))

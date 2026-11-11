@@ -5,7 +5,7 @@ import type { Invocation } from './config.js';
 import type { Act } from './contracts.js';
 import type { SpeakController } from './capture-bridge.js';
 import { VoiceTrigger, speechSentences, turnPauseMs, summaryWaitNotice, VOICE_NOTICES, isFixedVoiceNotice, type VoiceHypothesis } from './voice-trigger.js';
-import {VoiceInterruption} from './voice-interruption.js';
+import {VoiceInterruption, mergeVoiceRefinement, isVoiceRefinement} from './voice-interruption.js';
 import type { SpeechReporter } from './speech-status.js';
 import { AudioDiagnostics, type AudioSnapshot } from './audio-diagnostics.js';
 import type { AsrDiagnostic } from '@tina/gmeet-pipeline';
@@ -37,7 +37,7 @@ export interface VoiceApi {
   answer(question: string, requestId: string, revision: number, signal: AbortSignal, speakerKey?: string): Promise<{ text: string; evidence_available?: boolean; clarification?: boolean; reason?:string; answer_kind?:string }>;
   state(state: VoiceState, requestId?: string, diagnostic?: VoiceDiagnostic, audio?: AudioSnapshot, kws?: KwsStatus): Promise<void>;
   speechService?(text?:string): {baseUrl:string;token:string;revision:number;requestId:string} | undefined;
-  cancelTurn?(requestId:string): void;
+  cancelTurn?(requestId:string): Promise<void> | void;
 }
 export interface VoiceWorker {
   send(message: object): boolean;
@@ -113,9 +113,13 @@ export function voiceApi(url: string, token: string, fetchImpl = globalThis.fetc
     if (text.length > 200_000) throw new Error('Voice response exceeds bound');
     return JSON.parse(text);
   }
-  const cancelTurn = (requestId:string) => {
+  const cancelTurn = async (requestId:string) => {
     if(currentId===requestId)currentId=undefined;
-    if(agent) void call('/turn','DELETE',{request_id:requestId},AbortSignal.timeout(3000),undefined,agent.baseUrl).catch(()=>{});
+    const target=agent;
+    const result=target
+      ?await call('/turn','DELETE',{request_id:requestId},AbortSignal.timeout(15_000),undefined,target.baseUrl)
+      :await call('/state','POST',{state:'QUIET',request_id:requestId},AbortSignal.timeout(5000));
+    if(result[target?'stopped':'accepted']!==true)throw new Error('Voice cancellation was not confirmed');
   };
   return {
     config: async signal => {
@@ -140,7 +144,7 @@ export function voiceApi(url: string, token: string, fetchImpl = globalThis.fetc
     state: async (state, requestId, diagnostic, audio, kws) => {
       if(requestId && ['CAPTURING','THINKING','SPEAKING'].includes(state)) currentId=requestId;
       if(agent && requestId && ['QUIET','OFF'].includes(state)) {
-        cancelTurn(requestId);
+        void cancelTurn(requestId).catch(()=>{});
       }
       await call('/state','POST',{state,request_id:requestId,
         ...(diagnostic?{diagnostic}:{}),...(audio?{audio}:{}),...(kws?{kws}:{})});
@@ -186,8 +190,12 @@ export class MeetingVoice {
   private externalSpeaking = false;
   private processing = false;
   private interrupting = false;
+  private interruptCaller?: {channel:number;participant:string;after:number;guard?:VoiceInterruption};
+  private interruptBuffer: VoiceHypothesis[] = [];
   private interruption?: VoiceInterruption;
   private turnCaller?: {channel:number;participant:string};
+  private turnQuestion?: string;
+  private refinementBase?: {question:string;channel:number;participant:string;expires:number};
   private playedText = '';
   private speakingText = '';
   private playbackStarted = false;
@@ -415,12 +423,12 @@ export class MeetingVoice {
   }
   private async cancel(dispose = false, reason: VoiceDiagnosticCode = 'stopped') {
     const requestId=this.requestId,playedText=this.playedText,started=this.playbackStarted;
-    if(requestId)this.api.cancelTurn?.(requestId);
     this.finishTiming(reason);
     const generation = ++this.generation;
     this.epoch++; this.processing = false; this.externalSpeaking = false;
     this.trigger.reset(); this.activity.clear();
     this.interruption=undefined;this.turnCaller=undefined;
+    this.turnQuestion=undefined;this.refinementBase=undefined;
     this.recent.clear(); this.inputs.clear();
     this.requestSpeakerKey = undefined;
     this.waitingCaller = undefined;
@@ -429,14 +437,17 @@ export class MeetingVoice {
     let stopped = true, workerReady = true;
     try { await this.speak.stop(); } catch { stopped = false; this.log('playback_stop_failed'); }
     if (generation !== this.generation) return false;
-    if(requestId&&started){try{await this.report(requestId,'stopped',playedText);}catch{this.log('playback_receipt_failed');}}
+    let receipt=true;
+    // Persist the confirmed prefix before server cancellation finalizes the receipt.
+    if(requestId&&started){try{await this.report(requestId,'stopped',playedText);}catch{receipt=false;this.log('playback_receipt_failed');}}
+    const released=await Promise.resolve().then(()=>requestId?this.api.cancelTurn?.(requestId):undefined).then(()=>true,()=>false);
     if (generation !== this.generation) return false;
     this.playedText='';this.speakingText='';this.playbackStarted=false;
     if (dispose) { this.workerSerial++; this.worker?.close(); this.worker = undefined; this.closeKws(); }
-    else workerReady = this.control(stopped ? 'QUIET' : 'ERROR');
-    this.setState(stopped && workerReady ? (dispose ? 'OFF' : 'QUIET') : 'ERROR');
+    else workerReady = this.control(stopped && released && receipt ? 'QUIET' : 'ERROR');
+    this.setState(stopped && released && receipt && workerReady ? (dispose ? 'OFF' : 'QUIET') : 'ERROR');
     this.requestId = undefined;
-    this.diagnose(!stopped ? 'playback_failed' : !workerReady ? 'worker_failed' : reason);
+    this.diagnose(!stopped ? 'playback_failed' : !released || !receipt ? 'services_unavailable' : !workerReady ? 'worker_failed' : reason);
     return true;
   }
   async start() {
@@ -523,9 +534,19 @@ export class MeetingVoice {
     }
   }
   hypothesis(value: VoiceHypothesis) {
+    if(this.interrupting){
+      const caller=this.interruptCaller;
+      if(caller&&value.channel===caller.channel&&value.participant===caller.participant
+          &&Number.isFinite(value.startMs)&&Number.isFinite(value.endMs)&&value.endMs>=caller.after
+          &&value.endMs<=Date.now()+1000&&Date.now()-value.endMs<20000
+          &&typeof value.text==='string'&&value.text.length<=4000&&!caller.guard?.isPlaybackEcho(value.text)){
+        this.interruptBuffer.push(value);this.interruptBuffer=this.interruptBuffer.slice(-8);
+      }
+      return;
+    }
     if(!this.closed&&this.worker&&['THINKING','SPEAKING'].includes(this.state)&&!this.externalSpeaking){
       if(!this.interrupting){
-        const command=this.interruption?.feed(value,this.speakingText);
+        const command=this.interruption?.feed(value,this.speakingText,true,this.state==='SPEAKING');
         if(command)void this.interrupt(command);
       }
       return;
@@ -580,17 +601,23 @@ export class MeetingVoice {
     }
     this.finishQuestion();
   }
-  private async interrupt(command:{value:VoiceHypothesis;question:string;resume:boolean}){
+  private async interrupt(command:{value:VoiceHypothesis;question:string;resume:boolean;refinement?:boolean}){
     const caller=this.turnCaller;if(!caller||this.interrupting)return;
+    let original=command.refinement||command.resume&&!command.question?this.turnQuestion:undefined;
+    if(original&&!command.question&&mergeVoiceRefinement(original,'')===null)original=undefined;
+    if(original && mergeVoiceRefinement(original,command.question)===null) {this.log('refinement_requires_full_question');return;}
     this.interrupting=true;
+    this.interruptCaller={...caller,after:command.value.endMs,guard:this.interruption};this.interruptBuffer=[];
     try{
       const current = await this.cancel(false,'interrupted');
       if(!current||this.closed||this.state!=='QUIET'||!command.resume)return;
+      if(original)this.refinementBase={...caller,question:original,expires:Date.now()+FOLLOW_UP_MS};
+      const bufferedEnd=this.interruptBuffer.reduce((end,row)=>Math.max(end,row.endMs),command.value.endMs);
       this.waitingCaller={...caller,after:command.question?command.value.startMs:command.value.endMs,expires:Date.now()+FOLLOW_UP_MS,
-        ...(command.question?{endMs:command.value.endMs}:{})};
-      this.continuationHypotheses=command.question?[{...command.value,text:command.question,segments:undefined}]:[];
+        ...(command.question||this.interruptBuffer.length?{endMs:bufferedEnd}:{})};
+      this.continuationHypotheses=[...(command.question?[{...command.value,text:command.question,segments:undefined}]:[]),...this.interruptBuffer].slice(-8);
       this.diagnose('waiting_question');
-    }finally{this.interrupting=false;}
+    }finally{this.interrupting=false;this.interruptCaller=undefined;this.interruptBuffer=[];}
   }
   private finishQuestion() {
     const now = Date.now();
@@ -616,13 +643,20 @@ export class MeetingVoice {
     }
     this.processing = true;
     const caller = this.trigger.caller;
+    const base=this.refinementBase;
+    const refining=base && now<base.expires && this.trigger.answeringContinuation && isVoiceRefinement(question)
+      && caller?.channel===base.channel && caller?.participant===base.participant;
+    const effectiveQuestion=refining?mergeVoiceRefinement(base.question,question):question;
+    this.refinementBase=undefined;
+    if(!effectiveQuestion){void this.cancel(false,'question_timeout');return;}
     this.playedText='';this.speakingText='';this.playbackStarted=false;
     this.turnCaller=caller?.participant?{channel:caller.channel,participant:caller.participant}:undefined;
+    this.turnQuestion=effectiveQuestion;
     this.interruption=this.turnCaller?new VoiceInterruption(this.turnCaller,activity.endMs??this.trigger.endMs??Date.now()):undefined;
     this.markTiming('question_ready');
     if (!this.control('THINKING')) { this.processing = false; return; }
     this.setState('THINKING'); this.diagnose('thinking');
-    void this.answer(question, this.requestId, ++this.generation, this.requestSpeakerKey,
+    void this.answer(effectiveQuestion, this.requestId, ++this.generation, this.requestSpeakerKey,
       this.trigger.answeringContinuation, caller);
   }
   private async acknowledge(caller: {channel: number; participant?: string | null}, generation: number) {
@@ -685,8 +719,8 @@ export class MeetingVoice {
     let answerReceived = false;
     const noticeAbort = new AbortController();
     const progressNotice = summaryWaitNotice(question);
-    // Fast answers speak directly; a new, slow question gets one cached waiting phrase.
-    const ackTimer = acknowledged && !progressNotice ? undefined : setTimeout(() => {
+    // A wake acknowledgment buys a longer quiet interval, not indefinite silence during a slow tool.
+    const ackTimer = setTimeout(() => {
       if (!live()) return;
       ack = (async () => {
         let config: VoiceConfig;
@@ -700,11 +734,11 @@ export class MeetingVoice {
         const notice = this.nextNotice(progressNotice ? 'summary' : 'wait');
         this.speakingText=notice;
         return this.speak.speak(notice, 'auto', timing => {
-          if (live()) this.markSpeechTiming('notice',timing,true);
+          if (live()) {this.interruption?.observePlayback(notice);this.markSpeechTiming('notice',timing,true);}
         }, WAIT_NOTICE_TIMEOUT_MS);
       })().then(result => { if (result && result !== 'completed' && live()) this.log('ack_playback_failed'); },
         () => { if (live()) this.log('ack_playback_failed'); });
-    }, 900);
+    }, acknowledged && !progressNotice ? 4000 : 900);
     // Include a two-minute recap and bounded TTS playback inside the 360-second room reservation.
     const timeout = setTimeout(() => { if (live()) void this.cancel(false, 'answer_failed').then(current => { if (current) this.setState('ERROR'); }); }, 330_000);
     try {
@@ -743,6 +777,7 @@ export class MeetingVoice {
           let sentenceStarted = false;
           const onStarted = (timing?: Readonly<SpeechTiming>) => {
             sentenceStarted = true;
+            if(live())this.interruption?.observePlayback(sentence);
             if (!didStart && live()) { didStart = true; this.playbackStarted=true;this.markSpeechTiming('answer',timing,true); started = this.report(id, 'started'); void started.catch(() => {}); }
           };
           this.speakingText=sentence;
@@ -758,6 +793,7 @@ export class MeetingVoice {
             continue;
           }
           if (result !== 'completed') { this.diagnose('playback_failed'); await this.report(id, result ?? 'failed'); return; }
+          this.interruption?.observePlayback(sentence);
           this.playedText=(this.playedText+' '+sentence).trim();this.speakingText='';
           await this.report(id,'started',this.playedText);
           if(!live())return;
@@ -780,7 +816,7 @@ export class MeetingVoice {
       prepared?.cancel(); pending?.cancel();
       await ack.catch(() => {});
       clearTimeout(timeout);
-      if (live()) { this.interruption=undefined;this.turnCaller=undefined;this.speakingText='';this.playbackStarted=false;
+      if (live()) { this.interruption=undefined;this.turnCaller=undefined;this.turnQuestion=undefined;this.speakingText='';this.playbackStarted=false;
         this.finishTiming(outcome); if (this.control('QUIET')) this.setState('QUIET'); this.requestId = undefined; this.processing = false; this.trigger.reset(); this.activity.clear(); }
     }
   }

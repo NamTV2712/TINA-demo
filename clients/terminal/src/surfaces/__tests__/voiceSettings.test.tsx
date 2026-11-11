@@ -27,6 +27,10 @@ it('Settings exposes local KWS, question ASR and actual TTS metadata; saving onl
   expect(defaults.getAllByText('On')).toHaveLength(4);
   expect(screen.queryByLabelText('Active meeting')).toBeNull();
   expect(screen.queryByText('Meeting overrides (optional)')).toBeNull();
+  const sources=within(screen.getByRole('region',{name:'Meeting sources'}));
+  expect(sources.getByText('Approved tasks and decisions')).toBeTruthy();
+  expect(sources.getByText('Other meeting transcripts · up to 4')).toBeTruthy();
+  expect(sources.getByRole('status').textContent).toContain('No active Google Meet bot');
   fireEvent.change(screen.getByLabelText('Default for new Google Meet bots'),{target:{value:'off'}});
   expect(defaults.getAllByText('On')).toHaveLength(3);
   expect(defaults.getByText('Off')).toBeTruthy();
@@ -84,11 +88,42 @@ it('room answer permissions preserve the full CAS policy and do not touch other 
   render(<SettingsDialog onClose={()=>{}}/>);fireEvent.click(screen.getByRole('button',{name:'Voice assistant'}));
   await screen.findByText('Meeting #14 · Ready');fireEvent.click(screen.getByText('Meeting overrides (optional)'));fireEvent.change(screen.getByLabelText('Active meeting'),{target:{value:'14'}});
   await screen.findByText('Last answer: retrieval empty');
+  expect((screen.getByLabelText('Share approved tasks and decisions from this meeting') as HTMLInputElement).checked).toBe(false);
+  fireEvent.click(screen.getByLabelText('Share approved tasks and decisions from this meeting'));
   fireEvent.click(screen.getByLabelText('Allow general knowledge'));fireEvent.click(screen.getByLabelText('Allow public web search'));
   fireEvent.click(screen.getByRole('button',{name:'Save room settings'}));
   await screen.findByText('Saved. The current voice turn stops when settings change.');
   const body=JSON.parse(fetch.mock.calls.find(([url,init])=>url==='/api/meetings/14/voice-assistant'&&init?.method==='PUT')![1]!.body as string);
-  expect(body).toEqual({...policy,allow_general_knowledge:true,allow_web_search:true});
+  expect(body).toEqual({...policy,include_approved_actions:true,allow_general_knowledge:true,allow_web_search:true});
+});
+
+it('shares only explicitly checked meetings, preserves revision and enforces the four-selection UI limit',async()=>{
+  const policy={enabled:true,include_transcript:true,documents:[],revision:9,wake_variants:[],noise_suppression:true,
+    engine:'livekit',shared_meeting_ids:[] as number[]};
+  const fetch=vi.fn(async(input:RequestInfo|URL,init?:RequestInit)=>{
+    const path=String(input);
+    if(path==='/api/user/voice')return Response.json({prepare_new_bots:null});
+    if(path==='/api/user/transcription')return Response.json({});
+    if(path==='/api/bots/voice/services')return Response.json({...services,wake:{...services.wake,sessions:[{meeting_id:14,status:'ready'}]}});
+    if(path==='/api/meetings/14/voice-assistant')return Response.json({policy:init?.method==='PUT'?{...JSON.parse(init.body as string),revision:10}:policy,livekit_available:true});
+    if(path==='/api/workspace/meeting-knowledge/14')return Response.json({documents:[]});
+    if(path==='/api/meetings?limit=100')return Response.json({meetings:[{id:14,title:'Current room'},
+      ...[1,2,3,4,5].map(id=>({id,title:`Previous ${id}`}))]});
+    return new Response('',{status:404});
+  });vi.stubGlobal('fetch',fetch);
+  render(<SettingsDialog onClose={()=>{}}/>);fireEvent.click(screen.getByRole('button',{name:'Voice assistant'}));
+  await screen.findByText('Meeting #14 · Ready');fireEvent.click(screen.getByText('Meeting overrides (optional)'));
+  fireEvent.change(screen.getByLabelText('Active meeting'),{target:{value:'14'}});
+  await screen.findByText('Other meeting transcripts (0/4)');
+  fireEvent.click(screen.getByText('Choose meetings'));await screen.findByLabelText('Previous 1');
+  expect(screen.queryByLabelText('Current room')).toBeNull();
+  for(const id of [1,2,3,4])fireEvent.click(screen.getByLabelText(`Previous ${id}`));
+  expect((screen.getByLabelText('Previous 5') as HTMLInputElement).disabled).toBe(true);
+  fireEvent.click(screen.getByLabelText('Previous 2'));
+  fireEvent.click(screen.getByRole('button',{name:'Save room settings'}));
+  await screen.findByText('Saved. The current voice turn stops when settings change.');
+  const request=fetch.mock.calls.find(([url,init])=>url==='/api/meetings/14/voice-assistant'&&init?.method==='PUT')!;
+  expect(JSON.parse(request[1]!.body as string)).toEqual({...policy,shared_meeting_ids:[1,3,4]});
 });
 
 it('LiveKit runtime is an explicit room choice and preserves source permissions',async()=>{

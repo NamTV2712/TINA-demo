@@ -1,8 +1,15 @@
 import assert from 'node:assert/strict';
 import { botBase, botSegments, listBotMeetings, watchBotTranscript } from './bot-transcript';
-import { voiceReplies } from './voice-replies';
+import { voiceReplies,voiceSources } from './voice-replies';
 
 const config = { botGatewayUrl: 'http://127.0.0.1:28056', apiKey: 'fixture-secret' };
+const calculation={id:'ctx-'+'c'.repeat(64),kind:'calculation',quote:'100+200 = 300',calculation_query:'{"expression":"100+200"}'};
+assert.equal(voiceSources({sources:[calculation],unavailable:0}).sources[0].kind,'calculation');
+assert.throws(()=>voiceSources({sources:[{...calculation,calculation_query:undefined}],unavailable:0}));
+const crossSource={id:'ctx-'+'d'.repeat(64),kind:'transcript',quote:'Deadline cũ.',segment_id:'same-id',
+  meeting_id:2,meeting_title:'Sprint trước',meeting_start_time:'2026-11-04T08:00:00Z'};
+assert.equal(voiceSources({sources:[crossSource],unavailable:0}).sources[0].meeting_id,2);
+assert.throws(()=>voiceSources({sources:[{...crossSource,meeting_id:'2'}],unavailable:0}));
 const meeting = { id: 12, platform: 'teams', nativeMeetingId: 'same-room', title: 'Review', status: 'active', startMs: Date.parse('2026-10-30T01:00:00Z') };
 const doc = (text = 'Xin chào / hello', revision = 0) => ({ id: 12, platform: 'teams', native_meeting_id: 'same-room', start_time: '2026-10-30T01:00:00Z', segments: [{ segment_id: 'one', text, revision, start: 2, end: 4, completed: false, speaker: 'Hà' }] });
 for (const url of ['http://remote.test', 'http://person:secret@localhost', 'https://example.test?token=x', 'javascript:alert(1)']) assert.throws(() => botBase(url));

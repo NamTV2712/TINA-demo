@@ -707,7 +707,9 @@ def _run_meeting_knowledge(stream, out_topic: str, start: dict) -> None:
             generation_source = source
             if mode == 'voice':
                 with voice_span('source_selection', trace_id) as metrics:
-                    ranked, outcome = rerank_voice_sources(source['question'], source['sources'],
+                    pending = source.get('pending_clarification')
+                    intent = json.dumps({'question': source['question'], 'pending_clarification': pending}, ensure_ascii=False) if pending else source['question']
+                    ranked, outcome = rerank_voice_sources(intent, source['sources'],
                         source.get('history', []), source.get('recent_source_ids', []),
                         lambda prompt: generate(completion_from_env(timeout=4), prompt, RERANK_SYSTEM,
                                                 voice_schema('rerank', source['sources'])))
@@ -738,7 +740,9 @@ def _run_meeting_knowledge(stream, out_topic: str, start: dict) -> None:
                 text = raw
             else:
                 (validate_voice_answer if voice else validate_answer)(raw, source['sources'])
-                text = verify_voice_reply(raw, source['question'], source['sources'],
+                pending = source.get('pending_clarification')
+                intent = json.dumps({'question': source['question'], 'pending_clarification': pending}, ensure_ascii=False) if pending else source['question']
+                text = verify_voice_reply(raw, intent, source['sources'],
                     lambda prompt: checked_completion(prompt, VERIFY_SYSTEM),
                     repair=lambda prompt: checked_completion(prompt, VOICE_REPAIR_SYSTEM),
                     diagnostics=True) if voice else raw

@@ -4,9 +4,44 @@ from concurrent.futures import ThreadPoolExecutor
 import threading
 
 import pytest
+from fastapi import HTTPException
 
 from control_plane import voice_summary as summary
 from shared.voice_summary import wants_summary
+
+
+def test_stop_ends_the_wait_before_a_running_provider_finishes_and_never_schedules_selection():
+    entered,release,finished=threading.Event(),threading.Event(),threading.Event()
+    current=[True];modes=[];scope='cancel-wait-test'
+    def permit():
+        if not current[0]:raise HTTPException(409,'Stopped')
+    def complete(payload):
+        modes.append(payload['mode']);entered.set();assert release.wait(3)
+        return '{"claims":[]}'
+    source={'key':'a','kind':'transcript','quote':'Backend dùng PostgreSQL.'}
+    with ThreadPoolExecutor(max_workers=1) as caller:
+        result=caller.submit(summary.recap,'Tổng hợp quyết định cuộc họp.',[source],scope,complete,current=permit)
+        try:
+            assert entered.wait(2);current[0]=False
+            with pytest.raises(HTTPException) as error:result.result(timeout=1)
+            assert error.value.status_code==409 and modes==['voice_summary_map']
+        finally:
+            with summary._lock:
+                jobs=[job for key,(_,job) in summary._cache.items() if key[0]==scope]
+            for job in jobs:job.add_done_callback(lambda _:finished.set())
+            release.set();assert finished.wait(2)
+
+
+def test_refined_scope_reaches_map_selection_and_verification_as_one_question():
+    question='Tổng hợp quyết định cuộc họp.\nYêu cầu cập nhật: Chỉ lấy phần backend thôi.'
+    source={'key':'a','kind':'transcript','quote':'Backend dùng PostgreSQL.'};payloads=[]
+    def complete(payload):
+        payloads.append(payload)
+        assert payload['question']==question
+        return '{"claims":[{"text":"Backend dùng PostgreSQL.","source_ids":["s0"]}],"verification":["approved"]}'
+    result=summary.recap(question,[source],'refined-scope-test',complete)
+    assert wants_summary(question) and result['reason']=='answered'
+    assert [p['mode'] for p in payloads]==['voice_summary_map','voice_summary_select','voice_summary_verify']
 
 
 @pytest.mark.parametrize('question', ['Tổng hợp toàn bộ quyết định trong cuộc họp.',
@@ -15,7 +50,8 @@ def test_full_recap_intents_include_decisions_and_tasks(question):
     assert wants_summary(question)
 
 
-@pytest.mark.parametrize('question', ['Cách tóm tắt cuộc họp?', 'Tóm tắt 5 phút vừa rồi', 'Ai phụ trách demo?'])
+@pytest.mark.parametrize('question', ['Cách tóm tắt cuộc họp?', 'Tóm tắt 5 phút vừa rồi', 'Ai phụ trách demo?',
+    'Tổng hợp quyết định đã duyệt trong cuộc họp', 'Summarize saved decisions in this meeting'])
 def test_local_questions_do_not_trigger_whole_meeting_work(question):
     assert not wants_summary(question)
 
@@ -45,7 +81,7 @@ def test_every_stage_shares_one_waiting_deadline_instead_of_returning_after_map_
     deadlines = []
     monkeypatch.setattr(summary.time, 'monotonic', lambda: 0)
     claim = {'text': 'Lan làm demo.', 'source_ids': ['s0']}
-    def gather(jobs, deadline):
+    def gather(jobs, deadline, current=None):
         deadlines.append(deadline)
         stage = jobs[0][0][1]
         return ([json.dumps({'claims': [claim]})] if stage == 'verify' else [[claim]]), 1

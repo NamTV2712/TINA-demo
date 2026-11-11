@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { VoiceReplySources } from './VoiceReplySources';
 
-interface Policy { enabled: boolean; include_transcript: boolean; documents: string[]; revision: number; wake_variants: string[]; noise_suppression:boolean; allow_general_knowledge?:boolean; allow_web_search?:boolean }
+interface Policy { enabled: boolean; include_transcript: boolean; include_approved_actions?:boolean; shared_meeting_ids?:number[]; documents: string[]; revision: number; wake_variants: string[]; noise_suppression:boolean; allow_general_knowledge?:boolean; allow_web_search?:boolean }
 const button = { padding: '6px 10px', background: 'var(--panel2)', color: 'var(--t1)', border: '1px solid var(--line2)', borderRadius: 6, cursor: 'pointer' } as const;
 interface Diagnostic {
   event_id: string; code: string; observed_at_ms: number; expires_at_ms: number;
@@ -203,6 +203,7 @@ export function MeetingVoice({ meetingId, nativeId }: { meetingId: string; nativ
       <fieldset disabled={!loaded || busy} style={{ border: '1px solid var(--line2)', borderRadius: 6, display: 'grid', gap: 8 }}>
         <legend>Nguồn được phép đọc cho cả phòng</legend>
         <label><input type="checkbox" checked={policy.include_transcript} onChange={e => edit({ include_transcript: e.target.checked })} /> Transcript của meeting này</label>
+        <label><input type="checkbox" checked={!!policy.include_approved_actions} onChange={e => edit({ include_approved_actions: e.target.checked })} /> Task và quyết định đã duyệt của meeting này</label>
         {[...new Set([...documents.map(doc => doc.path), ...policy.documents])].map(path => <label key={path}><input type="checkbox" checked={policy.documents.includes(path)} onChange={e => edit({ documents: e.target.checked ? [...policy.documents, path] : policy.documents.filter(p => p !== path) })} /> {documents.find(doc => doc.path === path)?.title || `${path} (không còn liên kết)`}</label>)}
       </fieldset>
       <div style={{ display: 'flex', gap: 8 }}>

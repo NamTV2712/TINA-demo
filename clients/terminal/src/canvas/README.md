@@ -69,3 +69,7 @@ updates retain the same identity and original wording.
 VoiceActivity is a compact read-only runtime indicator in the transcript toolbar. Owner-scoped polling is sequential and cancelled on room changes; failed or expired snapshots cannot retain listening readiness.
 
 LiveTranscriptEngine exposes focusable source segment anchors, including IDs in merged speaker blocks, for verified voice citation navigation.
+
+VoiceActivity also presents allowlisted current-request tool progress in its existing badge; stale, mismatched or failed snapshots return to the generic phase. No tool arguments or source content enter progress labels.
+
+useVoiceSourceNavigation consumes only fresh same-room owner hints from VoiceActivity polling. It claims once, revalidates runtime identity and uses existing document/layout handlers or original transcript reveal. Background/reloaded/hidden views cannot replay navigation.

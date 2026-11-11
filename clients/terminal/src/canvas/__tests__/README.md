@@ -23,3 +23,5 @@ filtering, model-request and audio-target behavior while the reading layout chan
 The banner tests also cover hiding a duplicate ended notice without hiding live disconnects.
 `meetingCanvasDefaultView.test.tsx` verifies that recap tools open and close without starting
 processing or losing the transcript, and distinguishes empty ended meetings from waiting live feeds.
+
+voiceSourceNavigation.test.tsx covers authorized document navigation, current/other transcript reveal, once-only hints and hidden/reloaded/unmounted/stale views.

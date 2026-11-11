@@ -2,6 +2,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { CanvasActionsProvider, useActions, OPEN_ENTITY_EVENT } from "./actions";
 import { VoiceActivity } from "./VoiceActivity";
+import { useVoiceSourceNavigation,VOICE_SOURCE_REVEAL } from './useVoiceSourceNavigation';
 import { MeetingHealthBanner } from "./MeetingHealthBanner";
 import { LiveTranscriptEngine, type EngineActions, type EngineEntity, type EngineSignal } from "./LiveTranscriptEngine";
 import { useMeetingNotes } from "./notes";
@@ -159,6 +160,11 @@ function MeetingCanvasBody({ meetingId, meetingRecord, onDeleteMeeting, deleting
   const speakersOpen = useRef<(() => void) | null>(null);
   const reviewOpen = useRef<(() => void) | null>(null);
   const dialogMeetingId = meetingRecord?.id ?? meetingId ?? "";
+  const voiceNavigation=useVoiceSourceNavigation(dialogMeetingId);
+  useEffect(()=>{
+    const reveal=(event:Event)=>{if((event as CustomEvent).detail?.meetingId===dialogMeetingId){setOverride(false);setSearchQuery('');setSpeakerFilter('');}};
+    window.addEventListener(VOICE_SOURCE_REVEAL,reveal);return()=>window.removeEventListener(VOICE_SOURCE_REVEAL,reveal);
+  },[dialogMeetingId]);
   const [language, setLanguage] = useState<TranscriptLanguage>("bilingual");
   const translation = useMeetingTranslation(dialogMeetingId, language,
     transcript.segments.filter(segment => segment.completed !== false && !!segment.id).map(segment => segment.id!));
@@ -326,7 +332,7 @@ function MeetingCanvasBody({ meetingId, meetingRecord, onDeleteMeeting, deleting
         : undefined;
 
   return (
-    <div className={dossierStyles.layout + (meetingRecord && detailsOpen ? " " + dossierStyles.layoutWithRail : "")}>
+    <div data-voice-meeting-id={dialogMeetingId} className={dossierStyles.layout + (meetingRecord && detailsOpen ? " " + dossierStyles.layoutWithRail : "")}>
       <div className={`${dossierStyles.canvas} ${transcriptStyles.canvas}`}>
       {dialogMeetingId && <>
         <MeetingMemory hideTrigger meetingId={dialogMeetingId} openRef={memoryOpen} />
@@ -351,7 +357,8 @@ function MeetingCanvasBody({ meetingId, meetingRecord, onDeleteMeeting, deleting
             </button>
             {!canPlayMeetingAudio && meetingRecord?.has_recording && <span className={transcriptStyles.meta}>Recording available</span>}
           </div>
-          {dialogMeetingId && ["google_meet", "Google Meet"].includes(meetingRecord?.platform || "") && <VoiceActivity meetingId={dialogMeetingId} ended={durableTerminal || meetingRecord?.status === "past"} />}
+          {dialogMeetingId && ["google_meet", "Google Meet"].includes(meetingRecord?.platform || "") && <VoiceActivity meetingId={dialogMeetingId} ended={durableTerminal || meetingRecord?.status === "past"} onSnapshot={voiceNavigation.follow} />}
+          {voiceNavigation.message&&<span role="status" style={{fontSize:12,color:'var(--t3)'}}>{voiceNavigation.message}</span>}
           {meetingRecord && <button type="button" className={transcriptStyles.info} aria-expanded={detailsOpen} onClick={() => setDetailsOpen((open) => !open)}>
             {detailsOpen ? "Hide meeting info" : "Meeting info"}
           </button>}

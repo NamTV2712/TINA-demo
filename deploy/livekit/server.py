@@ -112,6 +112,9 @@ class Runtime:
     token: str
     room_name: str
     current_id: str | None = None
+    current_handle: object | None = None
+    turn_done: asyncio.Event | None = None
+    context_task: asyncio.Task | None = None
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     touched: float = field(default_factory=time.monotonic)
     pending_audio: int = 0
@@ -316,11 +319,17 @@ def create_app(client=None, room_connector=connect_room):
             if not task.done(): handle.interrupt(); task.cancel()
             with suppress(asyncio.CancelledError): await task
 
-    async def cancel_turn(mid, session, rid, token):
+    async def cancel_turn(mid, session, rid, token, *, strict=False):
         # Release TINA's room reservation even if planning or the SDK failed before finalization.
-        with suppress(httpx.HTTPError):
-            await http.post(f'{core}/bots/voice/{mid}/{session}/state', headers={'Authorization':token},
-                            json={'state':'QUIET','request_id':rid}, timeout=5)
+        try:
+            response=await http.post(f'{core}/bots/voice/{mid}/{session}/state', headers={'Authorization':token},
+                                    json={'state':'QUIET','request_id':rid}, timeout=5)
+            if strict and (response.status_code!=200 or response.json().get('accepted') is not True):
+                raise HTTPException(503,'TINA cancellation was not confirmed')
+        except httpx.HTTPError:
+            if strict: raise HTTPException(503,'TINA cancellation is unavailable') from None
+        except (ValueError,AttributeError):
+            if strict: raise HTTPException(503,'Invalid TINA cancellation acknowledgment') from None
 
     @app.post('/bots/{mid}/{session}/answer')
     async def answer(mid:int,session:str,body:Question,request:Request,authorization:str=Header(default=''),
@@ -331,11 +340,14 @@ def create_app(client=None, room_connector=connect_room):
             rid=str(body.request_id)
             if (mid,session,rid) in stopped: raise HTTPException(409,'Voice turn stopped')
             row.current_id=rid; row.model.result=None; row.model.plan_rounds=0; row.model.tool_requests.clear()
+            done=asyncio.Event();row.turn_done=done
             row.model.request={'body':body.model_dump(mode='json'),'speaker':x_voice_speaker_key}
             row.session.output.audio=None
             context = llm.ChatContext.empty()
             try:
-                snapshot = await row.model.agent(row.model.request, 'context')
+                row.context_task=asyncio.create_task(row.model.agent(row.model.request, 'context'))
+                try: snapshot = await row.context_task
+                finally: row.context_task=None
                 if len(snapshot['history']) > 3: raise RuntimeError('Heard context exceeds bound')
                 context = heard_context([HeardTurn.model_validate(t) for t in snapshot['history']])
                 now = time.monotonic()
@@ -349,10 +361,14 @@ def create_app(client=None, room_connector=connect_room):
                 await row.session.current_agent.update_chat_ctx(context.copy())
                 if (mid,session,rid) in stopped: raise HTTPException(409,'Voice turn stopped')
                 handle=row.session.generate_reply(user_input=body.question,chat_ctx=context.copy())
+                row.current_handle=handle
                 await asyncio.wait_for(wait_handle(handle,request),165)
                 if (mid,session,rid) in stopped: raise HTTPException(409,'Voice turn stopped')
                 if not row.model.result: raise HTTPException(503,'TINA answer failed')
                 return row.model.result | {'voice_runtime':'livekit'}
+            except asyncio.CancelledError:
+                if (mid,session,rid) in stopped: raise HTTPException(409,'Voice turn stopped') from None
+                raise
             except (RuntimeError, ValueError, httpx.HTTPError):
                 raise HTTPException(503,'TINA agent operation failed') from None
             finally:
@@ -360,7 +376,10 @@ def create_app(client=None, room_connector=connect_room):
                     if (mid,session,rid) not in stopped: row.failed=True
                     await cancel_turn(mid,session,rid,authorization)
                 row.model.request=None; row.model.result=None; row.model.tool_requests.clear(); row.touched=time.monotonic()
-                with suppress(RuntimeError): await row.session.current_agent.update_chat_ctx(context.copy())
+                row.current_handle=None
+                try:
+                    with suppress(RuntimeError): await row.session.current_agent.update_chat_ctx(context.copy())
+                finally: done.set()
 
     @app.post('/bots/{mid}/{session}/v1/audio/speech')
     async def speech(mid:int,session:str,body:Speech,request:Request,authorization:str=Header(default=''),
@@ -375,12 +394,15 @@ def create_app(client=None, room_connector=connect_room):
             async with row.lock:
                 if (mid,session,rid) in stopped: return
                 await turn_permit(mid,session,rid,authorization,x_voice_revision)
+                if (mid,session,rid) in stopped: return
                 if row.failed: raise RuntimeError('Agent speech failed')
                 row.current_id=rid
+                done=asyncio.Event();row.turn_done=done
                 synthesis = SynthesisStatus()
                 row.tts.synthesis = synthesis
                 output=HttpAudioOutput(); row.session.output.audio=output
                 handle=row.session.say(body.input,add_to_chat_ctx=False)
+                row.current_handle=handle
                 waiter=asyncio.create_task(handle.wait_for_playout())
                 try:
                     async with asyncio.timeout(150):
@@ -402,6 +424,7 @@ def create_app(client=None, room_connector=connect_room):
                     # Recreate a failed SDK session before the next turn instead of retaining its error budget/state.
                     row.failed = row.failed or synthesis.failed
                     row.session.output.audio=None; row.touched=time.monotonic()
+                    row.current_handle=None;done.set()
         return PCMResponse(stream(), row)
 
     @app.delete('/bots/{mid}/{session}/turn')
@@ -409,9 +432,15 @@ def create_app(client=None, room_connector=connect_room):
         await config(mid,session,authorization)
         row=rows.get((mid,session));rid=str(body.request_id)
         stopped.append((mid,session,rid))
-        await cancel_turn(mid,session,rid,authorization)
-        if row:
-            if row.current_id==rid: await row.session.interrupt()
+        done=None
+        if row and row.current_id==rid:
+            done,handle=row.turn_done,row.current_handle
+            if row.context_task is not None: row.context_task.cancel()
+            if handle is not None: handle.interrupt()
+        await cancel_turn(mid,session,rid,authorization,strict=True)
+        if done is not None:
+            try: await asyncio.wait_for(done.wait(),3)
+            except TimeoutError: raise HTTPException(503,'Previous voice turn is still stopping') from None
         return {'stopped':True}
     return app
 
