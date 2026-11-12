@@ -1,0 +1,73 @@
+
+name: TINA - Publish Core Images to GHCR
+
+on:
+  push:
+    branches:
+      - aws-demo
+    paths:
+      - ".github/workflows/publish-tina-core.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-core:
+    name: Build ${{ matrix.image }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        include:
+          - image: v012-runtime
+            context: ./core/runtime
+            dockerfile: ./core/runtime/Dockerfile
+
+          - image: v012-meeting-api
+            context: .
+            dockerfile: ./core/meetings/services/meeting-api/Dockerfile
+
+          - image: v012-gateway
+            context: .
+            dockerfile: ./core/gateway/services/gateway/Dockerfile
+
+          - image: v012-mcp
+            context: ./core/meetings/services/mcp
+            dockerfile: ./core/meetings/services/mcp/Dockerfile
+
+          - image: v012-flows
+            context: .
+            dockerfile: ./core/flows/Dockerfile
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Prepare image owner
+        run: |
+          echo "OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ghcr.io/${{ env.OWNER }}/tina-${{ matrix.image }}:aws-demo
+            ghcr.io/${{ env.OWNER }}/tina-${{ matrix.image }}:sha-${{ github.sha }}
