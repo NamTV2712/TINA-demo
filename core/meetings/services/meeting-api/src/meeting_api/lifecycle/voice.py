@@ -225,7 +225,8 @@ class VoiceState(BaseModel):
 def new_meeting_voice_policy():
     """Seed new capable rooms; saved policies and document grants remain owner-controlled."""
     return VoicePolicy(enabled=True,include_transcript=True,noise_suppression=True,
-                       allow_general_knowledge=True,allow_web_search=True,engine='livekit').model_dump()
+                       allow_general_knowledge=True,allow_web_search=True,
+                        engine='tina' if os.environ.get('TINA_AWS_NATIVE_VOICE_DEFAULT') == '1' else 'livekit').model_dump()
 
 
 def policy_of(row):
