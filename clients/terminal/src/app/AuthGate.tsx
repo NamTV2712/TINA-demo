@@ -12,6 +12,7 @@
  *  direct entry in development. Production requires OAuth. */
 import { useEffect, useState, type FormEvent } from "react";
 import { signIn } from "next-auth/react";
+import { PasswordSignIn } from "./PasswordSignIn";
 
 type Status = "checking" | "out" | "in";
 type Providers = { google: boolean; microsoft: boolean };
@@ -21,6 +22,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   const [providers, setProviders] = useState<Providers>({ google: false, microsoft: false });
   const [adminExists, setAdminExists] = useState(true); // fail-safe: plain sign-in until told otherwise
   const [showDebug, setShowDebug] = useState(false);
+  const [passwordAvailable, setPasswordAvailable] = useState(false);
   const [email, setEmail] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -41,6 +43,11 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       .then((r) => (r.ok ? r.json() : { admin_exists: true }))
       .then((d: { admin_exists?: boolean }) => active && setAdminExists(d.admin_exists !== false))
       .catch(() => undefined);
+      fetch("/api/auth/password", { cache: "no-store" })
+        .then((r) => r.ok ? r.json() : { enabled: false })
+        .then((d: { enabled?: boolean }) =>
+          active && setPasswordAvailable(d.enabled === true))
+        .catch(() => undefined);
     return () => { active = false; };
   }, []);
 
@@ -115,7 +122,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
                 instance&rsquo;s environment (GOOGLE_CLIENT_ID/SECRET or MICROSOFT_CLIENT_ID/SECRET).
               </div>
             )}
-            {!hasOAuth && !directLoginAvailable && (
+            {!hasOAuth && !directLoginAvailable && !passwordAvailable && (
               <div style={{ fontSize: 11.5, lineHeight: 1.5, color: "var(--t2)", background: "var(--panel2)", border: "1px solid var(--line2)", borderRadius: 8, padding: "9px 11px" }}>
                 Configure Google or Microsoft OAuth to sign in. Passwordless test login is disabled outside development.
               </div>
@@ -136,6 +143,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
           </button>
         )}
 
+        {passwordAvailable && <PasswordSignIn claiming={claiming} />}
         {hasOAuth && directLoginAvailable && (
           <button
             onClick={() => setShowDebug((v) => !v)}
