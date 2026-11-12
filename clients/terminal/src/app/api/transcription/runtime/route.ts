@@ -1,3 +1,4 @@
+import { awsRemoteRuntime } from "./awsRemote";
 import { createHmac } from "node:crypto";
 import { NextRequest, NextResponse } from "next/server";
 import { currentUser } from "../../tokens/currentUser";
@@ -22,6 +23,7 @@ async function proxy(req: NextRequest, write: boolean) {
   }
   const user = await currentUser();
   if (!user.ok) return NextResponse.json({ detail: "Sign in to control transcription" }, { status: 401, headers });
+  if (process.env.TINA_ASR_CONTROL_MODE === "aws-remote") return awsRemoteRuntime(req, write, user.userId);
   const base = (process.env.TINA_ASR_CONTROL_URL || "").replace(/\/+$/, "");
   const secret = process.env.TINA_INTERNAL_API_SECRET || "";
   if (!base || !secret) return NextResponse.json({ detail: "ASR controller is not configured; run make all" }, { status: 503, headers });

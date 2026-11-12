@@ -38,8 +38,13 @@ services:
   mcp:
     image: ghcr.io/namtv2712/tina-v012-mcp:aws-demo
 
+
   terminal:
     image: ghcr.io/namtv2712/tina-v012-terminal:aws-demo
+    environment:
+      - TINA_PASSWORD_LOGIN_EMAIL=${TINA_PASSWORD_LOGIN_EMAIL:-}
+      - TINA_PASSWORD_LOGIN_HASH=${TINA_PASSWORD_LOGIN_HASH:-}
+
 
   meeting-voice-models:
     image: ghcr.io/namtv2712/tina-bot:aws-demo
