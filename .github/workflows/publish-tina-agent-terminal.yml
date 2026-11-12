@@ -5,8 +5,10 @@ on:
   push:
     branches:
       - aws-demo
+      - feat/tina-password-login
     paths:
       - ".github/workflows/publish-tina-agent-terminal.yml"
+      - "clients/terminal/**"
   workflow_dispatch:
 
 permissions:
@@ -61,5 +63,5 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: |
-            ghcr.io/${{ env.OWNER }}/tina-${{ matrix.image }}:aws-demo
+            ghcr.io/${{ env.OWNER }}/tina-${{ matrix.image }}:${{ github.ref_name == 'feat/tina-password-login' && 'password-demo' || 'aws-demo' }}
             ghcr.io/${{ env.OWNER }}/tina-${{ matrix.image }}:sha-${{ github.sha }}
