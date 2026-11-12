@@ -60,15 +60,18 @@ jobs:
           docker push "$BASE_IMAGE:aws-demo"
           docker push "$BASE_IMAGE:sha-$GITHUB_SHA"
 
+
       - name: Build TINA Bot
         shell: bash
         run: |
           docker build \
+            --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
             --build-arg TINA_IMAGE_VERSION="${GITHUB_SHA:0:7}" \
             -f core/meetings/services/bot/Dockerfile \
             -t "$BOT_IMAGE:aws-demo" \
             -t "$BOT_IMAGE:sha-$GITHUB_SHA" \
             .
+
 
       - name: Push TINA Bot to GHCR
         shell: bash
