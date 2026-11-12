@@ -1,0 +1,45 @@
+
+# TINA AWS Demo - Core EC2 image overrides
+# Base: docker-compose.yml
+# Host: tina-core
+# Region: us-east-1
+
+services:
+  admin-api:
+    image: ghcr.io/namtv2712/tina-v012-admin-api:aws-demo
+
+  runtime:
+    image: ghcr.io/namtv2712/tina-v012-runtime:aws-demo
+
+  meeting-api:
+    image: ghcr.io/namtv2712/tina-v012-meeting-api:aws-demo
+
+  storage-init:
+    image: ghcr.io/namtv2712/tina-v012-meeting-api:aws-demo
+
+  agent-api:
+    image: ghcr.io/namtv2712/tina-v012-agent-api:aws-demo
+
+  agent-worker:
+    image: ghcr.io/namtv2712/tina-v012-agent-worker:aws-demo
+
+  gateway:
+    image: ghcr.io/namtv2712/tina-v012-gateway:aws-demo
+
+  flows-api:
+    image: ghcr.io/namtv2712/tina-v012-flows:aws-demo
+
+  flows-worker:
+    image: ghcr.io/namtv2712/tina-v012-flows:aws-demo
+
+  flows-mailbox:
+    image: ghcr.io/namtv2712/tina-v012-flows:aws-demo
+
+  mcp:
+    image: ghcr.io/namtv2712/tina-v012-mcp:aws-demo
+
+  terminal:
+    image: ghcr.io/namtv2712/tina-v012-terminal:aws-demo
+
+  meeting-voice-models:
+    image: ghcr.io/namtv2712/tina-bot:aws-demo
