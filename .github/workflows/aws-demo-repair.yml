@@ -1,0 +1,402 @@
+name: TINA AWS demo - repair and publish (one pass)
+
+on:
+  push:
+    branches: [feat/tina-password-login]
+    paths: [.github/workflows/aws-demo-repair.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  repair:
+    name: Sync, patch and save source
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.patch.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/tina-password-login
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Merge latest AWS branch and apply targeted patches
+        id: patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git fetch origin aws-demo
+          git merge --no-edit --signoff origin/aws-demo
+          mkdir -p clients/terminal/src/app/api/transcription/runtime
+          cat > clients/terminal/src/app/api/transcription/runtime/awsRemote.ts <<'TINA_AWS_REMOTE_TS'
+          /** AWS-only ASR controller: read/choose models on the separate Speech EC2.
+           * This deliberately NEVER starts/stops Docker containers across hosts.
+           * The Speech EC2 owns the two always-on workers; only per-account preference is updated.
+           */
+          import { NextRequest, NextResponse } from "next/server";
+
+          const noStore = { "Cache-Control": "no-store" } as const;
+          type Backend = "gipformer" | "viegem";
+          type Selection = { backend: Backend; enabled: boolean; revision: number };
+          type Account = { backend: Backend | null; enabled: boolean; revision: number };
+          type Worker = { running: boolean; ready: boolean; device: string; draining?: boolean };
+          const specs: Record<Backend, { url: string; model: string }> = {
+            gipformer: {
+              url: process.env.TINA_AWS_ASR_GIPFORMER_URL || "",
+              model: "g-group-ai-lab/gipformer1.5-68M-rnnt",
+            },
+            viegem: {
+              url: process.env.TINA_AWS_ASR_VIEGEM_URL || "",
+              model: "5CD-AI/VieGem-ASR",
+            },
+          };
+          const names: Backend[] = ["gipformer", "viegem"];
+
+          function err(detail: string, status = 503) {
+            return NextResponse.json({ detail }, { status, headers: noStore });
+          }
+          function adminConfig(): { url: string; secret: string } | null {
+            const url = (process.env.TINA_ADMIN_API_URL || "").replace(/\/+$/, "");
+            const secret = process.env.TINA_INTERNAL_API_SECRET || "";
+            return url && secret ? { url, secret } : null;
+          }
+          async function internal(path: string, init: RequestInit = {}): Promise<Response> {
+            const config = adminConfig();
+            if (!config) throw new Error("internal service not configured");
+            return fetch(`${config.url}${path}`, {
+              ...init,
+              headers: { "Content-Type": "application/json", "X-Internal-Secret": config.secret, ...init.headers },
+              cache: "no-store",
+              redirect: "error",
+              signal: AbortSignal.timeout(8000),
+            });
+          }
+          async function accountFor(userId: string | number): Promise<{
+            account: Account; counts: Record<Backend, number>;
+          }> {
+            const res = await internal(`/internal/transcription/runtime?user_id=${encodeURIComponent(String(userId))}`);
+            if (!res.ok) throw new Error(`admin runtime HTTP ${res.status}`);
+            const body = await res.json() as { account?: Account; counts?: Record<Backend, number> };
+            const account = body.account;
+            if (!account || !Number.isSafeInteger(account.revision) || typeof account.enabled !== "boolean" ||
+                !body.counts || names.some(name => !Number.isSafeInteger(body.counts?.[name]))) {
+              throw new Error("invalid runtime reply");
+            }
+            return { account, counts: body.counts };
+          }
+          async function workerFor(name: Backend): Promise<Worker> {
+            const { url, model } = specs[name];
+            const down: Worker = { running: false, ready: false, device: "cpu" };
+            if (!url) return down;
+            try {
+              const target = new URL(url);
+              if (target.protocol !== "http:" && target.protocol !== "https:") return down;
+              if (target.username || target.password || target.search || target.hash || target.pathname !== "/") return down;
+              const res = await fetch(target.origin + "/status", {
+                cache: "no-store", redirect: "error", signal: AbortSignal.timeout(3500),
+              });
+              if (!res.ok) return down;
+              const body = await res.json() as {
+                model?: { asr_model?: string; device?: string }; draining?: boolean;
+              };
+              if (body.model?.asr_model !== model) return down;
+              return { running: true, ready: body.draining !== true, draining: body.draining === true,
+                device: body.model.device || "cpu" };
+            } catch { return down; }
+          }
+          async function snapshot(userId: string | number) {
+            const [data, gipformer, viegem] = await Promise.all([
+              accountFor(userId), workerFor("gipformer"), workerFor("viegem"),
+            ]);
+            return { instance: "aws-two-ec2", account: data.account, counts: data.counts,
+              workers: { gipformer, viegem }, operation: null, last_error: null };
+          }
+          function parseSelection(raw: unknown): Selection | null {
+            if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+            const value = raw as Record<string, unknown>;
+            if (Object.keys(value).sort().join(",") !== "backend,enabled,revision" ||
+                (value.backend !== "gipformer" && value.backend !== "viegem") ||
+                typeof value.enabled !== "boolean" || !Number.isSafeInteger(value.revision) ||
+                (value.revision as number) < 0) return null;
+            return value as Selection;
+          }
+
+          export async function awsRemoteRuntime(req: NextRequest, write: boolean, userId: string | number) {
+            if (!adminConfig()) return err("AWS remote ASR controller is not configured");
+            if (names.some(name => !specs[name].url)) return err("Speech endpoints are not configured");
+            try {
+              if (!write) return NextResponse.json(await snapshot(userId), { headers: noStore });
+              const length = Number(req.headers.get("content-length") || "0");
+              if (!Number.isFinite(length) || length > 1024) return err("Request too large", 413);
+              if (!req.body) return err("Invalid request", 422);
+              const reader = req.body.getReader();
+              const parts: Uint8Array[] = [];
+              let size = 0;
+              while (true) {
+                const part = await reader.read();
+                if (part.done) break;
+                size += part.value.byteLength;
+                if (size > 1024) { await reader.cancel(); return err("Request too large", 413); }
+                parts.push(part.value);
+              }
+              const bytes = new Uint8Array(size);
+              let pos = 0;
+              for (const part of parts) { bytes.set(part, pos); pos += part.byteLength; }
+              let raw: unknown;
+              try { raw = JSON.parse(new TextDecoder().decode(bytes)); }
+              catch { return err("Invalid request", 422); }
+              const next = parseSelection(raw);
+              if (!next) return err("Invalid ASR selection", 422);
+              const before = await accountFor(userId);
+              if (before.account.revision !== next.revision) return err("Transcription settings changed; refresh", 409);
+              if (!next.enabled && before.account.backend !== next.backend) {
+                return err("Only the selected model can be disabled", 409);
+              }
+              if (next.enabled && !(await workerFor(next.backend)).ready) {
+                return err(`${next.backend} is not ready on the Speech EC2`, 503);
+              }
+              const result = await internal(`/internal/users/${encodeURIComponent(String(userId))}/transcription-runtime`, {
+                method: "PUT",
+                body: JSON.stringify({ backend: next.backend,
+                  enabled: next.enabled ? "true" : "false", expected_revision: next.revision }),
+              });
+              if (!result.ok) return err(result.status === 409 ? "Transcription settings changed; refresh" :
+                "Could not update account transcription selection", result.status >= 400 && result.status < 500 ? result.status : 503);
+              return NextResponse.json(await snapshot(userId), { headers: noStore });
+            } catch {
+              return err("AWS Speech or Admin API unavailable; retry shortly");
+            }
+          }
+          TINA_AWS_REMOTE_TS
+          cat > /tmp/tina_aws_source_patch.py <<'TINA_AWS_PYTHON_PATCH'
+          from pathlib import Path
+
+          route=Path('clients/terminal/src/app/api/transcription/runtime/route.ts')
+          text=route.read_text()
+          imp='import { awsRemoteRuntime } from "./awsRemote";\n'
+          if 'import { awsRemoteRuntime }' not in text:
+              text=imp+text
+          old='if (!user.ok) return NextResponse.json({ detail: "Sign in to control transcription" }, { status: 401, headers });'
+          if old not in text: raise SystemExit('Terminal auth anchor moved; refusing unsafe patch')
+          new=old+'\n  if (process.env.TINA_ASR_CONTROL_MODE === "aws-remote") return awsRemoteRuntime(req, write, user.userId);'
+          if 'TINA_ASR_CONTROL_MODE === "aws-remote"' not in text:
+              text=text.replace(old,new,1)
+          route.write_text(text)
+
+          voice=Path('core/meetings/services/meeting-api/src/meeting_api/lifecycle/voice.py')
+          text=voice.read_text()
+          old="allow_general_knowledge=True,allow_web_search=True,engine='livekit').model_dump()"
+          new="allow_general_knowledge=True,allow_web_search=True,\n                        engine='tina' if os.environ.get('TINA_AWS_NATIVE_VOICE_DEFAULT') == '1' else 'livekit').model_dump()"
+          if old not in text and new not in text: raise SystemExit('Voice policy anchor moved; refusing unsafe patch')
+          text=text.replace(old,new,1)
+          voice.write_text(text)
+
+          # These fixes are on the feature branch to retain the existing demo password login.
+          TINA_AWS_PYTHON_PATCH
+          python3 /tmp/tina_aws_source_patch.py
+          python3 -m py_compile core/meetings/services/meeting-api/src/meeting_api/lifecycle/voice.py
+          mkdir -p deploy/aws
+          cat > deploy/aws/aws-final-deploy.sh <<'TINA_AWS_SSM_DEPLOY'
+          #!/usr/bin/env bash
+          # SSM target: tina-core i-08e90a7723e74a498 (us-east-1)
+          # Precondition: workflow aws-demo-repair.yml published both :aws-final images to GHCR.
+          set -Eeuo pipefail
+
+          BASE=/opt/tina-demo/deploy/compose
+          ENV=/etc/tina-demo/core.env
+          PASS=/etc/tina-demo/password-demo.yml
+          OVER=/etc/tina-demo/aws-final.yml
+          PREV=/etc/tina-demo/aws-final.yml.before-last-deploy
+          CORE_IP=10.20.2.133
+          TERM_IMAGE=ghcr.io/namtv2712/tina-v012-terminal:aws-final
+          MEETING_IMAGE=ghcr.io/namtv2712/tina-v012-meeting-api:aws-final
+          APPLIED=0
+          CONFIG_CHANGED=0
+          EXISTED=0
+
+          compose() {
+            docker compose --project-directory "$BASE" --env-file "$ENV" \
+              -f "$BASE/docker-compose.yml" \
+              -f "$BASE/docker-compose.aws-core.yml" \
+              -f "$PASS" \
+              -f "$OVER" "$@"
+          }
+          rollback() {
+            rc=$?
+            trap - ERR
+            echo "DEPLOY FAILED (exit $rc)"
+            if [ "$CONFIG_CHANGED" = 1 ]; then
+              echo '=== RESTORE PREVIOUS OVERRIDE ==='
+              if [ "$EXISTED" = 1 ] && [ -f "$PREV" ]; then
+                cp -p "$PREV" "$OVER"
+              else
+                # Original Compose does not use the new overlay; restore previous tags explicitly.
+                cat > "$OVER" <<'YAML'
+          services:
+            terminal:
+              image: ghcr.io/namtv2712/tina-v012-terminal:password-demo
+            meeting-api:
+              image: ghcr.io/namtv2712/tina-v012-meeting-api:aws-demo
+          YAML
+              fi
+              if [ "$APPLIED" = 1 ]; then
+                echo '=== RESTORE PREVIOUS CONTAINERS ==='
+                compose up -d --no-deps --force-recreate terminal meeting-api || true
+              fi
+            fi
+            exit "$rc"
+          }
+          trap rollback ERR
+
+          echo '=== TINA AWS FINAL PATCH ==='
+          [ -f "$ENV" ] && [ -f "$PASS" ] && [ -f "$BASE/docker-compose.aws-core.yml" ] || {
+            echo 'Missing existing TINA Core deployment files; stopped safely.'; exit 1;
+          }
+
+          if docker ps --format '{{.Names}}' | grep -Eq '^tina-mtg-'; then
+            echo 'STOP: Active meeting Bot detected. End the bot in TINA first to avoid disruption.'
+            exit 2
+          fi
+
+          echo '=== PRE-DEPLOY HEALTH ==='
+          for name in tina-v012-terminal-1 tina-v012-meeting-api-1; do
+            docker inspect --format '{{.Name}} | {{.State.Status}} | {{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$name"
+          done
+
+          echo '=== DOWNLOAD VERIFIED BUILDS ==='
+          docker pull "$TERM_IMAGE"
+          docker pull "$MEETING_IMAGE"
+
+          echo '=== BACKUP CURRENT CONFIG ==='
+          if [ -f "$OVER" ]; then
+            EXISTED=1
+            cp -p "$OVER" "$PREV"
+          fi
+          CONFIG_CHANGED=1
+
+          cat > "$OVER" <<YAML
+          # TINA demo only: separate Speech EC2 is always-on; no cross-host Docker lifecycle.
+          services:
+            terminal:
+              image: ${TERM_IMAGE}
+              environment:
+                TINA_ASR_CONTROL_MODE: "aws-remote"
+                TINA_AWS_ASR_GIPFORMER_URL: "http://${CORE_IP}:18002"
+                TINA_AWS_ASR_VIEGEM_URL: "http://${CORE_IP}:18005"
+            meeting-api:
+              image: ${MEETING_IMAGE}
+              environment:
+                TINA_AWS_NATIVE_VOICE_DEFAULT: "1"
+          YAML
+          chmod 600 "$OVER"
+
+          echo '=== VALIDATE COMPOSE BEFORE CHANGING CONTAINERS ==='
+          compose config --quiet
+
+          echo '=== DEPLOY ONLY TERMINAL + MEETING API ==='
+          APPLIED=1
+          compose up -d --no-deps --force-recreate --pull never terminal meeting-api
+
+          wait_healthy() {
+            local name="$1" status=""
+            for i in $(seq 1 36); do
+              status=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$name" 2>/dev/null || true)
+              if [ "$status" = healthy ]; then
+                echo "$name HEALTHY"
+                return 0
+              fi
+              if [ "$status" = unhealthy ] || [ "$status" = exited ]; then
+                echo "$name: $status"
+                return 1
+              fi
+              sleep 5
+            done
+            echo "$name: health timed out ($status)"
+            return 1
+          }
+
+          wait_healthy tina-v012-meeting-api-1
+          wait_healthy tina-v012-terminal-1
+
+          echo '=== VERIFY PASSWORD LOGIN ==='
+          docker exec tina-v012-terminal-1 node -e '
+          (async () => {
+           const r = await fetch("http://127.0.0.1:3000/api/auth/password", { signal: AbortSignal.timeout(8000) });
+           if (r.status !== 200 || (await r.json()).enabled !== true) throw Error("password login disabled");
+           console.log("PASSWORD LOGIN: ENABLED");
+          })().catch(e => { console.error("PASSWORD LOGIN: FAILED"); process.exit(1); });'
+
+          echo '=== VERIFY REMOTE ASR CONFIG ==='
+          docker exec tina-v012-terminal-1 node -e '
+          (async () => {
+           if (process.env.TINA_ASR_CONTROL_MODE !== "aws-remote") throw Error("wrong mode");
+           for (const [name, key, expected] of [
+            ["GIPFORMER", "TINA_AWS_ASR_GIPFORMER_URL", "g-group-ai-lab/gipformer1.5-68M-rnnt"],
+            ["VIEGEM", "TINA_AWS_ASR_VIEGEM_URL", "5CD-AI/VieGem-ASR"]
+           ]) {
+            const base = process.env[key]; if (!base) throw Error(name + " URL not set");
+            const r = await fetch(base + "/status", { signal: AbortSignal.timeout(10000) });
+            const body = await r.json();
+            if (!r.ok || body.model?.asr_model !== expected) throw Error(name + " worker not ready");
+            console.log(name + ": READY");
+           }
+          })().catch(e => { console.error("ASR CHECK FAILED: " + e.message); process.exit(1); });'
+
+          echo '=== VERIFY VOICE CONFIG ==='
+          docker exec -i tina-v012-meeting-api-1 python - <<'PY'
+          import os
+          assert os.getenv('TINA_MEETING_VOICE') == '1', 'voice was not enabled'
+          assert os.getenv('TINA_AWS_NATIVE_VOICE_DEFAULT') == '1', 'new-room default not configured'
+          assert os.getenv('TTS_SERVICE_URL'), 'TTS endpoint missing'
+          print('TINA VOICE: ENABLED; NEW MEETING DEFAULT: TINA')
+          PY
+
+          echo '=== SUCCESS: AWS TWO-EC2 DEMO PATCH DEPLOYED ==='
+          trap - ERR
+          TINA_AWS_SSM_DEPLOY
+          git add deploy/aws/aws-final-deploy.sh
+          git add clients/terminal/src/app/api/transcription/runtime/route.ts \
+            clients/terminal/src/app/api/transcription/runtime/awsRemote.ts \
+            core/meetings/services/meeting-api/src/meeting_api/lifecycle/voice.py
+          if ! git diff --cached --quiet; then
+            git commit --signoff -m 'fix(aws): enable remote ASR selection and default native TINA voice'
+          fi
+          git push origin HEAD:refs/heads/feat/tina-password-login
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  publish:
+    name: Build and publish ${{ matrix.image }}
+    needs: repair
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: v012-terminal
+            dockerfile: clients/terminal/Dockerfile
+          - image: v012-meeting-api
+            dockerfile: core/meetings/services/meeting-api/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.repair.outputs.sha }}
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ghcr.io/namtv2712/tina-${{ matrix.image }}:aws-final
+            ghcr.io/namtv2712/tina-${{ matrix.image }}:sha-${{ needs.repair.outputs.sha }}
