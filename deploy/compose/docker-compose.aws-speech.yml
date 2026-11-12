@@ -1,0 +1,35 @@
+
+# TINA AWS Demo - Speech EC2
+# Base: docker-compose.yml
+# EC2: tina-speech
+# Private IP: 10.20.2.133
+# Region: us-east-1
+
+services:
+
+  # Gipformer ASR
+  gipformer-models:
+    image: ghcr.io/namtv2712/tina-v012-gipformer:aws-demo
+    pull_policy: always
+
+  gipformer:
+    image: ghcr.io/namtv2712/tina-v012-gipformer:aws-demo
+    pull_policy: always
+
+  # VieGem ASR - CPU version
+  viegem-models:
+    image: ghcr.io/namtv2712/tina-v012-viegem:aws-demo
+    pull_policy: always
+
+  viegem:
+    image: ghcr.io/namtv2712/tina-v012-viegem:aws-demo
+    pull_policy: always
+
+  # Text-to-Speech
+  tts-models:
+    image: ghcr.io/namtv2712/tina-tts:aws-demo
+    pull_policy: always
+
+  tts:
+    image: ghcr.io/namtv2712/tina-tts:aws-demo
+    pull_policy: always
