@@ -84,6 +84,8 @@ services:
       context: ../tts
     environment:
       TTS_API_TOKEN: ${TTS_API_TOKEN:-}
+    ports:
+      - "${SPEECH_BIND_IP:-127.0.0.1}:${TTS_HOST_PORT:-18006}:8000"
     volumes: ["tts-models:/models:ro"]
     networks: [tina]
     read_only: true
@@ -92,7 +94,6 @@ services:
     restart: unless-stopped
     depends_on:
       tts-models: {condition: service_completed_successfully}
-      meeting-voice-models: {condition: service_completed_successfully}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health',timeout=3)"]
       interval: 10s
@@ -224,7 +225,7 @@ services:
       # Decrypted at startup by stack.py; never copied into platform_settings.
       - TINA_VIEGEM_TOKEN=${TINA_VIEGEM_TOKEN:-}
       - TINA_GIPFORMER_TOKEN=${TRANSCRIPTION_SERVICE_TOKEN:-}
-      - TINA_GIPFORMER_URL=http://host.docker.internal:${GIPFORMER_HOST_PORT:-18002}
+      - TINA_GIPFORMER_URL=${TINA_GIPFORMER_URL:-http://host.docker.internal:18002}
       - LOG_LEVEL=${LOG_LEVEL:-info}
       # ── the publish edge (config.v1 class `publish-edge`) ──────────────────────────────────
       # Identity hands `onboarding.completed` to flows here. Same variable, same default-empty
@@ -600,7 +601,7 @@ services:
       - TINA_GIPFORMER_TOKEN=${TRANSCRIPTION_SERVICE_TOKEN:-}
       - TINA_GIPFORMER_DRAIN_KEY=${TINA_GIPFORMER_DRAIN_KEY:-}
     ports:
-      - "127.0.0.1:${GIPFORMER_HOST_PORT:-18002}:8000"
+      - "${SPEECH_BIND_IP:-127.0.0.1}:${GIPFORMER_HOST_PORT:-18002}:8000"
     volumes:
       - ../transcription/models/gipformer-fsmn:/app/models/gipformer-fsmn:ro
     healthcheck:
@@ -647,7 +648,7 @@ services:
       - TRANSFORMERS_OFFLINE=1
       - TOKENIZERS_PARALLELISM=false
     ports:
-      - "127.0.0.1:${VIEGEM_HOST_PORT:-18005}:8000"
+      - "${SPEECH_BIND_IP:-127.0.0.1}:${VIEGEM_HOST_PORT:-18005}:8000"
     volumes:
       - ../transcription/models/viegem-fsmn:/app/models/viegem-fsmn:ro
     healthcheck:
